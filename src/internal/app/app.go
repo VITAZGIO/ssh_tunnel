@@ -109,6 +109,9 @@ func (a *App) SetNetLayer(n NetLayer) {
 	if ab, ok := n.(AdBlocker); ok {
 		ab.SetAdBlock(cfg)
 	}
+	if cl, ok := n.(ConfigLayer); ok {
+		cl.ApplyConfig(cfg)
+	}
 }
 
 func New(cfg config.Config) *App {
@@ -164,6 +167,24 @@ func (a *App) Config() config.Config {
 // работающем туннеле — ради них останавливаться незачем. Остальное (адрес
 // сервера, порты, число каналов) вступит в силу при следующем подключении, о
 // чём сообщается в возвращаемом тексте.
+// ReplaceConfig подменяет настройки целиком — смена профиля приложения
+// (см. appprofiles): другие серверы, программы, всё. Работающий туннель
+// переподключается уже с новыми настройками; у нового профиля без сервера
+// он остаётся выключенным.
+func (a *App) ReplaceConfig(cfg config.Config) error {
+	running := a.Running()
+	if running {
+		a.Stop()
+	}
+	if _, err := a.SetConfig(cfg); err != nil {
+		return err
+	}
+	if running && cfg.Active().Host != "" {
+		return a.Start()
+	}
+	return nil
+}
+
 func (a *App) SetConfig(cfg config.Config) (string, error) {
 	a.mu.Lock()
 	old, running := a.cfg, a.running
@@ -187,6 +208,12 @@ func (a *App) SetConfig(cfg config.Config) (string, error) {
 	}
 	if ab := a.adBlocker(); ab != nil {
 		ab.SetAdBlock(cfg)
+	}
+	a.mu.Lock()
+	netLayer := a.net
+	a.mu.Unlock()
+	if cl, ok := netLayer.(ConfigLayer); ok {
+		cl.ApplyConfig(cfg)
 	}
 
 	if running && connectionSettingsChanged(old, cfg) {

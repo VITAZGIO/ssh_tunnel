@@ -67,17 +67,8 @@
                                 android:textColor="?attr/c_dim"
                                 android:text="@string/direct_sub" />
                             <TextView
-                                android:id="@+id/directInfo"
-                                android:layout_width="16dp"
-                                android:layout_height="16dp"
-                                android:background="@drawable/bg_infoq"
-                                android:gravity="center"
-                                android:textSize="9sp"
-                                android:textStyle="bold"
-                                android:textColor="?attr/c_dim"
-                                android:text="?"
-                                android:clickable="true"
-                                android:focusable="true" />
+                                style="@style/InfoQ"
+                                android:id="@+id/directInfo" />
                         </LinearLayout>
                         <EditText
                             android:id="@+id/directEdit"
@@ -108,17 +99,8 @@
                                 android:textColor="?attr/c_dim"
                                 android:text="@string/tunnel_sub" />
                             <TextView
-                                android:id="@+id/tunnelInfo"
-                                android:layout_width="16dp"
-                                android:layout_height="16dp"
-                                android:background="@drawable/bg_infoq"
-                                android:gravity="center"
-                                android:textSize="9sp"
-                                android:textStyle="bold"
-                                android:textColor="?attr/c_dim"
-                                android:text="?"
-                                android:clickable="true"
-                                android:focusable="true" />
+                                style="@style/InfoQ"
+                                android:id="@+id/tunnelInfo" />
                         </LinearLayout>
                         <EditText
                             android:id="@+id/tunnelEdit"

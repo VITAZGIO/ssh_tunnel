@@ -132,6 +132,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var meshBtn: View
     private lateinit var udpRelayEnabledCheck: CheckBox
     private lateinit var showServerPickerCheck: CheckBox
+    private lateinit var appProfiles: AppProfiles
 
     private lateinit var homePicker: View
     private lateinit var homePickerFlag: FlagView
@@ -289,6 +290,15 @@ class MainActivity : AppCompatActivity() {
         }
         udpRelayEnabledCheck = findViewById(R.id.udpRelayEnabled)
         showServerPickerCheck = findViewById(R.id.showServerPicker)
+        appProfiles = AppProfiles(this, settings)
+        findViewById<CheckBox>(R.id.appProfilesOn).apply {
+            isChecked = appProfiles.enabled
+            setOnCheckedChangeListener { _, on ->
+                appProfiles.setEnabled(on)
+                renderAppProfiles()
+            }
+        }
+        renderAppProfiles()
 
         homePicker = findViewById(R.id.homePicker)
         homePickerFlag = findViewById(R.id.homePickerFlag)
@@ -347,6 +357,7 @@ class MainActivity : AppCompatActivity() {
         localCheckInfo.setOnClickListener { showTip(it, getString(R.string.local_via_tunnel_note)) }
         bindInfo(R.id.alwaysOnInfo, R.string.always_on_hint)
         bindInfo(R.id.udpRelayInfo, R.string.udp_relay_note)
+        bindInfo(R.id.appProfilesInfo, R.string.app_profiles_note)
         bindInfo(R.id.poolInfo, R.string.pool_note)
         bindInfo(R.id.meshStartInfo, R.string.mesh_start_note)
 
@@ -862,6 +873,75 @@ class MainActivity : AppCompatActivity() {
             power.postDelayed({ if (settings.ready()) startWith(true, true) }, 900)
         } else {
             Toast.makeText(this, R.string.server_switched, Toast.LENGTH_SHORT).show()
+        }
+        refresh()
+    }
+
+    /**
+     * Полоска профилей приложения вверху настроек: «Профиль 1, 2 … +», у
+     * выбранного — крестик (если профилей больше одного).
+     */
+    private fun renderAppProfiles() {
+        findViewById<View>(R.id.appProfilesScroll).visibility =
+            if (appProfiles.enabled) View.VISIBLE else View.GONE
+        val bar = findViewById<LinearLayout>(R.id.appProfilesBar)
+        bar.removeAllViews()
+        fun chip(text: String, on: Boolean, click: () -> Unit): TextView = TextView(this).apply {
+            this.text = text
+            textSize = 13f
+            setTextColor(tc(if (on) R.color.text else R.color.dim))
+            if (on) setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setBackgroundResource(if (on) R.drawable.bg_seg_on else R.drawable.bg_outline)
+            gravity = android.view.Gravity.CENTER
+            minHeight = dp(34)
+            setPadding(dp(12), 0, dp(12), 0)
+            setOnClickListener { click() }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(34)).apply { marginEnd = dp(6) }
+        }
+        val many = appProfiles.list.size > 1
+        appProfiles.list.forEachIndexed { i, p ->
+            val on = p.id == appProfiles.active
+            val name = getString(R.string.app_profile, i + 1)
+            bar.addView(chip(if (on && many) "$name  ×" else name, on) {
+                if (!on) changeAppProfile { appProfiles.switchTo(p.id) }
+                else if (many) {
+                    AlertDialog.Builder(this)
+                        .setMessage(getString(R.string.app_profile_del, name))
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .setPositiveButton(R.string.app_profile_del_yes) { _, _ ->
+                            changeAppProfile { appProfiles.delete(p.id) }
+                        }
+                        .show()
+                }
+            })
+        }
+        bar.addView(chip("+", false) { changeAppProfile { appProfiles.add() } })
+    }
+
+    /**
+     * Смена профиля приложения: туннель останавливается, настройки целиком
+     * подменяются, экран перечитывает их. Работал туннель — поднимается снова
+     * уже по новому профилю, как при смене сервера (см. switchActiveProfile).
+     */
+    private fun changeAppProfile(action: () -> Unit) {
+        val wasRunning = TunnelService.state != "stopped"
+        if (wasRunning) {
+            startService(Intent(this, TunnelService::class.java).setAction(TunnelService.ACTION_STOP))
+        }
+        try {
+            action()
+        } catch (e: Exception) {
+            Toast.makeText(this, R.string.bundle_bad, Toast.LENGTH_LONG).show()
+        }
+        editingProfileId = settings.activeProfileId
+        applyLanguage(settings.language)
+        renderProfileTabs()
+        loadProfileIntoForm(settings.active())
+        loadAppSettings()
+        renderAppProfiles()
+        if (wasRunning) {
+            power.postDelayed({ if (settings.ready()) startWith(true, true) }, 900)
         }
         refresh()
     }

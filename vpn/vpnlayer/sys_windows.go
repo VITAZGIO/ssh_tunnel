@@ -29,6 +29,13 @@ type sys struct {
 	idx4 uint32
 	idx6 uint32
 	dns  []netip.Addr
+	// up4, up6 — маршрут по умолчанию настоящей сети: через него ставится
+	// маршрут к серверу (см. setServers).
+	up4, up6 defaultRoute
+
+	// servers — адреса SSH-сервера, pinned — поставленные к ним маршруты.
+	servers []netip.Addr
+	pinned  []pinnedRoute
 
 	dev   *device
 	guard *wfp.Guard
@@ -62,8 +69,9 @@ func (s *sys) refresh() bool {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	changed := s.idx4 != r4.ifIndex || s.idx6 != r6.ifIndex
+	changed := s.idx4 != r4.ifIndex || s.idx6 != r6.ifIndex || s.up4.nextHop != r4.nextHop
 	s.idx4, s.idx6, s.dns = r4.ifIndex, r6.ifIndex, dns
+	s.up4, s.up6 = r4, r6
 	return changed
 }
 
@@ -99,6 +107,7 @@ func findDefault(family winipcfg.AddressFamily, ours uint64) (defaultRoute, bool
 			luid:    uint64(row.InterfaceLUID),
 			ifIndex: row.InterfaceIndex,
 			metric:  row.Metric + iface.Metric,
+			nextHop: row.NextHop.Addr(),
 		})
 	}
 	return pickDefault(routes, ours)
@@ -224,6 +233,7 @@ func (s *sys) setFull(full bool) error {
 		// перестаёт спрашивать у нас имена обычных сайтов.
 		s.guard.Close()
 		s.guard = nil
+		s.unpinServers()
 		_ = luid.FlushDNS(windows.AF_INET)
 		for _, r := range routes4 {
 			_ = luid.DeleteRoute(r, netip.IPv4Unspecified())
@@ -263,6 +273,7 @@ func (s *sys) setFull(full bool) error {
 		s.guard = guard
 	}
 	s.full = true
+	s.pinServers()
 	return nil
 }
 
@@ -282,6 +293,11 @@ func configureFamily(luid winipcfg.LUID, family winipcfg.AddressFamily, prefix n
 	}
 	ipif.UseAutomaticMetric = false
 	ipif.Metric = 0
+	// Пересылка: устройства мобильной точки доступа Windows попадают в
+	// адаптер по нашим маршрутам, а ответы им идут из адаптера обратно в
+	// точку доступа. Без пересылки Windows эти ответы выкидывала, и телефон
+	// на точке доступа писал «подключено без интернета».
+	ipif.ForwardingEnabled = true
 	ipif.NLMTU = adapterMTU
 	ipif.DadTransmits = 0
 	ipif.RouterDiscoveryBehavior = winipcfg.RouterDiscoveryDisabled
@@ -318,6 +334,9 @@ func addRoute(luid winipcfg.LUID, dst netip.Prefix, next netip.Addr) error {
 func (s *sys) close() {
 	s.guard.Close()
 	s.guard = nil
+	// Маршрут к серверу стоит на настоящей сетевой карте и вместе с адаптером
+	// не исчезает.
+	s.unpinServers()
 	removeMeshDNSRule()
 	s.full = false
 	s.mu.Lock()
@@ -369,4 +388,69 @@ func (s *sys) flushDNS() {
 	if procFlushCache.Find() == nil {
 		procFlushCache.Call()
 	}
+}
+
+// pinnedRoute — поставленный нами маршрут к серверу через настоящую сеть.
+type pinnedRoute struct {
+	luid winipcfg.LUID
+	dst  netip.Prefix
+	next netip.Addr
+}
+
+// setServers запоминает адреса сервера; при включённом обходе маршруты к
+// ним сразу перекладываются (сменился сервер или роутер).
+func (s *sys) setServers(addrs []netip.Addr) {
+	s.servers = append([]netip.Addr(nil), addrs...)
+	if s.full {
+		s.pinServers()
+	}
+}
+
+// pinServers ставит к каждому адресу сервера маршрут через настоящую сеть.
+//
+// Свои соединения с сервером программа и так шлёт мимо адаптера (protect),
+// но Windows с включённой мобильной точкой доступа сверяет пакеты с таблицей
+// маршрутов: по таблице путь к серверу ведёт в наш адаптер, а ответы
+// приходят на сетевую карту — и точка доступа выкидывает их как чужие. Через
+// 20 секунд соединения умирали по тайм-ауту, туннель переподключался по
+// кругу. Отдельный маршрут делает таблицу честной. Он же нужен телефону на
+// точке доступа, если у того свой VPN на этот же сервер.
+func (s *sys) pinServers() {
+	s.unpinServers()
+	s.mu.RLock()
+	up4, up6 := s.up4, s.up6
+	s.mu.RUnlock()
+	for _, a := range s.servers {
+		up, bits, any := up4, 32, netip.IPv4Unspecified()
+		if a.Is6() {
+			up, bits, any = up6, 128, netip.IPv6Unspecified()
+		}
+		if up.luid == 0 {
+			continue
+		}
+		next := up.nextHop
+		if !next.IsValid() {
+			next = any
+		}
+		luid := winipcfg.LUID(up.luid)
+		dst := netip.PrefixFrom(a, bits)
+		err := luid.AddRoute(dst, next, 0)
+		if errors.Is(err, windows.ERROR_OBJECT_ALREADY_EXISTS) {
+			// Уже поставлен кем-то (руками) — не наш, и снимать его не нам.
+			continue
+		}
+		if err != nil {
+			s.bus.Warnf("Маршрут к серверу %s не встал (%v): с включённой точкой доступа Windows VPN может рваться", a, err)
+			continue
+		}
+		s.pinned = append(s.pinned, pinnedRoute{luid: luid, dst: dst, next: next})
+	}
+}
+
+// unpinServers снимает поставленные маршруты к серверу.
+func (s *sys) unpinServers() {
+	for _, p := range s.pinned {
+		_ = p.luid.DeleteRoute(p.dst, p.next)
+	}
+	s.pinned = nil
 }

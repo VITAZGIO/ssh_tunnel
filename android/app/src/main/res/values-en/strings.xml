@@ -321,4 +321,9 @@
     <string name="update_dl_failed">download failed (code %1$d) — open the release page</string>
     <string name="update_release_btn">Open release page</string>
     <string name="mb">%1$.1f MB</string>
+    <string name="app_profiles_on">App profiles</string>
+    <string name="app_profiles_note">Several complete sets of settings — servers, apps, checkboxes. A “Profile 1 +” strip appears at the top of settings: plus creates a new empty profile, a tap switches, the cross on the selected one deletes it. Handy to set up a profile for someone else and hand it over via “Settings transfer”.</string>
+    <string name="app_profile">Profile %1$d</string>
+    <string name="app_profile_del">Delete “%1$s” with all its settings and servers?</string>
+    <string name="app_profile_del_yes">Delete</string>
 </resources>

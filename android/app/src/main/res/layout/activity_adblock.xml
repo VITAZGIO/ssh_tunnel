@@ -70,17 +70,8 @@
                     android:textSize="12sp"
                     android:textColor="?attr/c_dim" />
                 <TextView
-                    android:id="@+id/tabInfo"
-                    android:layout_width="16dp"
-                    android:layout_height="16dp"
-                    android:background="@drawable/bg_infoq"
-                    android:gravity="center"
-                    android:textSize="9sp"
-                    android:textStyle="bold"
-                    android:textColor="?attr/c_dim"
-                    android:text="?"
-                    android:clickable="true"
-                    android:focusable="true" />
+                    style="@style/InfoQ"
+                    android:id="@+id/tabInfo" />
             </LinearLayout>
 
             <EditText

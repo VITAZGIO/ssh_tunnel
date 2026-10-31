@@ -130,7 +130,11 @@ func RunSelfCheck(ctx context.Context, opt SelfCheckOptions) []CheckStep {
 	resolved := []string{opt.Host}
 	if net.ParseIP(opt.Host) == nil {
 		ctx1, cancel := context.WithTimeout(ctx, opt.DialTimeout)
-		addrs, err := net.DefaultResolver.LookupHost(ctx1, opt.Host)
+		resolver := net.DefaultResolver
+		if opt.Resolver != nil {
+			resolver = opt.Resolver
+		}
+		addrs, err := resolver.LookupHost(ctx1, opt.Host)
 		cancel()
 		if err != nil {
 			appendStep(&steps, CheckStep{Name: StepDNS, Code: "resolve_failed", Detail: err.Error()})

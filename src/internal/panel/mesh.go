@@ -237,6 +237,20 @@ func (m *MeshManager) Reinstall() error {
 	return m.runJob("install", m.installMain)
 }
 
+// InstallUDPRelay ставит или обновляет ретранслятор UDP. Без него у
+// клиентов с галочкой «Пробрасывать UDP» звонки, игры и QUIC не работают, а
+// видео YouTube подолгу стоит, пока браузер не перейдёт на TCP.
+func (m *MeshManager) InstallUDPRelay() error {
+	return m.runJob("udprelay", func(onLine func(string)) error {
+		onLine("Ставлю ретранслятор UDP")
+		if err := m.sys.RunScript(meshsvc.UDPRelayInstallScript(m.version), onLine); err != nil {
+			return err
+		}
+		onLine("Готово: UDP от клиентов идёт через сервер")
+		return nil
+	})
+}
+
 func (m *MeshManager) installMain(onLine func(string)) error {
 	onLine("Ставлю meshd — службу сети устройств")
 	if err := m.sys.RunScript(meshsvc.InstallScript(m.version), onLine); err != nil {
@@ -627,6 +641,8 @@ type MeshState struct {
 	Name          string    `json:"name"`
 	Meshd         UnitState `json:"meshd"`
 	Uplink        UnitState `json:"uplink"`
+	// UDPRelay — ретранслятор UDP (ставится кнопкой, см. InstallUDPRelay).
+	UDPRelay UnitState `json:"udprelay"`
 	Job           *meshJob  `json:"job,omitempty"`
 	SSHHost       string    `json:"sshHost,omitempty"`
 	SSHPort       int       `json:"sshPort,omitempty"`
@@ -660,6 +676,8 @@ func (m *MeshManager) State(ctx context.Context) MeshState {
 		Meshd:   m.sys.UnitState(meshdUnit),
 		Uplink:  m.sys.UnitState(meshsvc.UplinkUnitName),
 		Job:     m.jobSnapshot(),
+
+		UDPRelay: m.sys.UnitState(meshsvc.UDPRelayUnitName),
 		SSHHost: m.sshHost,
 		SSHPort: m.sshPort,
 

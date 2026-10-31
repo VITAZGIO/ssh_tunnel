@@ -23,6 +23,17 @@ import (
 // target — куда шло приложение (имя хоста, если его удалось восстановить,
 // иначе адрес), byIP — пришёл готовый адрес, то есть имя разрешалось не нами.
 func (t *Tunnel) ServeConn(conn net.Conn, target string, byIP bool) {
+	t.serveTun(conn, target, byIP, false)
+}
+
+// ServeConnDirect — то же, но мимо сервера: соединение устройства, которое
+// выходит в интернет через этот компьютер (точка доступа), когда ему велено
+// ходить напрямую. Сеть устройств работает и для него.
+func (t *Tunnel) ServeConnDirect(conn net.Conn, target string, byIP bool) {
+	t.serveTun(conn, target, byIP, true)
+}
+
+func (t *Tunnel) serveTun(conn net.Conn, target string, byIP, direct bool) {
 	defer conn.Close()
 
 	var proc string
@@ -54,7 +65,7 @@ func (t *Tunnel) ServeConn(conn net.Conn, target string, byIP bool) {
 	}
 	// Программа, которой по правилам положено мимо сервера, идёт напрямую
 	// так же, как выученный адрес.
-	forceDirect := learned || (proc != "" && !t.useTunnel(proc))
+	forceDirect := direct || learned || (proc != "" && !t.useTunnel(proc))
 
 	remote, direct, err := t.dialForTun(target, forceDirect)
 	if err != nil {

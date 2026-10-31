@@ -26,6 +26,7 @@ func (s *Server) meshRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/mesh/state", s.requireAuth(s.withMesh(s.handleMeshState)))
 	mux.HandleFunc("/api/mesh/role", s.requireAuth(s.withMesh(s.handleMeshRole)))
 	mux.HandleFunc("/api/mesh/reinstall", s.requireAuth(s.withMesh(s.handleMeshReinstall)))
+	mux.HandleFunc("/api/udprelay/install", s.requireAuth(s.withMesh(s.handleUDPRelayInstall)))
 	mux.HandleFunc("/api/mesh/rename", s.requireAuth(s.withMesh(s.handleMeshRename)))
 	mux.HandleFunc("/api/mesh/forget", s.requireAuth(s.withMesh(s.handleMeshForget)))
 	mux.HandleFunc("/api/mesh/links/create", s.requireAuth(s.withMesh(s.handleMeshLinkCreate)))
@@ -134,6 +135,14 @@ func (s *Server) handleMeshReinstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	replyErr(w, s.mesh.Reinstall(), map[string]bool{"ok": true})
+}
+
+func (s *Server) handleUDPRelayInstall(w http.ResponseWriter, r *http.Request) {
+	var req struct{}
+	if !decodePost(w, r, &req) {
+		return
+	}
+	replyErr(w, s.mesh.InstallUDPRelay(), map[string]bool{"ok": true})
 }
 
 type meshDeviceReq struct {
