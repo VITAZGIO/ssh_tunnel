@@ -212,6 +212,11 @@ type Tunnel struct {
 	// оборвётся само (см. UDPRelay).
 	udpRelayMu     sync.Mutex
 	udpRelayClient *udprelay.Client
+	// udpRelayRetry — до этого времени ретранслятор не спрашиваем: он только
+	// что не ответил (не установлен на сервере). Без паузы каждый новый
+	// UDP-поток ждал отказа сервера, журнал заливало одной и той же строкой,
+	// а браузер не спешил переходить с QUIC на обычный TCP — видео стояло.
+	udpRelayRetry time.Time
 
 	// poolCtx живёт отдельно от ctx: слив (см. Drain) гасит пул
 	// SSH-соединений, но оставляет локальные слушатели работать. Всё, что
@@ -1032,13 +1037,18 @@ func (t *Tunnel) UDPRelay() *udprelay.Client {
 		}
 	}
 
+	if time.Now().Before(t.udpRelayRetry) {
+		return nil
+	}
 	addr := t.cfg.UDPRelayAddr
 	if addr == "" {
 		addr = defaultUDPRelayAddr
 	}
 	conn, err := t.Dial("tcp", addr)
 	if err != nil {
-		t.bus.Warnf("UDP через туннель недоступен: %v", err)
+		t.udpRelayRetry = time.Now().Add(udpRelayRetryAfter)
+		t.bus.Warnf("UDP через туннель недоступен (%v) — следующая попытка через %s. "+
+			"Ретранслятор ставится мастером настройки VPS; пока его нет, UDP отбрасывается и браузеры идут по TCP", err, udpRelayRetryAfter)
 		return nil
 	}
 	t.udpRelayClient = udprelay.NewClient(conn)
@@ -1511,3 +1521,6 @@ func (t *Tunnel) publishStats(ctx context.Context) {
 		}
 	}
 }
+
+// udpRelayRetryAfter — пауза после отказа ретранслятора UDP.
+const udpRelayRetryAfter = time.Minute
