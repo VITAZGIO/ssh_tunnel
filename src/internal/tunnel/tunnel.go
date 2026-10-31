@@ -379,11 +379,18 @@ func (t *Tunnel) reportDialErr(s string, err error) {
 // Start поднимает пул и локальные слушатели. Возвращает ошибку только если
 // стартовать вообще не получилось (нет ключа, занят порт, сервер не отвечает);
 // после успешного старта обрывы связи лечатся сами, без ошибки наружу.
-func (t *Tunnel) Start() error {
+func (t *Tunnel) Start() error { return t.StartContext(context.Background()) }
+
+// StartContext — Start, который можно прервать: отмена parent во время
+// подключения обрывает попытки сразу, а не после всех повторов (минута и
+// больше на плохой сети). Отменённое подключение заканчивается состоянием
+// «выключен», а не ошибкой: его остановил человек. Отменять parent после
+// успешного старта нельзя — туннель живёт на его основе.
+func (t *Tunnel) StartContext(parent context.Context) error {
 	if t.State() != events.StateStopped {
 		return errors.New("туннель уже запущен")
 	}
-	t.ctx, t.cancel = context.WithCancel(context.Background())
+	t.ctx, t.cancel = context.WithCancel(parent)
 	t.setState(events.StateConnecting, "")
 
 	if err := t.loadSigner(); err != nil {
@@ -447,8 +454,14 @@ func (t *Tunnel) startPool() error {
 	// не подходит, пользователь должен узнать об этом сразу, а не из лога.
 	first, wire, err := t.dialFirst(ctx)
 	if err != nil {
-		t.reportDialErr(events.StateError, err)
+		canceled := ctx.Err() != nil
 		t.poolCancel()
+		if canceled {
+			// Подключение отменили (StartContext) — это не ошибка.
+			t.setState(events.StateStopped, "")
+			return context.Canceled
+		}
+		t.reportDialErr(events.StateError, err)
 		return err
 	}
 

@@ -77,6 +77,9 @@ type App struct {
 	// устройств. Туннель держится, пока нужна хотя бы одна из них.
 	bypassOff bool
 	meshOff   bool
+	// connectCancel прерывает идущее подключение (Start ещё не вернулся):
+	// «Отключить» во время него срабатывает сразу. nil — подключения нет.
+	connectCancel context.CancelFunc
 	// sysProxyArgs — с чем включать системный прокси, когда обход
 	// блокировок включают обратно на живом туннеле.
 	sysProxyArgs *sysProxyArgs
@@ -383,7 +386,12 @@ func (a *App) Start() error {
 	err := a.connectFrom(cfg, candidates, 0, gen)
 	a.mu.Lock()
 	a.transitioning = false
+	stopped := a.gen != gen
 	a.mu.Unlock()
+	if err != nil && stopped {
+		// Подключение прервали «Отключить» — это не ошибка подключения.
+		return nil
+	}
 	return err
 }
 
@@ -447,6 +455,10 @@ func (a *App) stop(drain bool) {
 		drain = false
 	}
 	tun, sysOn := a.tun, a.sysOn
+	if a.connectCancel != nil {
+		a.connectCancel()
+		a.connectCancel = nil
+	}
 	a.running, a.sysOn = false, false
 	a.effectiveProfile = ""
 	// Ссылку на туннель при сливе сохраняем: он ещё живёт фоном, и следующий

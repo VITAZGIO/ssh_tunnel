@@ -453,6 +453,12 @@
            color:var(--err);border-radius:9px;padding:8px 11px;margin:0 0 11px;
            font-size:12.5px;white-space:pre-wrap;display:none}
   .err-box.on{display:block}
+  /* На главном ошибка всплывает поверх, не сдвигая кнопку: раньше она
+     вставала в поток над кнопкой, и всё под ней прыгало вниз. Нажатие
+     её убирает. */
+  .mainPage{position:relative}
+  #error{position:absolute;left:0;right:0;top:0;z-index:5;margin:0;cursor:pointer;
+         box-shadow:0 6px 18px rgba(0,0,0,.35);background:color-mix(in srgb,var(--err) 16%,var(--bg))}
   .peer{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);
         border-radius:9px;background:var(--card);margin-bottom:6px;cursor:pointer}
   .peer:hover{border-color:var(--accent)}
@@ -1641,6 +1647,13 @@ const api = (path, body, raw) => fetch(path, {
   headers: {'X-Token': T, 'Content-Type': 'application/json'},
   body: body ? (raw ? body : JSON.stringify(body)) : undefined
 }).then(r => r.json());
+// apiWithin — тот же запрос, но ждём не дольше ms: кнопка не должна
+// зависать, даже если ответ задержался (сама операция идёт дальше, а итог
+// придёт событием состояния).
+const apiWithin = (ms, path, body) => Promise.race([
+  api(path, body).catch(() => ({})),
+  new Promise(res => setTimeout(() => res({}), ms)),
+]);
 
 /* ---------- своё окно подтверждения вместо системного confirm() ---------- */
 /* Объявлено сразу после $ и до всего остального: обращаться к $ раньше, чем
@@ -2862,18 +2875,27 @@ async function refreshNetModes(){
   const st = await api('/api/status');
   if(st && st.modes){ netModes = st.modes; renderNetModes(); }
 }
+// Как и большая: включение из выключенного — это подключение, и его можно
+// отменить большой кнопкой, поэтому на это время ничего не блокируем.
+let meshBusy = false;
 $('meshBtn').onclick = async () => {
-  $('meshBtn').disabled = true;
+  if(meshBusy) return;
   showError('');
+  const starting = !running;
+  if(starting) setState('connecting', '');
+  else { meshBusy = true; $('meshBtn').disabled = true; }
   try{
-    const r = await api('/api/meshmode', {on: !netModes.mesh});
+    const r = starting ? await api('/api/meshmode', {on: true})
+                       : await apiWithin(4000, '/api/meshmode', {on: !netModes.mesh});
     if(r.error) showError(connErrorText(r.errorKind, r.error));
     if(r.modes){ netModes = r.modes; renderNetModes(); }
   } finally {
+    meshBusy = false;
     $('meshBtn').disabled = false;
     refresh();
   }
 };
+$('error').onclick = () => showError('');
 function showError(msg, where){
   const box = $(where || 'error');
   box.textContent = msg || '';
@@ -3000,16 +3022,33 @@ function showPing(ms){
 }
 
 /* ---------- кнопка ---------- */
+// Подключение может идти минуту (плохая сеть, повторы), поэтому кнопку на
+// это время не блокируем: «Подключение…» видно сразу, а повторное нажатие —
+// «Отменить» — прерывает его (app.Stop отменяет идущее подключение).
+// Блокируется кнопка только на короткие запросы выключения.
+let powerBusy = false;
 $('power').onclick = async () => {
-  $('power').disabled = true;
+  if(powerBusy) return;
   showError('');
+  if(!running){
+    setState('connecting', '');
+    const r = await api('/api/start', {});
+    if(r.error){ showError(connErrorText(r.errorKind, r.error)); show('viewMain'); }
+    refresh();
+    return;
+  }
+  powerBusy = true;
+  $('power').disabled = true;
   try{
     // Есть сеть устройств — большая кнопка отвечает только за обход
-    // блокировок: выключение оставляет сеть работать.
-    const r = running && netModes.meshConfigured ? await api('/api/bypass', {on: !netModes.bypass})
-            : running ? await api('/api/stop', {}) : await api('/api/start', {});
+    // блокировок: выключение оставляет сеть работать. В жёлтом состоянии
+    // (подключение, переподключение) — это «выключить всё сейчас».
+    const r = netModes.meshConfigured && lastState === 'connected'
+            ? await apiWithin(4000, '/api/bypass', {on: !netModes.bypass})
+            : await apiWithin(4000, '/api/stop', {});
     if(r.error){ showError(connErrorText(r.errorKind, r.error)); show('viewMain'); }
   } finally {
+    powerBusy = false;
     $('power').disabled = false;
     refresh();
   }

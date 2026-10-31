@@ -95,15 +95,6 @@
                 android:paddingEnd="16dp"
                 android:paddingBottom="16dp">
 
-            <TextView
-                android:id="@+id/error"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_error"
-                android:padding="10dp"
-                android:textSize="12.5sp"
-                android:textColor="?attr/c_err"
-                android:visibility="gone" />
 
             <RelativeLayout
                 android:layout_width="match_parent"
@@ -253,6 +244,21 @@
                         android:fontFamily="monospace"
                         android:textSize="12.5sp" />
                 </LinearLayout>
+
+                <!-- Ошибка — поверх, у верхнего края, а не в потоке: раньше
+                     она вставала над кнопкой, и всё под ней прыгало вниз.
+                     Нажатие убирает её. -->
+                <TextView
+                    android:id="@+id/error"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentTop="true"
+                    android:elevation="6dp"
+                    android:background="@drawable/bg_error"
+                    android:padding="10dp"
+                    android:textSize="12.5sp"
+                    android:textColor="?attr/c_err"
+                    android:visibility="gone" />
             </RelativeLayout>
 
 

@@ -148,6 +148,9 @@ class MainActivity : AppCompatActivity() {
 
     // С какими режимами включать после разрешения на VPN: большая кнопка —
     // всё, кнопка «Сеть устройств» — только сеть.
+    // Ошибка, которую убрали нажатием: та же самая больше не всплывает.
+    private var dismissedError = ""
+
     private var pendingBypass = true
     private var pendingMesh = true
 
@@ -305,6 +308,11 @@ class MainActivity : AppCompatActivity() {
         loadAppSettings()
 
         power.setOnClickListener { onToggle() }
+        // Ошибка лежит поверх кнопки — нажатие убирает её до следующей.
+        errorView.setOnClickListener {
+            dismissedError = TunnelService.detail
+            errorView.visibility = View.GONE
+        }
         speedButton.setOnClickListener { runSpeedTest() }
         for (id in listOf(R.id.save, R.id.saveServers, R.id.saveApp)) {
             findViewById<Button>(id).setOnClickListener { saveSettings() }
@@ -1536,6 +1544,16 @@ class MainActivity : AppCompatActivity() {
     private fun onToggle() {
         val running = TunnelService.state != "stopped" && TunnelService.state != "error"
         val meshUp = running && settings.meshConfigured() && TunnelService.meshOn
+        if (running && TunnelService.state != "connected") {
+            // Жёлтое состояние (подключение, переподключение): кнопка —
+            // это «Выключить всё сейчас», без ожидания и без оглядки на сеть
+            // устройств. Раньше с сетью устройств она лишь гасила обход, и
+            // туннель так и висел жёлтым.
+            settings.lastRunning = false
+            settings.lastMesh = false
+            startService(Intent(this, TunnelService::class.java).setAction(TunnelService.ACTION_STOP))
+            return
+        }
         if (running && TunnelService.bypassOn) {
             settings.lastRunning = false
             settings.lastMesh = meshUp
@@ -1854,7 +1872,7 @@ class MainActivity : AppCompatActivity() {
 
         if (state == "error" && TunnelService.detail.isNotBlank()) {
             errorView.text = TunnelService.detail
-            errorView.visibility = View.VISIBLE
+            errorView.visibility = if (TunnelService.detail == dismissedError) View.GONE else View.VISIBLE
             detailView.text = ""
         } else {
             errorView.visibility = View.GONE

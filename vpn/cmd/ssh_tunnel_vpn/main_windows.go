@@ -42,6 +42,7 @@ func main() {
 	uninstall := flag.Bool("uninstall-service", false, "удалить службу (нужны права администратора)")
 	relaunch := flag.Bool("relaunch", false, "после -uninstall-service снова открыть окно")
 	waitInstance := flag.Bool("wait-instance", false, "дождаться, пока закроется прежняя копия программы")
+	killStuck := flag.Bool("kill-stuck", false, "закрыть зависшую прежнюю копию (нужны права администратора)")
 	flag.Parse()
 
 	updater.VPN = true
@@ -59,12 +60,32 @@ func main() {
 	// Одна копия на компьютер — общая с обычным ssh_tunnel.exe: два туннеля
 	// сразу друг другу бы только мешали. Если уже запущен любой, показываем его.
 	if !*noWindow {
+		if *killStuck {
+			nativeui.KillStuckInstance(windowTitle)
+		}
 		if *waitInstance {
 			if !nativeui.WaitSingleInstance(20 * time.Second) {
 				return
 			}
-		} else if nativeui.AlreadyRunning(windowTitle) {
-			return
+		} else {
+			switch nativeui.CheckInstance(windowTitle) {
+			case nativeui.InstanceShown:
+				return
+			case nativeui.InstanceStuck:
+				// Зависшая копия запущена от администратора — закрыть её
+				// может только копия с теми же правами. Она же и займёт место.
+				self, _ := os.Executable()
+				args := []string{"-kill-stuck", "-wait-instance"}
+				if *tray {
+					args = append(args, "-tray")
+				}
+				if _, err := winsvc.RunElevated(self, args, false); err != nil {
+					fatal("Предыдущая копия программы зависла и не закрывается сама.\n\n" +
+						"Закрой её в Диспетчере задач (Ctrl+Shift+Esc → ssh_tunnel_vpn → «Снять задачу»)\n" +
+						"и запусти программу снова.")
+				}
+				return
+			}
 		}
 	}
 
