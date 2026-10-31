@@ -469,10 +469,13 @@ class MainActivity : AppCompatActivity() {
         renderMeshSummary()
         renderDomainsSummary()
         refresh()
+        // Скачивание обновления шло, пока экран был закрыт, — следим дальше.
+        if (settings.updateDownloadId >= 0) pollDownload()
     }
 
     override fun onPause() {
         TunnelService.onUpdate = null
+        updateNote.removeCallbacks(downloadPoll)
         super.onPause()
     }
 
@@ -1343,6 +1346,12 @@ class MainActivity : AppCompatActivity() {
                 when {
                     result.newer -> {
                         updateNote.text = getString(R.string.update_available, result.latest)
+                        // Кнопка могла остаться «Установить» или «Открыть
+                        // страницу релиза» от прошлой загрузки.
+                        readyDownloadId = -1
+                        (updateDownloadBtn as TextView).setText(R.string.update_download)
+                        updateDownloadBtn.setOnClickListener { onDownloadUpdate() }
+                        findViewById<View>(R.id.updateProgress).visibility = View.GONE
                         updateDownloadBtn.visibility = View.VISIBLE
                     }
                     result.ahead -> updateNote.text = getString(R.string.update_ahead, result.latest)
@@ -1362,6 +1371,12 @@ class MainActivity : AppCompatActivity() {
      * открываем страницу релиза в браузере.
      */
     private fun onDownloadUpdate() {
+        // Уже скачано — кнопка стала «Установить».
+        val ready = readyDownloadId
+        if (ready >= 0) {
+            installDownloaded(ready)
+            return
+        }
         val u = pendingUpdate ?: return
         if (u.apkUrl.isBlank()) {
             updateNote.text = getString(R.string.update_open_release)
@@ -1379,13 +1394,109 @@ class MainActivity : AppCompatActivity() {
                     android.os.Environment.DIRECTORY_DOWNLOADS, "ssh_tunnel-${u.latest}.apk"
                 )
             val dm = getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-            dm.enqueue(req)
+            settings.updateDownloadId = dm.enqueue(req)
             updateNote.text = getString(R.string.update_downloading)
+            updateDownloadBtn.visibility = View.GONE
+            pollDownload()
         } catch (e: Exception) {
             // Менеджер загрузок отключён (такое бывает на прошивках без
             // сервисов Google) — тогда пусть скачивает браузер.
             updateNote.text = getString(R.string.update_open_release)
             openLink(u.releaseUrl)
+        }
+    }
+
+    // Скачанное обновление, которое осталось установить (-1 — нет).
+    private var readyDownloadId = -1L
+
+    private val downloadPoll = Runnable { pollDownload() }
+
+    private fun mb(bytes: Long): String = getString(R.string.mb, bytes / 1048576.0)
+
+    /**
+     * Ход скачивания обновления — полоской и текстом, раз в полсекунды, пока
+     * экран открыт. Раньше загрузка уходила в менеджер загрузок молча, и
+     * было не понять, идёт ли она вообще.
+     */
+    private fun pollDownload() {
+        updateNote.removeCallbacks(downloadPoll)
+        val id = settings.updateDownloadId
+        val bar = findViewById<android.widget.ProgressBar>(R.id.updateProgress)
+        if (id < 0) return
+        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+        val c = try {
+            dm.query(android.app.DownloadManager.Query().setFilterById(id))
+        } catch (e: Exception) {
+            null
+        }
+        c.use { cur ->
+            if (cur == null || !cur.moveToFirst()) {
+                // Загрузку удалили из менеджера — следить не за чем.
+                settings.updateDownloadId = -1
+                bar.visibility = View.GONE
+                return
+            }
+            fun long(col: String) = cur.getLong(cur.getColumnIndexOrThrow(col))
+            val status = cur.getInt(cur.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS))
+            val done = long(android.app.DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+            val total = long(android.app.DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+            bar.visibility = View.VISIBLE
+            when (status) {
+                android.app.DownloadManager.STATUS_SUCCESSFUL -> {
+                    settings.updateDownloadId = -1
+                    readyDownloadId = id
+                    bar.isIndeterminate = false
+                    bar.progress = bar.max
+                    updateNote.setText(R.string.update_done)
+                    (updateDownloadBtn as TextView).setText(R.string.update_install)
+                    updateDownloadBtn.visibility = View.VISIBLE
+                    return
+                }
+                android.app.DownloadManager.STATUS_FAILED -> {
+                    settings.updateDownloadId = -1
+                    bar.visibility = View.GONE
+                    val reason = cur.getInt(cur.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_REASON))
+                    updateNote.text = getString(R.string.update_dl_failed, reason)
+                    dm.remove(id)
+                    pendingUpdate?.let { u ->
+                        (updateDownloadBtn as TextView).setText(R.string.update_release_btn)
+                        updateDownloadBtn.setOnClickListener { openLink(u.releaseUrl) }
+                        updateDownloadBtn.visibility = View.VISIBLE
+                    }
+                    return
+                }
+                android.app.DownloadManager.STATUS_PAUSED -> updateNote.setText(R.string.update_waiting)
+                android.app.DownloadManager.STATUS_PENDING -> updateNote.setText(R.string.update_queued)
+                else -> updateNote.text = if (total > 0) getString(R.string.update_progress, mb(done), mb(total))
+                    else getString(R.string.update_progress_unknown, mb(done))
+            }
+            if (total > 0) {
+                bar.isIndeterminate = false
+                bar.progress = (done * bar.max / total).toInt()
+            } else {
+                bar.isIndeterminate = true
+            }
+        }
+        updateNote.postDelayed(downloadPoll, 500)
+    }
+
+    /** Открывает скачанный APK в системном установщике. */
+    private fun installDownloaded(id: Long) {
+        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+        try {
+            val uri = dm.getUriForDownloadedFile(id) ?: throw Exception("нет файла")
+            startActivity(
+                Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (e: Exception) {
+            // Установщик не открылся — хотя бы список загрузок, APK там.
+            try {
+                startActivity(Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS))
+            } catch (e2: Exception) {
+                updateNote.setText(R.string.update_done)
+            }
         }
     }
 
