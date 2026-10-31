@@ -499,6 +499,14 @@
   .nav{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;border:0;
        border-bottom:1px solid var(--line);padding:13px 4px;color:var(--text);font:inherit;cursor:pointer}
   .nav:hover{background:var(--card)}
+  /* Профили приложения: полоска вверху настроек. */
+  .apBar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0 12px}
+  .apBar button{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:4px 12px;
+        border:1px solid var(--line);background:transparent;color:var(--text);font:inherit;font-size:13px;cursor:pointer}
+  .apBar button.on{background:var(--card2);box-shadow:inset 0 -2px 0 var(--accent);font-weight:600}
+  .apBar button .x{color:var(--dim);font-size:15px;line-height:1;padding:0 2px}
+  .apBar button .x:hover{color:var(--bad,#e5484d)}
+  .apBar .add{width:32px;justify-content:center;padding:0;font-size:17px}
   .nav .t{flex:1;display:flex;flex-direction:column;gap:2px;font-size:15px;font-weight:600;min-width:0}
   .nav .v{font-size:12px;font-weight:400;color:var(--dim);display:flex;align-items:center;gap:6px}
   .nav .v svg{width:16px;height:auto;flex:none}
@@ -763,6 +771,8 @@
     </div>
 
     <div class="err-box" id="setError"></div>
+
+    <div class="apBar" id="appProfilesBar" hidden></div>
 
     <div class="navlist">
       <button class="nav" id="toServers"><span class="t"><span data-i18n="servers_title">Выбор сервера</span>
@@ -1048,6 +1058,24 @@
             отклик всех серверов и выберет самый быстрый. Если он не поднимется или упадёт — перейдёт
             на следующий по отклику, об этом будет видно в журнале. Возврат на выбранный вручную
             сервер — кнопкой «Выбрать этот сервер» или при следующем подключении.</span></span></label>
+      </div>
+      <div class="chk-row">
+        <label class="chk"><input type="checkbox" id="appProfilesOn">
+          <span class="lbl" data-i18n="app_profiles_on">Профили приложения</span>
+          <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)"
+            >?<span class="tip" data-i18n="app_profiles_note">Несколько полных наборов настроек — серверы,
+            программы, галочки. Вверху настроек появится полоска «Профиль 1 +»: плюс создаёт новый профиль
+            с нуля, щелчок переключает, крестик удаляет. Удобно настроить профиль для другого человека и
+            отдать ему экспортом.</span></span></label>
+      </div>
+      <div class="chk-row" id="hotspotRow" hidden>
+        <label class="chk"><input type="checkbox" id="hotspotVpn">
+          <span class="lbl" data-i18n="hotspot_vpn">Устройства на точке доступа — через VPN</span>
+          <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)"
+            >?<span class="tip" data-i18n="hotspot_vpn_note">Если этот компьютер раздаёт Wi-Fi (мобильная
+            точка доступа Windows): галочка стоит — подключённые телефоны и ноутбуки ходят в интернет через
+            сервер, как и сам компьютер; снята — напрямую, через обычную сеть компьютера. Работает, когда
+            включён обход блокировок.</span></span></label>
       </div>
       <div class="chk-row" id="showPickerRow" style="display:none">
         <label class="chk"><input type="checkbox" id="showServerPicker">
@@ -1881,6 +1909,11 @@ const I18N = {
       'компьютера и скажет, сломается что-нибудь или нет.</p>',
     verbose:'Подробный журнал', connect_on_launch:'Подключаться сразу при запуске',
     show_picker:'Показывать выбор сервера на главном экране',
+    hotspot_vpn:'Устройства на точке доступа — через VPN',
+    hotspot_vpn_note:'Если этот компьютер раздаёт Wi-Fi (мобильная точка доступа Windows): галочка стоит — подключённые телефоны и ноутбуки ходят в интернет через сервер, как и сам компьютер; снята — напрямую, через обычную сеть компьютера. Работает, когда включён обход блокировок.',
+    app_profiles_on:'Профили приложения', app_profile:'Профиль', app_profile_add:'Новый профиль',
+    app_profiles_note:'Несколько полных наборов настроек — серверы, программы, галочки. Вверху настроек появится полоска «Профиль 1 +»: плюс создаёт новый профиль с нуля, щелчок переключает, крестик удаляет. Удобно настроить профиль для другого человека и отдать ему экспортом.',
+    app_profile_del:'Удалить профиль «{n}» со всеми его настройками и серверами?',
     auto_pick_fastest:'Подключаться к самому быстрому серверу',
     auto_pick_fastest_note:'При подключении программа измерит отклик всех серверов и выберет самый '+
       'быстрый. Если он не поднимется или упадёт — перейдёт на следующий по отклику, об этом будет видно '+
@@ -2188,7 +2221,10 @@ const I18N = {
     verbose:'Verbose log', connect_on_launch:'Connect immediately on launch',
     show_picker:'Show server picker on the home screen',
     hotspot_vpn:'Devices on the hotspot go through VPN',
-    hotspot_vpn_note:'If this computer shares Wi-Fi (Windows mobile hotspot): checked — connected phones and laptops reach the internet through the server, like the computer itself; unchecked — directly, through the computer's normal network. Applies while blocking bypass is on.',
+    app_profiles_on:'App profiles', app_profile:'Profile', app_profile_add:'New profile',
+    app_profiles_note:'Several complete sets of settings — servers, apps, checkboxes. A “Profile 1 +” strip appears at the top of settings: plus creates a new empty profile, a click switches, the cross deletes. Handy to set up a profile for someone else and hand it over by export.',
+    app_profile_del:'Delete profile “{n}” with all its settings and servers?',
+    hotspot_vpn_note:'If this computer shares Wi-Fi (Windows mobile hotspot): checked — connected phones and laptops reach the internet through the server, like the computer itself; unchecked — directly, through the computer’s normal network. Applies while blocking bypass is on.',
     auto_pick_fastest:'Connect to the fastest server',
     auto_pick_fastest_note:"When connecting, the program measures every server's response time and picks "+
       "the fastest one. If it doesn't come up or drops, it moves on to the next-best one — visible in the "+
@@ -4639,6 +4675,64 @@ $('langBtn').onclick = e => {
   m.hidden = false;
 };
 document.addEventListener('click', () => { $('langMenu').hidden = true; });
+
+/* ---------- профили приложения ---------- */
+/* Полные наборы настроек (src/internal/appprofiles). Действующий — обычный
+   config.json, поэтому после переключения достаточно перечитать настройки. */
+let appProfiles = {enabled:false, active:'', profiles:[]};
+function appProfileName(p, i){ return p.name || (tr('app_profile') + ' ' + (i + 1)); }
+function renderAppProfiles(){
+  const bar = $('appProfilesBar');
+  $('appProfilesOn').checked = !!appProfiles.enabled;
+  bar.hidden = !appProfiles.enabled;
+  bar.innerHTML = '';
+  const list = appProfiles.profiles || [];
+  list.forEach((p, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    const on = p.id === appProfiles.active;
+    b.className = on ? 'on' : '';
+    b.appendChild(document.createTextNode(appProfileName(p, i)));
+    if(on && list.length > 1){
+      const x = document.createElement('span');
+      x.className = 'x';
+      x.textContent = '×';
+      x.onclick = async ev => {
+        ev.stopPropagation();
+        if(!await appConfirm(tr('app_profile_del').replace('{n}', appProfileName(p, i)))) return;
+        appProfileAction('delete', {id: p.id});
+      };
+      b.appendChild(x);
+    }
+    b.onclick = () => { if(!on) appProfileAction('switch', {id: p.id}); };
+    bar.appendChild(b);
+  });
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'add';
+  add.textContent = '+';
+  add.title = tr('app_profile_add');
+  add.onclick = () => appProfileAction('add', {});
+  bar.appendChild(add);
+}
+async function loadAppProfiles(){
+  const r = await api('/api/appprofiles');
+  if(r && r.state){ appProfiles = r.state; renderAppProfiles(); }
+}
+async function appProfileAction(what, body){
+  if(what !== 'enable' && formDirty && !await appConfirm(tr('discard_unsaved'))) return;
+  showError('', 'setError');
+  const r = await api('/api/appprofiles/' + what, body);
+  if(r.state){ appProfiles = r.state; renderAppProfiles(); }
+  if(r.error) showError(r.error, 'setError');
+  if(what === 'enable') return;
+  // Действующий профиль сменился — перечитываем настройки целиком.
+  const st = await api('/api/status');
+  if(st && st.config) applyDoc(st.config, false);
+  refresh();
+}
+$('appProfilesOn').addEventListener('change', () => appProfileAction('enable', {on: $('appProfilesOn').checked}));
+loadAppProfiles();
 
 // applyDoc — центральная точка «пришли свежие настройки, разложи их по
 // экрану». keepEditing=false используется после удаления сервера: править

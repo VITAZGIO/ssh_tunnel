@@ -576,6 +576,18 @@ func Load() Config {
 	return cfg
 }
 
+// Parse разбирает снимок настроек (профиль приложения, см. appprofiles) так
+// же, как Load разбирает config.json: недостающее — по умолчанию, заведомо
+// нерабочее — исправлено.
+func Parse(data []byte) (Config, error) {
+	cfg := Default()
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return Config{}, err
+	}
+	cfg.normalize()
+	return cfg, nil
+}
+
 func (c *Config) Save() error {
 	c.normalize()
 	if err := os.MkdirAll(Dir(), 0o700); err != nil {

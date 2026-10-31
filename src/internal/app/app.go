@@ -167,6 +167,24 @@ func (a *App) Config() config.Config {
 // работающем туннеле — ради них останавливаться незачем. Остальное (адрес
 // сервера, порты, число каналов) вступит в силу при следующем подключении, о
 // чём сообщается в возвращаемом тексте.
+// ReplaceConfig подменяет настройки целиком — смена профиля приложения
+// (см. appprofiles): другие серверы, программы, всё. Работающий туннель
+// переподключается уже с новыми настройками; у нового профиля без сервера
+// он остаётся выключенным.
+func (a *App) ReplaceConfig(cfg config.Config) error {
+	running := a.Running()
+	if running {
+		a.Stop()
+	}
+	if _, err := a.SetConfig(cfg); err != nil {
+		return err
+	}
+	if running && cfg.Active().Host != "" {
+		return a.Start()
+	}
+	return nil
+}
+
 func (a *App) SetConfig(cfg config.Config) (string, error) {
 	a.mu.Lock()
 	old, running := a.cfg, a.running

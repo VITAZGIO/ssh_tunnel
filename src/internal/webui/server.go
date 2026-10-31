@@ -204,6 +204,8 @@ func (s *Server) Serve() error {
 	mux.HandleFunc("/api/profile/latency", s.guard(s.handleProfileLatency))
 	mux.HandleFunc("/api/settings/export", s.guard(s.handleSettingsExport))
 	mux.HandleFunc("/api/settings/import", s.guard(s.handleSettingsImport))
+	mux.HandleFunc("/api/appprofiles", s.guard(s.handleAppProfiles))
+	mux.HandleFunc("/api/appprofiles/", s.guard(s.handleAppProfilesAction))
 	mux.HandleFunc("/api/update/check", s.guard(s.handleUpdateCheck))
 	mux.HandleFunc("/api/update/download", s.guard(s.handleUpdateDownload))
 	mux.HandleFunc("/api/mesh", s.guard(s.handleMesh))
