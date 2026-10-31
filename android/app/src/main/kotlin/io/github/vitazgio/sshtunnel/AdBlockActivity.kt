@@ -1,29 +1,26 @@
 package io.github.vitazgio.sshtunnel
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import mobile.Mobile
 import org.json.JSONObject
 
 /**
- * Блокировка рекламы — отдельным экраном, как выбор приложений: два списка,
- * которые применяются одновременно (см. ad_block_tab_block/ad_block_tab_allow
- * в strings.xml) — чёрный список (что блокировать) и белый список (что не
- * трогать, даже если совпало с чёрным). Раньше оба текстовых поля были
- * зажаты прямо в общих настройках — здесь у каждого простор и кнопки
- * вставки/копирования буфера обмена.
+ * Блокировка рекламы — отдельным экраном, устроенным как «Исключения
+ * доменов»: две вкладки над одним полем — чёрный список (откуда брать списки
+ * блокировки) и белый (что не трогать, даже если совпало с чёрным), ниже
+ * перенос обоих списков буфером или файлом и одна кнопка «Сохранить». Она же
+ * и скачивает списки по ссылкам: отдельная «Обновить список» была лишней.
  */
 class AdBlockActivity : AppCompatActivity() {
 
@@ -31,15 +28,31 @@ class AdBlockActivity : AppCompatActivity() {
 
     private lateinit var enabledCheck: CheckBox
     private lateinit var tileBlocked: TextView
-    private lateinit var tabBlockBtn: Button
-    private lateinit var tabAllowBtn: Button
+    private lateinit var tabs: LinearLayout
     private lateinit var tabLabel: TextView
     private lateinit var listEdit: EditText
-    private lateinit var updateButton: Button
+    private lateinit var saveButton: View
     private lateinit var statusView: TextView
 
     /** true — редактируется чёрный список (adBlockSources), false — белый (adBlockAllowlist). */
     private var onBlockTab = true
+
+    // Текст обеих вкладок, пока экран открыт: в настройки он попадает по
+    // «Сохранить» (или при уходе с экрана).
+    private var sources = ""
+    private var allowlist = ""
+
+    private val saveFile = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            statusView.setText(if (Xfer.write(this, uri, exportText())) R.string.saved_to_file else R.string.file_failed)
+        }
+    }
+
+    private val openFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importText(Xfer.read(this, uri))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,128 +72,154 @@ class AdBlockActivity : AppCompatActivity() {
             insets
         }
 
-        findViewById<View>(R.id.backFromAdBlock).setOnClickListener { saveCurrentTab(); finish() }
+        findViewById<View>(R.id.backFromAdBlock).setOnClickListener { storeLists(); finish() }
 
         enabledCheck = findViewById(R.id.adBlockEnabled)
         tileBlocked = findViewById(R.id.tileBlocked)
-        tabBlockBtn = findViewById(R.id.tabBlockBtn)
-        tabAllowBtn = findViewById(R.id.tabAllowBtn)
+        tabs = findViewById(R.id.abTabs)
         tabLabel = findViewById(R.id.tabLabel)
         listEdit = findViewById(R.id.listEdit)
-        updateButton = findViewById(R.id.adBlockUpdate)
+        saveButton = findViewById(R.id.saveAdBlock)
         statusView = findViewById(R.id.adBlockStatus)
 
+        sources = settings.adBlockSources
+        allowlist = settings.adBlockAllowlist
         enabledCheck.isChecked = settings.adBlockEnabled
         enabledCheck.setOnCheckedChangeListener { _, checked -> settings.adBlockEnabled = checked }
 
         tileBlocked.text = getString(R.string.tile_blocked) + ": " + settings.adBlockTotal
 
-        tabBlockBtn.setOnClickListener { switchTab(true) }
-        tabAllowBtn.setOnClickListener { switchTab(false) }
+        for (k in 0 until tabs.childCount) {
+            val c = tabs.getChildAt(k)
+            c.setOnClickListener { switchTab(c.tag == "block") }
+        }
+        // Поле сразу с чёрным списком: switchTab сперва забирает текст поля
+        // в открытую вкладку, и пустое поле затёрло бы загруженный список.
+        listEdit.setText(sources)
         switchTab(true)
 
         findViewById<View>(R.id.tabInfo).setOnClickListener {
             showTip(it, getString(if (onBlockTab) R.string.ad_block_sources_note else R.string.ad_block_allowlist_hint))
         }
-        findViewById<View>(R.id.adBlockUpdateInfo).setOnClickListener {
-            showTip(it, getString(R.string.ad_block_note))
-        }
 
-        findViewById<View>(R.id.pasteListBtn).setOnClickListener { pasteList() }
-        findViewById<View>(R.id.copyListBtn).setOnClickListener { copyList() }
-        updateButton.setOnClickListener { updateBlockLists() }
-        findViewById<View>(R.id.saveAdBlock).setOnClickListener {
-            saveCurrentTab()
-            Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show()
-            finish()
-        }
+        Xfer.bindModeSeg(findViewById(R.id.xferModeSeg), settings)
+        findViewById<View>(R.id.abExportBtn).setOnClickListener { onExport() }
+        findViewById<View>(R.id.abImportBtn).setOnClickListener { onImport() }
+        saveButton.setOnClickListener { onSave() }
     }
 
     override fun onPause() {
         super.onPause()
-        saveCurrentTab()
+        storeLists()
     }
 
     private fun switchTab(block: Boolean) {
-        saveCurrentTab()
+        takeField()
         onBlockTab = block
-        tabBlockBtn.setBackgroundResource(if (block) R.drawable.bg_button_primary else R.drawable.bg_button)
-        tabAllowBtn.setBackgroundResource(if (block) R.drawable.bg_button else R.drawable.bg_button_primary)
-        // Цвет фона один поверх другого мог быть недостаточно заметен —
-        // жирный белый текст на активной вкладке убирает всякую путаницу,
-        // какой список сейчас открыт.
-        tabBlockBtn.setTextColor(tc(if (block) android.R.color.white else R.color.text))
-        tabBlockBtn.setTypeface(null, if (block) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
-        tabAllowBtn.setTextColor(tc(if (block) R.color.text else android.R.color.white))
-        tabAllowBtn.setTypeface(null, if (block) android.graphics.Typeface.NORMAL else android.graphics.Typeface.BOLD)
-        if (block) {
-            tabLabel.setText(R.string.ad_block_sources)
-            listEdit.hint = getString(R.string.ad_block_sources_hint)
-            listEdit.setText(settings.adBlockSources)
-        } else {
-            tabLabel.setText(R.string.ad_block_allowlist)
-            listEdit.hint = getString(R.string.ad_block_allowlist_hint)
-            listEdit.setText(settings.adBlockAllowlist)
+        for (k in 0 until tabs.childCount) {
+            val c = tabs.getChildAt(k)
+            c.setBackgroundResource(if ((c.tag == "block") == block) R.drawable.bg_seg_on else 0)
         }
+        tabLabel.setText(if (block) R.string.ad_block_sources else R.string.ad_block_allowlist)
+        listEdit.hint = getString(if (block) R.string.ad_block_sources_hint else R.string.ad_block_allowlist_hint)
+        listEdit.setText(if (block) sources else allowlist)
     }
 
-    private fun saveCurrentTab() {
+    /** Переносит текст поля в список открытой вкладки. */
+    private fun takeField() {
+        if (!::listEdit.isInitialized) return
         val text = listEdit.text.toString()
-        if (onBlockTab) settings.adBlockSources = text else settings.adBlockAllowlist = text
+        if (onBlockTab) sources = text else allowlist = text
     }
 
-    private fun pasteList() {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-        val text = cm?.primaryClip?.takeIf { it.itemCount > 0 }
-            ?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
-        if (text.isBlank()) {
-            Toast.makeText(this, R.string.paste_failed, Toast.LENGTH_SHORT).show()
-            return
-        }
-        listEdit.setText(text)
-    }
-
-    private fun copyList() {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-        cm?.setPrimaryClip(ClipData.newPlainText(getString(R.string.ad_block_title), listEdit.text.toString()))
-        Toast.makeText(this, R.string.adblock_copied, Toast.LENGTH_SHORT).show()
+    private fun storeLists() {
+        takeField()
+        settings.adBlockSources = sources.trim()
+        settings.adBlockAllowlist = allowlist.trim()
     }
 
     /**
-     * Загружает списки блокировки по нажатию кнопки — не сама по себе, не по
-     * расписанию. Сеть небыстрая, поэтому в отдельном потоке; результат
-     * (сколько имён загружено, или ошибка) сохраняется на телефон самим ядром
-     * и тут же показывается человеку. Работает только для чёрного списка —
-     * источники ссылок есть только у него, белый список — просто текст.
+     * «Сохранить»: списки — в настройки, и сразу скачать блокировку по
+     * ссылкам из чёрного списка. Сеть небыстрая, поэтому в отдельном потоке;
+     * пока идёт загрузка, кнопка недоступна. Не скачалось — экран остаётся
+     * открытым с причиной, сами списки при этом уже сохранены.
      */
-    private fun updateBlockLists() {
-        if (!onBlockTab) switchTab(true)
-        val sources = listEdit.text.toString()
-        if (sources.isBlank()) {
-            statusView.text = ""
-            Toast.makeText(this, R.string.ad_block_sources_hint, Toast.LENGTH_SHORT).show()
+    private fun onSave() {
+        storeLists()
+        val src = settings.adBlockSources
+        if (src.isBlank()) {
+            Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show()
+            finish()
             return
         }
-        settings.adBlockSources = sources
-        updateButton.isEnabled = false
+        saveButton.isEnabled = false
         statusView.setText(R.string.ad_block_updating)
         Thread {
             val result = try {
-                Mobile.updateBlockLists(sources, settings.adBlockListFile.absolutePath)
+                Mobile.updateBlockLists(src, settings.adBlockListFile.absolutePath)
             } catch (e: Exception) {
-                """{"error":"${e.message}"}"""
+                JSONObject().put("error", e.message ?: "").toString()
             }
             runOnUiThread {
-                updateButton.isEnabled = true
+                saveButton.isEnabled = true
                 val o = try { JSONObject(result) } catch (e: Exception) { JSONObject() }
                 val err = o.optString("error")
-                statusView.text = if (err.isNotBlank()) {
-                    getString(R.string.ad_block_update_failed, err)
+                if (err.isNotBlank()) {
+                    statusView.text = getString(R.string.ad_block_update_failed, err)
                 } else {
-                    getString(R.string.ad_block_updated, o.optInt("count"))
+                    Toast.makeText(
+                        this, getString(R.string.saved) + " · " + getString(R.string.ad_block_updated, o.optInt("count")),
+                        Toast.LENGTH_LONG
+                    ).show()
+                    finish()
                 }
             }
         }.start()
+    }
+
+    /** {"sshTunnelAdBlock":1,"sources":"…","allowlist":"…"} — оба списка разом. */
+    private fun exportText(): String {
+        takeField()
+        return JSONObject()
+            .put("sshTunnelAdBlock", 1)
+            .put("sources", sources.trim())
+            .put("allowlist", allowlist.trim())
+            .toString(2)
+    }
+
+    private fun onExport() {
+        if (Xfer.toFile(settings)) {
+            saveFile.launch("ssh_tunnel-adblock.json")
+            return
+        }
+        Xfer.copy(this, getString(R.string.ad_block_title), exportText())
+        statusView.setText(R.string.copied)
+    }
+
+    private fun onImport() {
+        if (Xfer.toFile(settings)) {
+            openFile.launch(arrayOf("application/json", "text/plain", "*/*"))
+            return
+        }
+        importText(Xfer.paste(this))
+    }
+
+    /** Свой JSON — в обе вкладки; просто текст — в ту, что открыта. */
+    private fun importText(text: String) {
+        if (text.isBlank()) {
+            statusView.setText(R.string.paste_failed)
+            return
+        }
+        val o = try { JSONObject(text.trim()) } catch (e: Exception) { null }
+        if (o != null && o.has("sshTunnelAdBlock")) {
+            sources = o.optString("sources")
+            allowlist = o.optString("allowlist")
+            listEdit.setText(if (onBlockTab) sources else allowlist)
+        } else {
+            listEdit.setText(text.trim())
+            takeField()
+        }
+        statusView.setText(R.string.ad_block_imported)
     }
 
     private fun showTip(anchor: View, text: String) {

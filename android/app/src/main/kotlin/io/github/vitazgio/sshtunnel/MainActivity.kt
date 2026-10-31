@@ -50,6 +50,7 @@ class MainActivity : AppCompatActivity() {
         const val SERVERS = 4
         const val APP = 5
         const val KEY_PAGE = "page"
+        const val KEY_GROUPS = "groups"
         const val KEY_SCROLL = "scroll"
     }
 
@@ -396,6 +397,16 @@ class MainActivity : AppCompatActivity() {
             flipper.inAnimation = null
             flipper.outAnimation = null
             flipper.displayedChild = page
+            // Раскрытые группы настроек остаются раскрытыми: смена темы
+            // пересоздаёт экран, и сворачивать всё было бы неудобно.
+            savedInstanceState.getBooleanArray(KEY_GROUPS)?.let { open ->
+                for ((i, g) in groups.withIndex()) {
+                    if (open.getOrElse(i) { false }) {
+                        findViewById<View>(g.second).visibility = View.VISIBLE
+                        findViewById<View>(g.third).rotation = 90f
+                    }
+                }
+            }
             flipper.inAnimation = inA
             flipper.outAnimation = outA
             val y = savedInstanceState.getInt(KEY_SCROLL, 0)
@@ -406,6 +417,8 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putInt(KEY_PAGE, flipper.displayedChild)
+        outState.putBooleanArray(KEY_GROUPS,
+            groups.map { findViewById<View>(it.second).visibility == View.VISIBLE }.toBooleanArray())
         outState.putInt(KEY_SCROLL, (flipper.currentView as? ScrollView)?.scrollY ?: 0)
     }
 

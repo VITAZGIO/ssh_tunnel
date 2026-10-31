@@ -24,7 +24,8 @@ class DomainsActivity : AppCompatActivity() {
     private lateinit var settings: Settings
     private lateinit var directEdit: EditText
     private lateinit var tunnelEdit: EditText
-    private lateinit var track: View
+    private lateinit var paneDirect: View
+    private lateinit var paneTunnel: View
     private lateinit var tabs: LinearLayout
     private lateinit var note: TextView
     private var onTunnel = false
@@ -61,25 +62,14 @@ class DomainsActivity : AppCompatActivity() {
 
         directEdit = findViewById(R.id.directEdit)
         tunnelEdit = findViewById(R.id.tunnelEdit)
-        track = findViewById(R.id.domTrack)
+        paneDirect = findViewById(R.id.paneDirect)
+        paneTunnel = findViewById(R.id.paneTunnel)
         tabs = findViewById(R.id.domTabs)
         note = findViewById(R.id.domNote)
 
         directEdit.setText(settings.directHosts)
         tunnelEdit.setText(settings.tunnelHosts)
 
-        // Каждая панель — ровно в ширину видимой области: лента вдвое шире.
-        val viewport = findViewById<View>(R.id.domViewport)
-        viewport.addOnLayoutChangeListener { _, l, _, r, _, _, _, _, _ ->
-            val w = r - l
-            for (id in listOf(R.id.paneDirect, R.id.paneTunnel)) {
-                val pane = findViewById<View>(id)
-                if (w > 0 && pane.layoutParams.width != w) {
-                    pane.layoutParams = pane.layoutParams.also { it.width = w }
-                    track.translationX = if (onTunnel) -w.toFloat() else 0f
-                }
-            }
-        }
         for (k in 0 until tabs.childCount) {
             val c = tabs.getChildAt(k)
             c.setOnClickListener { setTab(c.tag == "tunnel", true) }
@@ -110,11 +100,25 @@ class DomainsActivity : AppCompatActivity() {
             val c = tabs.getChildAt(k)
             c.setBackgroundResource(if ((c.tag == "tunnel") == tunnel) R.drawable.bg_seg_on else 0)
         }
+        val show = if (tunnel) paneTunnel else paneDirect
+        val hide = if (tunnel) paneDirect else paneTunnel
         val w = findViewById<View>(R.id.domViewport).width.toFloat()
-        val x = if (tunnel) -w else 0f
-        if (animate) track.animate().translationX(x).setDuration(300).start() else track.translationX = x
         // Фокус не остаётся в уехавшем за край поле.
         if (directEdit.hasFocus() || tunnelEdit.hasFocus()) (if (tunnel) tunnelEdit else directEdit).requestFocus()
+        if (!animate || w <= 0f || show.visibility == View.VISIBLE) {
+            show.animate().cancel(); hide.animate().cancel()
+            show.translationX = 0f
+            show.visibility = View.VISIBLE
+            hide.visibility = View.INVISIBLE
+            return
+        }
+        // «В туннель» справа от «напрямую»: уезжает влево, приезжает справа.
+        val dir = if (tunnel) 1f else -1f
+        show.translationX = dir * w
+        show.visibility = View.VISIBLE
+        show.animate().translationX(0f).setDuration(300).start()
+        hide.animate().translationX(-dir * w).setDuration(300)
+            .withEndAction { hide.visibility = View.INVISIBLE; hide.translationX = 0f }.start()
     }
 
     /** Списки общие для всех серверов — как и на компьютере. */

@@ -41,21 +41,17 @@
                 <TextView style="@style/SegItem" android:tag="tunnel" android:text="@string/tunnel_label" />
             </LinearLayout>
 
-            <!-- Лента шириной в два экрана: видна половина. -->
+            <!-- Обе панели лежат друг на друге; при переключении одна уезжает
+                 вбок, другая въезжает с противоположной стороны. -->
             <FrameLayout
                 android:id="@+id/domViewport"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:clipChildren="true">
-                <LinearLayout
-                    android:id="@+id/domTrack"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
 
                     <LinearLayout
                         android:id="@+id/paneDirect"
-                        android:layout_width="300dp"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical">
                         <LinearLayout
@@ -96,7 +92,7 @@
 
                     <LinearLayout
                         android:id="@+id/paneTunnel"
-                        android:layout_width="300dp"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical">
                         <LinearLayout
@@ -134,7 +130,6 @@
                             android:textColorHint="?attr/c_dim"
                             android:autofillHints="" />
                     </LinearLayout>
-                </LinearLayout>
             </FrameLayout>
 
             <LinearLayout

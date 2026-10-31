@@ -110,7 +110,7 @@
     <string name="ad_block_enabled">Block ads and tracking</string>
     <string name="ad_block_sources">Block lists</string>
     <string name="ad_block_sources_hint">an https://… link or a file path, one per line</string>
-    <string name="ad_block_sources_note">Both the hosts format and \"one name per line\" are understood as-is, and they can be mixed. There are no built-in lists: only what you add here is used.</string>
+    <string name="ad_block_sources_note">Both the hosts format and \"one name per line\" are understood as-is, and they can be mixed. There are no built-in lists: only what you add here is used. Lists are downloaded on Save and then work offline; a new list applies on the next connection.</string>
     <string name="ad_block_allowlist">Never block</string>
     <string name="ad_block_allowlist_hint">your own exceptions, comma-separated or one per line</string>
     <string name="ad_block_note">Lists are downloaded and stored on the phone only by this button — they never update on their own. An updated list takes effect on the next connection.</string>
@@ -311,4 +311,5 @@
     <string name="mesh_btn_off">Device network: off</string>
     <string name="state_mesh_only">Device network only</string>
     <string name="bundle_saved">settings saved to a file, %1$d server(s); open it on the other device</string>
+    <string name="ad_block_imported">Lists loaded — tap Save</string>
 </resources>
