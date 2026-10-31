@@ -814,8 +814,10 @@
           <div class="kv"><span class="k" data-i18n="status_label">Статус</span><span class="v" id="meshSvcState">—</span></div>
           <div class="kv"><span class="k" data-i18n="mesh_version">Версия meshd</span><span class="v" id="meshSvcVersion">—</span></div>
           <div class="kv"><span class="k" data-i18n="mesh_since">Работает с</span><span class="v" id="meshSvcSince">—</span></div>
+          <div class="kv"><span class="k" data-i18n="udprelay_label">Ретранслятор UDP</span><span class="v" id="udpRelayState">—</span></div>
           <div class="row-inline" style="margin-top:12px">
             <button class="btn ghost" id="meshReinstallBtn" data-i18n="mesh_reinstall">Обновить meshd</button>
+            <button class="btn ghost" id="udpRelayBtn" data-i18n="udprelay_install">Поставить ретранслятор UDP</button>
             <button class="btn danger" id="meshOffBtn" data-i18n="mesh_off">Выключить сеть на сервере</button>
           </div>
         </div>
@@ -1180,7 +1182,9 @@ const I18N = {
       'устройства этого сервера пропадут из сети, пока его не подключат снова.',
     srv_main:'главный', srv_waiting:'ждёт подключения', srv_self_joined:'подключился сам',
     mesh_service_title:'Служба сети', mesh_version:'Версия meshd', mesh_since:'Работает с',
-    mesh_reinstall:'Обновить meshd', mesh_off:'Выключить сеть на сервере',
+    mesh_reinstall:'Обновить meshd', udprelay_label:'Ретранслятор UDP', udprelay_install:'Поставить ретранслятор UDP',
+    udprelay_update:'Обновить ретранслятор UDP', udprelay_none:'не установлен', job_udprelay:'Ставлю ретранслятор UDP',
+    mesh_off:'Выключить сеть на сервере',
     confirm_mesh_off:'Выключить сеть устройств на этом сервере? Устройства перестанут видеть друг друга '+
       'через него. Их адреса и имена сохранятся — включишь снова, всё вернётся.',
     confirm_off_yes:'Выключить',
@@ -1430,7 +1434,9 @@ const I18N = {
       'devices leave the network until it is connected again.',
     srv_main:'main', srv_waiting:'waiting to connect', srv_self_joined:'joined by itself',
     mesh_service_title:'Network service', mesh_version:'meshd version', mesh_since:'Running since',
-    mesh_reinstall:'Update meshd', mesh_off:'Turn off the network on this server',
+    mesh_reinstall:'Update meshd', udprelay_label:'UDP relay', udprelay_install:'Install UDP relay',
+    udprelay_update:'Update UDP relay', udprelay_none:'not installed', job_udprelay:'Installing the UDP relay',
+    mesh_off:'Turn off the network on this server',
     confirm_mesh_off:'Turn off the device network on this server? Devices will stop seeing each other '+
       'through it. Their addresses and names are kept — turn it back on and everything returns.',
     confirm_off_yes:'Turn off',
@@ -2479,7 +2485,7 @@ function renderJob(job){
   title.innerHTML = '';
   if (job.running){
     title.appendChild(el('span', 'spin'));
-    title.appendChild(document.createTextNode(t('job_install')));
+    title.appendChild(document.createTextNode(t(job.kind === 'udprelay' ? 'job_udprelay' : 'job_install')));
   } else {
     title.textContent = job.error ? t('job_failed') + ': ' + job.error : t('job_done');
   }
@@ -2545,6 +2551,14 @@ function renderMeshMain(){
   $('meshSvcVersion').textContent = m.version || '—';
   $('meshSvcSince').textContent = m.startedAt ? fmtClock(m.startedAt) : '—';
   $('meshReinstallBtn').disabled = !!(m.job && m.job.running);
+  // Ретранслятор UDP: без него у клиентов с «Пробрасывать UDP» не работают
+  // звонки, игры и QUIC (видео YouTube подолгу стоит).
+  const relay = m.udprelay || {};
+  $('udpRelayState').innerHTML = '';
+  $('udpRelayState').appendChild(el('span', 'badge ' + (relay.active ? 'ok' : 'warn'),
+    relay.installed ? svcText(relay) : t('udprelay_none')));
+  $('udpRelayBtn').textContent = t(relay.installed ? 'udprelay_update' : 'udprelay_install');
+  $('udpRelayBtn').disabled = !!(m.job && m.job.running);
 }
 
 /* ---------- схема сети ---------- */
@@ -3656,6 +3670,11 @@ $('meshCodeClose').addEventListener('click', () => {
   $('meshAddLinkBtn').hidden = false;
   MESH_CODE = '';
   $('meshCode').textContent = '';
+});
+$('udpRelayBtn').addEventListener('click', async () => {
+  const {ok, data} = await api('/api/udprelay/install', {});
+  if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+  loadMesh();
 });
 $('meshReinstallBtn').addEventListener('click', async () => {
   const {ok, data} = await api('/api/mesh/reinstall', {});

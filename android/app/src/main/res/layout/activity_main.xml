@@ -700,20 +700,11 @@
                     android:layout_marginBottom="8dp"
                     android:orientation="horizontal"
                     android:gravity="center_vertical">
-                    <TextView style="@style/SectTitle" android:layout_marginTop="0dp" android:text="@string/xfer_title" />
+                    <TextView style="@style/SectTitle" android:layout_marginTop="0dp" android:layout_marginBottom="0dp" android:text="@string/xfer_title" />
                     <TextView
+                        style="@style/InfoQ"
                         android:id="@+id/xferInfo"
-                        android:layout_width="16dp"
-                        android:layout_height="16dp"
-                        android:layout_marginStart="6dp"
-                        android:background="@drawable/bg_infoq"
-                        android:gravity="center"
-                        android:textSize="9sp"
-                        android:textStyle="bold"
-                        android:textColor="?attr/c_dim"
-                        android:text="?"
-                        android:clickable="true"
-                        android:focusable="true" />
+                        android:layout_marginStart="6dp" />
                     <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
                     <!-- Куда переносить: буфер обмена или файл. Выбор запоминается. -->
                     <LinearLayout
@@ -915,17 +906,8 @@
                                     android:layout_width="0dp" android:layout_weight="1"
                                     android:text="@string/pool_hint" />
                                 <TextView
-                                    android:id="@+id/poolInfo"
-                                    android:layout_width="16dp"
-                                    android:layout_height="16dp"
-                                    android:background="@drawable/bg_infoq"
-                                    android:gravity="center"
-                                    android:textSize="9sp"
-                                    android:textStyle="bold"
-                                    android:textColor="?attr/c_dim"
-                                    android:text="?"
-                                    android:clickable="true"
-                                    android:focusable="true" />
+                                    style="@style/InfoQ"
+                                    android:id="@+id/poolInfo" />
                             </LinearLayout>
                             <EditText android:id="@+id/pool" style="@style/Field"
                                 android:inputType="number" android:autofillHints="" />
@@ -1267,18 +1249,9 @@
                         android:textColor="?attr/c_text"
                         android:text="@string/start_mode" />
                     <TextView
+                        style="@style/InfoQ"
                         android:id="@+id/startModeInfo"
-                        android:layout_width="16dp"
-                        android:layout_height="16dp"
-                        android:layout_marginStart="6dp"
-                        android:background="@drawable/bg_infoq"
-                        android:gravity="center"
-                        android:textSize="9sp"
-                        android:textStyle="bold"
-                        android:textColor="?attr/c_dim"
-                        android:text="?"
-                        android:clickable="true"
-                        android:focusable="true" />
+                        android:layout_marginStart="6dp" />
                 </LinearLayout>
                 <LinearLayout
                     android:id="@+id/startModeSeg"
@@ -1306,18 +1279,9 @@
                         android:textColor="?attr/c_text"
                         android:text="@string/mesh_start_mode" />
                     <TextView
+                        style="@style/InfoQ"
                         android:id="@+id/meshStartInfo"
-                        android:layout_width="16dp"
-                        android:layout_height="16dp"
-                        android:layout_marginStart="6dp"
-                        android:background="@drawable/bg_infoq"
-                        android:gravity="center"
-                        android:textSize="9sp"
-                        android:textStyle="bold"
-                        android:textColor="?attr/c_dim"
-                        android:text="?"
-                        android:clickable="true"
-                        android:focusable="true" />
+                        android:layout_marginStart="6dp" />
                 </LinearLayout>
                 <LinearLayout
                     android:id="@+id/meshStartSeg"
@@ -1344,17 +1308,8 @@
                             android:textColor="?attr/c_dim"
                             android:text="@string/always_on_label" />
                         <TextView
-                            android:id="@+id/alwaysOnInfo"
-                            android:layout_width="16dp"
-                            android:layout_height="16dp"
-                            android:background="@drawable/bg_infoq"
-                            android:gravity="center"
-                            android:textSize="9sp"
-                            android:textStyle="bold"
-                            android:textColor="?attr/c_dim"
-                            android:text="?"
-                            android:clickable="true"
-                            android:focusable="true" />
+                            style="@style/InfoQ"
+                            android:id="@+id/alwaysOnInfo" />
                     </LinearLayout>
 
                 </LinearLayout>
@@ -1400,17 +1355,8 @@
                             android:text="@string/local_via_tunnel" />
 
                         <TextView
-                            android:id="@+id/localViaTunnelInfo"
-                            android:layout_width="16dp"
-                            android:layout_height="16dp"
-                            android:background="@drawable/bg_infoq"
-                            android:gravity="center"
-                            android:textSize="9sp"
-                            android:textStyle="bold"
-                            android:textColor="?attr/c_dim"
-                            android:text="?"
-                            android:clickable="true"
-                            android:focusable="true" />
+                            style="@style/InfoQ"
+                            android:id="@+id/localViaTunnelInfo" />
                     </LinearLayout>
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -1424,17 +1370,8 @@
                             android:textColor="?attr/c_text"
                             android:text="@string/udp_relay_enabled" />
                         <TextView
-                            android:id="@+id/udpRelayInfo"
-                            android:layout_width="16dp"
-                            android:layout_height="16dp"
-                            android:background="@drawable/bg_infoq"
-                            android:gravity="center"
-                            android:textSize="9sp"
-                            android:textStyle="bold"
-                            android:textColor="?attr/c_dim"
-                            android:text="?"
-                            android:clickable="true"
-                            android:focusable="true" />
+                            style="@style/InfoQ"
+                            android:id="@+id/udpRelayInfo" />
                     </LinearLayout>
                     <CheckBox
                         android:id="@+id/showServerPicker"
