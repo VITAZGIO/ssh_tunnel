@@ -323,4 +323,9 @@
     <string name="update_dl_failed">скачать не вышло (код %1$d) — открой страницу релиза</string>
     <string name="update_release_btn">Открыть страницу релиза</string>
     <string name="mb">%1$.1f МБ</string>
+    <string name="app_profiles_on">Профили приложения</string>
+    <string name="app_profiles_note">Несколько полных наборов настроек — серверы, приложения, галочки. Вверху настроек появится полоска «Профиль 1 +»: плюс создаёт новый профиль с нуля, нажатие переключает, крестик у выбранного удаляет. Удобно настроить профиль для другого человека и отдать ему через «Перенос настроек».</string>
+    <string name="app_profile">Профиль %1$d</string>
+    <string name="app_profile_del">Удалить «%1$s» со всеми его настройками и серверами?</string>
+    <string name="app_profile_del_yes">Удалить</string>
 </resources>

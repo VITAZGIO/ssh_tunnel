@@ -640,6 +640,23 @@
                     </LinearLayout>
                 </LinearLayout>
 
+                <!-- Профили приложения: «Профиль 1, 2 … +» (AppProfiles.kt).
+                     Видна, только если стоит галочка «Профили приложения». -->
+                <HorizontalScrollView
+                    android:id="@+id/appProfilesScroll"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="10dp"
+                    android:scrollbars="none"
+                    android:visibility="gone">
+                    <LinearLayout
+                        android:id="@+id/appProfilesBar"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical" />
+                </HorizontalScrollView>
+
                 <View style="@style/Hairline" />
                 <LinearLayout
                     android:id="@+id/toServers"
@@ -1380,6 +1397,21 @@
                         android:layout_marginTop="4dp"
                         android:textColor="?attr/c_text"
                         android:text="@string/show_picker" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical">
+                        <CheckBox
+                            android:id="@+id/appProfilesOn"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:textColor="?attr/c_text"
+                            android:text="@string/app_profiles_on" />
+                        <TextView
+                            style="@style/InfoQ"
+                            android:id="@+id/appProfilesInfo" />
+                    </LinearLayout>
                 </LinearLayout>
                 <View style="@style/Hairline" />
 
