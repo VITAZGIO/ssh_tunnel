@@ -51,6 +51,9 @@ import (
 const defaultListen = "127.0.0.1:47823"
 
 func main() {
+	// Своё имя файла в релизе (ssh_tunnel_panel): по нему проверка и
+	// обновление из настроек ищут, что качать.
+	updater.Panel = true
 	listen := flag.String("listen", defaultListen, "адрес, который слушает панель")
 	domain := flag.String("domain", "", "домен панели — включает встроенный автосертификат "+
 		"Let's Encrypt и HTTPS на :443/:80; без флага панель отдаёт обычный HTTP и ждёт "+
@@ -136,7 +139,8 @@ func main() {
 		WithClientDefaults(effectiveSSHHost, *sshPort, effectivePublicURL).
 		WithHistory(history).
 		WithSettings(settings).
-		WithMesh(mesh)
+		WithMesh(mesh).
+		WithDataDir(*dataDir)
 	handler := srv.Handler()
 	go srv.SyncAccess()
 	if *selfAddr != "" {
