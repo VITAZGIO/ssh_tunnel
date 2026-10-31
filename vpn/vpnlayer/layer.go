@@ -45,9 +45,10 @@ type Layer struct {
 	// block — блокировка рекламы (см. adblock.go). Один и тот же объект на
 	// всё время жизни: настройки меняют его содержимое, а не указатель.
 	block *core.BlockList
-	// stats — счётчики стека поднятого адаптера (под mu); из них берётся
-	// число заблокированных имён.
-	stats *core.Stats
+	// stats — счётчики стека поднятого адаптера; из них берётся число
+	// заблокированных имён. Атомарно, без mu: запрос состояния не должен
+	// ждать, пока адаптер поднимается или снимается.
+	stats atomic.Pointer[core.Stats]
 }
 
 // SetBypass переключает «весь трафик» и «только сеть устройств» (реализует
@@ -190,7 +191,7 @@ func (l *Layer) startStack(dev core.Device) error {
 		return err
 	}
 	stats := &core.Stats{}
-	l.stats = stats // startStack зовётся под l.mu (bringUp)
+	l.stats.Store(stats)
 	resolver := l.resolver()
 
 	dns := &core.DNS{

@@ -79,8 +79,25 @@ func (a *App) connectFrom(cfg config.Config, candidates []config.Profile, idx in
 	for i := idx; i < len(candidates); i++ {
 		p := candidates[i]
 		tun, socksAddr, httpAddr := a.buildTunnel(cfg, p)
-		err := tun.Start()
+		ctx, cancel := context.WithCancel(context.Background())
+		a.mu.Lock()
+		if a.gen != gen {
+			a.mu.Unlock()
+			cancel()
+			return errNotConnected
+		}
+		a.connectCancel = cancel
+		a.mu.Unlock()
+		err := tun.StartContext(ctx)
 		if err != nil {
+			cancel()
+			a.mu.Lock()
+			stopped := a.gen != gen
+			a.mu.Unlock()
+			if stopped {
+				// Нажали «Отключить» — запасные серверы не пробуем.
+				return errNotConnected
+			}
 			lastErr = err
 			if tunnel.IsAuthError(err) {
 				break
@@ -117,6 +134,9 @@ func (a *App) connectFrom(cfg config.Config, candidates []config.Profile, idx in
 		}
 		a.tun = tun
 		a.running = true
+		// Туннель поднят: отменять его контекст больше нельзя, остановка —
+		// уже обычным tun.Stop.
+		a.connectCancel = nil
 		a.proxyURL = "http://" + httpAddr
 		if netLayer != nil {
 			a.proxyURL = "" // локального прокси в режиме VPN нет

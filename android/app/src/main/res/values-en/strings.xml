@@ -110,7 +110,7 @@
     <string name="ad_block_enabled">Block ads and tracking</string>
     <string name="ad_block_sources">Block lists</string>
     <string name="ad_block_sources_hint">an https://… link or a file path, one per line</string>
-    <string name="ad_block_sources_note">Both the hosts format and \"one name per line\" are understood as-is, and they can be mixed. There are no built-in lists: only what you add here is used.</string>
+    <string name="ad_block_sources_note">Both the hosts format and \"one name per line\" are understood as-is, and they can be mixed. There are no built-in lists: only what you add here is used. Lists are downloaded on Save and then work offline; a new list applies on the next connection.</string>
     <string name="ad_block_allowlist">Never block</string>
     <string name="ad_block_allowlist_hint">your own exceptions, comma-separated or one per line</string>
     <string name="ad_block_note">Lists are downloaded and stored on the phone only by this button — they never update on their own. An updated list takes effect on the next connection.</string>
@@ -186,7 +186,7 @@
     <string name="update_failed">could not reach GitHub — check your connection</string>
     <string name="update_rate_limited">GitHub is rate-limiting requests, try again later</string>
     <string name="update_download">Download APK to Downloads</string>
-    <string name="update_downloading">downloading the APK to Downloads — open it from the notification and install</string>
+    <string name="update_downloading">downloading…</string>
     <string name="update_open_release">opening the release page — grab the APK there</string>
 
     <string name="author_label">Author</string>
@@ -311,4 +311,14 @@
     <string name="mesh_btn_off">Device network: off</string>
     <string name="state_mesh_only">Device network only</string>
     <string name="bundle_saved">settings saved to a file, %1$d server(s); open it on the other device</string>
+    <string name="ad_block_imported">Lists loaded — tap Save</string>
+    <string name="update_queued">waiting in the download queue…</string>
+    <string name="update_waiting">download paused — waiting for network</string>
+    <string name="update_progress">downloaded %1$s of %2$s</string>
+    <string name="update_progress_unknown">downloaded %1$s</string>
+    <string name="update_done">downloaded — tap Install</string>
+    <string name="update_install">Install</string>
+    <string name="update_dl_failed">download failed (code %1$d) — open the release page</string>
+    <string name="update_release_btn">Open release page</string>
+    <string name="mb">%1$.1f MB</string>
 </resources>

@@ -189,3 +189,49 @@ func TestRememberRunningKeepsBothModes(t *testing.T) {
 		t.Fatal("«как при закрытии» не повторяет запомненное")
 	}
 }
+
+// Сервер принял соединение и молчит (плохая сеть, фильтрация у провайдера):
+// «Отключить» во время подключения прерывает его сразу, а не после всех
+// повторов, и это не ошибка.
+func TestStopAbortsConnecting(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close() // держим открытым и молчим
+		}
+	}()
+	keyPath, _ := testKeyPath(t)
+	a := New(config.Config{Profiles: []config.Profile{profileAt(t, "main", ln.Addr().String(), keyPath)}})
+	t.Cleanup(a.Stop)
+
+	done := make(chan error, 1)
+	go func() { done <- a.Start() }()
+	time.Sleep(300 * time.Millisecond)
+	stopAt := time.Now()
+	a.Stop()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("прерванное подключение вернуло ошибку: %v", err)
+		}
+		if d := time.Since(stopAt); d > 3*time.Second {
+			t.Fatalf("Start вернулся через %v после «Отключить»", d)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("«Отключить» не прервало подключение")
+	}
+	if a.Running() {
+		t.Fatal("туннель остался включённым")
+	}
+	if st := a.State(); st != "stopped" {
+		t.Fatalf("состояние %q вместо stopped", st)
+	}
+}

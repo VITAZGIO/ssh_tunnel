@@ -20,6 +20,9 @@
     <!-- Только чтобы отсканировать QR с настройками — приложение не снимает
          фото и не пишет видео, само разрешение спрашивается по нажатию. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Скачанное обновление открывается сразу в установщике: без этого
+         разрешения Android даже не предложит разрешить установку. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application

@@ -42,40 +42,25 @@
                 android:textSize="12.5sp"
                 android:textColor="?attr/c_dim" />
 
-            <!-- Две вкладки, как у экрана приложений: список блокировки
-                 отдельно от списка исключений — оба применяются одновременно. -->
+            <!-- Две вкладки, как в «Исключениях доменов»: список блокировки и
+                 список исключений — оба применяются одновременно. -->
             <LinearLayout
+                android:id="@+id/abTabs"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="42dp"
                 android:layout_marginTop="8dp"
-                android:orientation="horizontal">
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/tabBlockBtn"
-                    style="@style/SecondaryButton"
-                    android:layout_width="0dp"
-                    android:layout_weight="1"
-                    android:layout_height="wrap_content"
-                    android:textSize="12.5sp"
-                    android:paddingTop="9dp"
-                    android:paddingBottom="9dp"
-                    android:text="@string/ad_block_tab_block" />
-                <Space android:layout_width="8dp" android:layout_height="1dp" />
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/tabAllowBtn"
-                    style="@style/SecondaryButton"
-                    android:layout_width="0dp"
-                    android:layout_weight="1"
-                    android:layout_height="wrap_content"
-                    android:textSize="12.5sp"
-                    android:paddingTop="9dp"
-                    android:paddingBottom="9dp"
-                    android:text="@string/ad_block_tab_allow" />
+                android:orientation="horizontal"
+                android:background="@drawable/bg_outline"
+                android:showDividers="middle"
+                android:divider="@drawable/bg_seg_div">
+                <TextView style="@style/SegItem" android:tag="block" android:text="@string/ad_block_tab_block" />
+                <TextView style="@style/SegItem" android:tag="allow" android:text="@string/ad_block_tab_allow" />
             </LinearLayout>
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="12dp"
                 android:gravity="center_vertical">
                 <TextView
                     android:id="@+id/tabLabel"
@@ -101,8 +86,8 @@
             <EditText
                 android:id="@+id/listEdit"
                 style="@style/Field"
-                android:inputType="textMultiLine"
-                android:minLines="6"
+                android:inputType="textMultiLine|textNoSuggestions"
+                android:minLines="7"
                 android:gravity="top"
                 android:textColorHint="?attr/c_dim"
                 android:autofillHints="" />
@@ -110,57 +95,29 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal">
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/pasteListBtn"
-                    style="@style/SecondaryButton"
-                    android:layout_width="0dp"
-                    android:layout_weight="1"
-                    android:layout_height="wrap_content"
-                    android:textSize="12sp"
-                    android:paddingTop="9dp"
-                    android:paddingBottom="9dp"
-                    android:text="@string/adblock_paste" />
-                <Space android:layout_width="6dp" android:layout_height="1dp" />
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/copyListBtn"
-                    style="@style/SecondaryButton"
-                    android:layout_width="0dp"
-                    android:layout_weight="1"
-                    android:layout_height="wrap_content"
-                    android:textSize="12sp"
-                    android:paddingTop="9dp"
-                    android:paddingBottom="9dp"
-                    android:text="@string/adblock_copy" />
+                android:layout_marginTop="18dp"
+                android:layout_marginBottom="8dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+                <TextView style="@style/SectTitle" android:layout_marginTop="0dp"
+                    android:layout_marginBottom="0dp" android:text="@string/domains_xfer" />
+                <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+                <LinearLayout
+                    android:id="@+id/xferModeSeg"
+                    style="@style/XferSeg">
+                    <TextView style="@style/XferSegItem" android:tag="clip" android:text="@string/xfer_clip" />
+                    <TextView style="@style/XferSegItem" android:tag="file" android:text="@string/xfer_file" />
+                </LinearLayout>
             </LinearLayout>
-
-            <!-- «Обновить список» — во всю ширину, как «Сохранить»: в
-                 короткую кнопку подпись не влезала. -->
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/adBlockUpdate"
-                    style="@style/PrimaryButton"
-                    android:layout_width="0dp"
-                    android:layout_weight="1"
-                    android:text="@string/ad_block_update" />
-                <TextView
-                    android:id="@+id/adBlockUpdateInfo"
-                    android:layout_width="16dp"
-                    android:layout_height="16dp"
-                    android:layout_marginStart="10dp"
-                    android:background="@drawable/bg_infoq"
-                    android:gravity="center"
-                    android:textSize="9sp"
-                    android:textStyle="bold"
-                    android:textColor="?attr/c_dim"
-                    android:text="?"
-                    android:clickable="true"
-                    android:focusable="true" />
+                android:layout_height="42dp"
+                android:orientation="horizontal"
+                android:background="@drawable/bg_outline"
+                android:showDividers="middle"
+                android:divider="@drawable/bg_seg_div">
+                <TextView android:id="@+id/abImportBtn" style="@style/SegItem" android:text="@string/import_short" />
+                <TextView android:id="@+id/abExportBtn" style="@style/SegItem" android:text="@string/export_short" />
             </LinearLayout>
             <TextView
                 android:id="@+id/adBlockStatus"
@@ -170,6 +127,8 @@
                 android:textSize="12.5sp"
                 android:textColor="?attr/c_dim" />
 
+            <!-- «Сохранить» и скачивает списки по ссылкам: отдельная кнопка
+                 «Обновить список» больше не нужна. -->
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/saveAdBlock"
                 style="@style/PrimaryButton"

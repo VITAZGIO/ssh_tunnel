@@ -90,6 +90,10 @@ type Tunnel struct {
 	// его было уже нечем. Поколение отвечает на вопрос «пока я подключался,
 	// меня не выключили?».
 	gen int64
+
+	// startCancel прерывает идущее подключение (StartCore ещё не вернулся):
+	// «Выключить» во время него срабатывает сразу, а не после всех повторов.
+	startCancel context.CancelFunc
 }
 
 // NewTunnel создаёт выключенный туннель.
@@ -285,11 +289,24 @@ func (t *Tunnel) StartCore() error {
 	go t.forwardEvents(ch, unsub, stop, cb)
 
 	tun := tunnel.New(cfg, bus)
+	ctx, cancel := context.WithCancel(context.Background())
 	t.mu.Lock()
 	tun.SetBypass(!t.bypassOff)
 	tun.SetMeshPaused(t.meshOff)
+	if t.gen != gen {
+		t.mu.Unlock()
+		cancel()
+		close(stop)
+		return fmt.Errorf("остановлено")
+	}
+	t.startCancel = cancel
 	t.mu.Unlock()
-	if err := tun.Start(); err != nil {
+	err := tun.StartContext(ctx)
+	t.mu.Lock()
+	t.startCancel = nil
+	t.mu.Unlock()
+	if err != nil {
+		cancel()
 		close(stop)
 		return err
 	}
@@ -595,6 +612,11 @@ func (t *Tunnel) Stop() {
 	tun, eng, stop := t.core, t.engine, t.stop
 	t.core, t.engine, t.bus, t.stop, t.stack = nil, nil, nil, nil, nil
 	t.gen++
+	if t.startCancel != nil {
+		// Подключение ещё идёт — обрываем его.
+		t.startCancel()
+		t.startCancel = nil
+	}
 	t.mu.Unlock()
 
 	if stop != nil {

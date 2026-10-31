@@ -306,6 +306,14 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putLong("adBlockTotal", v).apply()
 
     /**
+     * Скачивание обновления в менеджере загрузок, за которым следит экран
+     * (-1 — нет). Хранится, чтобы полоска прогресса пережила уход с экрана.
+     */
+    var updateDownloadId: Long
+        get() = prefs.getLong("updateDownloadId", -1)
+        set(v) = prefs.edit().putLong("updateDownloadId", v).apply()
+
+    /**
      * Файл со списком заблокированных имён, один на строку. Готовит его
      * UpdateBlockLists (ядро на Go) по нажатию кнопки «Обновить» — и он же
      * читается при каждом подключении, поэтому блокировка работает и без

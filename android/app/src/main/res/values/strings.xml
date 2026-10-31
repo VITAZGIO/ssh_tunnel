@@ -57,7 +57,7 @@
     <string name="ad_block_enabled">Блокировать рекламу и слежку</string>
     <string name="ad_block_sources">Списки блокировки</string>
     <string name="ad_block_sources_hint">ссылка https://… или путь к файлу, по одному в строке</string>
-    <string name="ad_block_sources_note">Форматы hosts и «одно имя в строке» — оба понимаются сразу, можно смешивать. Встроенных списков нет: работает только то, что добавлено здесь.</string>
+    <string name="ad_block_sources_note">Форматы hosts и «одно имя в строке» — оба понимаются сразу, можно смешивать. Встроенных списков нет: работает только то, что добавлено здесь. Списки скачиваются при «Сохранить» и дальше работают без сети; новый список применится при следующем подключении.</string>
     <string name="ad_block_allowlist">Никогда не блокировать</string>
     <string name="ad_block_allowlist_hint">свои исключения, через запятую или с новой строки</string>
     <string name="ad_block_update">Обновить список</string>
@@ -185,7 +185,7 @@
     <string name="update_failed">не получилось связаться с GitHub — проверь интернет</string>
     <string name="update_rate_limited">GitHub временно ограничил число запросов, попробуй позже</string>
     <string name="update_download">Скачать APK в «Загрузки»</string>
-    <string name="update_downloading">скачиваю APK в «Загрузки» — потом открой его из шторки и установи</string>
+    <string name="update_downloading">скачиваю…</string>
     <string name="update_open_release">открываю страницу релиза — скачай APK оттуда</string>
 
     <string name="author_label">Автор</string>
@@ -313,4 +313,14 @@
     <string name="mesh_btn_off">Сеть устройств: выкл</string>
     <string name="state_mesh_only">Только сеть устройств</string>
     <string name="bundle_saved">настройки сохранены в файл, серверов — %1$d; открой его на другом устройстве</string>
+    <string name="ad_block_imported">Списки загружены — нажми «Сохранить»</string>
+    <string name="update_queued">жду очереди загрузок…</string>
+    <string name="update_waiting">загрузка на паузе — жду сети</string>
+    <string name="update_progress">скачано %1$s из %2$s</string>
+    <string name="update_progress_unknown">скачано %1$s</string>
+    <string name="update_done">скачано — нажми «Установить»</string>
+    <string name="update_install">Установить</string>
+    <string name="update_dl_failed">скачать не вышло (код %1$d) — открой страницу релиза</string>
+    <string name="update_release_btn">Открыть страницу релиза</string>
+    <string name="mb">%1$.1f МБ</string>
 </resources>

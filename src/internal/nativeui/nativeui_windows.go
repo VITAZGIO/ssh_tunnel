@@ -20,7 +20,9 @@ package nativeui
 
 import (
 	"fmt"
+	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -82,6 +84,8 @@ var (
 	pGetDpiForWindow  = user32.NewProc("GetDpiForWindow")
 	pFindWindow       = user32.NewProc("FindWindowW")
 	pPostMessage      = user32.NewProc("PostMessageW")
+	pSendMsgTimeout   = user32.NewProc("SendMessageTimeoutW")
+	pGetWndThreadPid  = user32.NewProc("GetWindowThreadProcessId")
 	pRegisterWinMsg   = user32.NewProc("RegisterWindowMessageW")
 	pChangeMsgFilter  = user32.NewProc("ChangeWindowMessageFilterEx")
 	pSetTimer         = user32.NewProc("SetTimer")
@@ -216,6 +220,7 @@ type ui struct {
 	// при этом пропадают, и добавлять их надо заново.
 	taskbarCreated uintptr
 	hintShown      bool // подсказку «я в трее» показываем один раз за запуск
+	lastRunning    bool // последний ответ Running (см. running)
 }
 
 var active *ui // окно в программе одно, поэтому глобальная ссылка достаточна
@@ -224,13 +229,215 @@ var active *ui // окно в программе одно, поэтому гло
 // второй копии надо просто показать окно первой. Мьютекс намеренно не
 // освобождается — он живёт до конца процесса.
 func AlreadyRunning(title string) bool {
-	name, _ := windows.UTF16PtrFromString("Local\\ssh_tunnel_single_instance")
-	_, _, err := pCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(name)))
-	if errno, ok := err.(windows.Errno); ok && uintptr(errno) == errAlreadyExists {
-		showExistingWindow(title)
-		return true
+	switch CheckInstance(title) {
+	case InstanceNone:
+		return false
+	case InstanceStuck:
+		showStuckMessage()
 	}
-	return false
+	return true
+}
+
+// Что нашлось при запуске (см. CheckInstance).
+type Instance int
+
+const (
+	// InstanceNone — другой копии нет (или зависшая закрыта): работаем мы.
+	InstanceNone Instance = iota
+	// InstanceShown — другая копия жива, её окно показано.
+	InstanceShown
+	// InstanceStuck — другая копия зависла, а закрыть её не хватает прав
+	// (она запущена от администратора, а мы — нет).
+	InstanceStuck
+)
+
+// CheckInstance занимает место единственной копии программы. Если его
+// держит живая копия — показывает её окно. Если зависшая (окно не отвечает
+// или его нет вовсе, а процесс висит — так бывало при выходе на плохой
+// сети) — закрывает её и занимает место сама: раньше в таком случае новый
+// запуск молча ничего не делал, и оставался только Диспетчер задач.
+func CheckInstance(title string) Instance {
+	if takeInstance() {
+		return InstanceNone
+	}
+	hwnd := findAppWindow(title)
+	if hwnd != 0 && windowResponds(hwnd) {
+		pPostMessage.Call(hwnd, wmShowWindow, 0, 0)
+		return InstanceShown
+	}
+	pid := stuckPID(hwnd)
+	if pid == 0 {
+		// Окна нет и похожего процесса не нашли — значит, копия только что
+		// запускается или уже вышла: дадим ей пару секунд.
+		if WaitSingleInstance(3 * time.Second) {
+			return InstanceNone
+		}
+		if hwnd = findAppWindow(title); hwnd != 0 {
+			pPostMessage.Call(hwnd, wmShowWindow, 0, 0)
+		}
+		return InstanceShown
+	}
+	if !killProcess(pid) {
+		return InstanceStuck
+	}
+	if WaitSingleInstance(5 * time.Second) {
+		return InstanceNone
+	}
+	return InstanceStuck
+}
+
+// KillStuckInstance — то же закрытие зависшей копии, для копии с правами
+// администратора, запущенной ради этого (флаг -kill-stuck): обычной копии
+// права закрыть процесс администратора не хватает.
+func KillStuckInstance(title string) {
+	if takeInstance() {
+		return
+	}
+	hwnd := findAppWindow(title)
+	if hwnd != 0 && windowResponds(hwnd) {
+		return
+	}
+	pid := stuckPID(hwnd)
+	if pid != 0 {
+		killProcess(pid)
+	}
+}
+
+// stuckPID — процесс зависшей копии: владелец окна, если это наша
+// программа, иначе — найденный по имени файла.
+func stuckPID(hwnd uintptr) uint32 {
+	if hwnd != 0 {
+		var pid uint32
+		pGetWndThreadPid.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+		if pid != 0 && isOurProcess(pid) {
+			return pid
+		}
+	}
+	return staleProcess()
+}
+
+// takeInstance пробует занять мьютекс единственной копии. Мьютекс
+// намеренно не освобождается — он живёт до конца процесса.
+func takeInstance() bool {
+	name, _ := windows.UTF16PtrFromString("Local\\ssh_tunnel_single_instance")
+	h, _, err := pCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(name)))
+	if errno, ok := err.(windows.Errno); ok && uintptr(errno) == errAlreadyExists {
+		windows.CloseHandle(windows.Handle(h))
+		return false
+	}
+	return true
+}
+
+func findAppWindow(title string) uintptr {
+	class, _ := windows.UTF16PtrFromString("webview")
+	name, _ := windows.UTF16PtrFromString(title)
+	hwnd, _, _ := pFindWindow.Call(uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(name)))
+	if hwnd == 0 {
+		// Копия прежней версии могла жить с другим заголовком.
+		hwnd, _, _ = pFindWindow.Call(uintptr(unsafe.Pointer(class)), 0)
+	}
+	return hwnd
+}
+
+// windowResponds — поток окна разбирает сообщения (не завис).
+func windowResponds(hwnd uintptr) bool {
+	const (
+		wmNull          = 0x0000
+		smtoAbortIfHung = 0x0002
+		smtoBlock       = 0x0001
+	)
+	var res uintptr
+	r, _, _ := pSendMsgTimeout.Call(hwnd, wmNull, 0, 0, smtoAbortIfHung|smtoBlock, 3000,
+		uintptr(unsafe.Pointer(&res)))
+	return r != 0
+}
+
+// staleProcess ищет другую копию программы в этом же сеансе Windows
+// (службу в сеансе 0 не трогаем), запущенную не только что: свежую копию,
+// которая ещё не успела нарисовать окно, за зависшую не считаем.
+func staleProcess() uint32 {
+	self := uint32(os.Getpid())
+	var mySession uint32
+	windows.ProcessIdToSessionId(self, &mySession)
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return 0
+	}
+	defer windows.CloseHandle(snap)
+	var e windows.ProcessEntry32
+	e.Size = uint32(unsafe.Sizeof(e))
+	for err = windows.Process32First(snap, &e); err == nil; err = windows.Process32Next(snap, &e) {
+		if e.ProcessID == self {
+			continue
+		}
+		name := strings.ToLower(windows.UTF16ToString(e.ExeFile[:]))
+		if name != "ssh_tunnel.exe" && name != "ssh_tunnel_vpn.exe" {
+			continue
+		}
+		var sess uint32
+		if windows.ProcessIdToSessionId(e.ProcessID, &sess) != nil || sess != mySession {
+			continue
+		}
+		if processAge(e.ProcessID) < 15*time.Second {
+			continue
+		}
+		return e.ProcessID
+	}
+	return 0
+}
+
+func processAge(pid uint32) time.Duration {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return 0
+	}
+	defer windows.CloseHandle(h)
+	var created, exited, kernel, user windows.Filetime
+	if windows.GetProcessTimes(h, &created, &exited, &kernel, &user) != nil {
+		return 0
+	}
+	return time.Since(time.Unix(0, created.Nanoseconds()))
+}
+
+// isOurProcess — процесс запущен из ssh_tunnel.exe или ssh_tunnel_vpn.exe.
+// Окно ищется и по одному классу «webview», а он общий у всех программ на
+// той же библиотеке: чужую программу закрывать нельзя ни в коем случае.
+func isOurProcess(pid uint32) bool {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(h)
+	buf := make([]uint16, windows.MAX_PATH)
+	n := uint32(len(buf))
+	if windows.QueryFullProcessImageName(h, 0, &buf[0], &n) != nil {
+		return false
+	}
+	path := strings.ToLower(windows.UTF16ToString(buf[:n]))
+	return strings.HasSuffix(path, `\ssh_tunnel.exe`) || strings.HasSuffix(path, `\ssh_tunnel_vpn.exe`)
+}
+
+func killProcess(pid uint32) bool {
+	if !isOurProcess(pid) {
+		return false
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, pid)
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(h)
+	if windows.TerminateProcess(h, 1) != nil {
+		return false
+	}
+	windows.WaitForSingleObject(h, 5000)
+	return true
+}
+
+func showStuckMessage() {
+	text, _ := windows.UTF16PtrFromString("Предыдущая копия ssh_tunnel зависла и не закрывается сама.\n\n" +
+		"Закрой её в Диспетчере задач (Ctrl+Shift+Esc → ssh_tunnel → «Снять задачу») и запусти программу снова.")
+	caption, _ := windows.UTF16PtrFromString("ssh_tunnel")
+	windows.MessageBox(0, text, caption, windows.MB_ICONWARNING)
 }
 
 // WaitSingleInstance дожидается, пока закроется прежняя копия программы, и
@@ -262,21 +469,6 @@ func Quit() {
 	}
 }
 
-func showExistingWindow(title string) {
-	class, _ := windows.UTF16PtrFromString("webview")
-	name, _ := windows.UTF16PtrFromString(title)
-
-	hwnd, _, _ := pFindWindow.Call(uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(name)))
-	if hwnd == 0 {
-		// Запасной вариант — искать только по классу окна. Нужен, если рядом
-		// работает копия прежней версии с другим заголовком: иначе повторный
-		// запуск просто молча ничего бы не сделал.
-		hwnd, _, _ = pFindWindow.Call(uintptr(unsafe.Pointer(class)), 0)
-	}
-	if hwnd != 0 {
-		pPostMessage.Call(hwnd, wmShowWindow, 0, 0)
-	}
-}
 
 // Run создаёт окно и крутит цикл сообщений до выхода из программы.
 // Возвращается только когда пользователь выбрал «Выход».
@@ -499,7 +691,7 @@ func (u *ui) showMenu() {
 
 	appendItem(menu, menuOpen, "Открыть")
 	toggle := "Подключить"
-	if u.opts.Running != nil && u.opts.Running() {
+	if u.running() {
 		toggle = "Отключить"
 	}
 	appendItem(menu, menuToggle, toggle)
@@ -533,14 +725,52 @@ func appendItem(menu uintptr, id int, text string) {
 	pAppendMenu.Call(menu, mfString, uintptr(id), uintptr(unsafe.Pointer(s)))
 }
 
+// quitGrace — сколько ждать OnQuit при выходе. На плохой сети остановка
+// туннеля могла тянуться долго, а окно в это время уже было как бы закрыто:
+// процесс висел без значка, и новый запуск упирался в «уже запущено».
+const quitGrace = 5 * time.Second
+
 func (u *ui) quit() {
 	u.once.Do(func() {
-		if u.opts.OnQuit != nil {
-			u.opts.OnQuit() // снять системный прокси до закрытия окна
-		}
+		// Сначала исчезаем с глаз: значок и окно убираются сразу, что бы ни
+		// происходило дальше.
 		u.removeTrayIcon()
+		pShowWindow.Call(u.hwnd, swHide)
+		if u.opts.OnQuit != nil {
+			// Снять системный прокси и закрыть туннель — но не дольше
+			// quitGrace: зависшая сеть не должна держать процесс.
+			done := make(chan struct{})
+			go func() {
+				u.opts.OnQuit()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(quitGrace):
+			}
+		}
 		pDestroyWindow.Call(u.hwnd) // дальше библиотека пошлёт WM_QUIT
+		// Страховка: если и после этого что-то держит процесс, он всё равно
+		// завершается — иначе следующий запуск увидит «уже запущено».
+		time.AfterFunc(quitGrace, func() { os.Exit(0) })
 	})
+}
+
+// running — подключён ли туннель, для подписи в меню значка. Ответ ждём
+// недолго: в режиме службы это запрос к ней, и на занятой службе меню
+// (а с ним и всё окно — это один поток) замирало бы на секунды.
+func (u *ui) running() bool {
+	if u.opts.Running == nil {
+		return false
+	}
+	ch := make(chan bool, 1)
+	go func() { ch <- u.opts.Running() }()
+	select {
+	case v := <-ch:
+		u.lastRunning = v
+	case <-time.After(400 * time.Millisecond):
+	}
+	return u.lastRunning
 }
 
 // allowMessagesFromShell пропускает в окно сообщения от Проводника и от
@@ -636,7 +866,7 @@ func copyUTF16(dst []uint16, text string) {
 // не открывая окно.
 //
 // Заголовок окна намеренно НЕ меняется: по нему вторая копия программы ищет
-// окно первой (см. showExistingWindow), и «плавающий» заголовок сломал бы этот
+// окно первой (см. CheckInstance), и «плавающий» заголовок сломал бы этот
 // поиск ровно тогда, когда туннель подключён.
 func SetStatus(text string) {
 	u := active

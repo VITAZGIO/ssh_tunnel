@@ -50,6 +50,7 @@ class MainActivity : AppCompatActivity() {
         const val SERVERS = 4
         const val APP = 5
         const val KEY_PAGE = "page"
+        const val KEY_GROUPS = "groups"
         const val KEY_SCROLL = "scroll"
     }
 
@@ -147,6 +148,9 @@ class MainActivity : AppCompatActivity() {
 
     // С какими режимами включать после разрешения на VPN: большая кнопка —
     // всё, кнопка «Сеть устройств» — только сеть.
+    // Ошибка, которую убрали нажатием: та же самая больше не всплывает.
+    private var dismissedError = ""
+
     private var pendingBypass = true
     private var pendingMesh = true
 
@@ -304,6 +308,11 @@ class MainActivity : AppCompatActivity() {
         loadAppSettings()
 
         power.setOnClickListener { onToggle() }
+        // Ошибка лежит поверх кнопки — нажатие убирает её до следующей.
+        errorView.setOnClickListener {
+            dismissedError = TunnelService.detail
+            errorView.visibility = View.GONE
+        }
         speedButton.setOnClickListener { runSpeedTest() }
         for (id in listOf(R.id.save, R.id.saveServers, R.id.saveApp)) {
             findViewById<Button>(id).setOnClickListener { saveSettings() }
@@ -396,6 +405,16 @@ class MainActivity : AppCompatActivity() {
             flipper.inAnimation = null
             flipper.outAnimation = null
             flipper.displayedChild = page
+            // Раскрытые группы настроек остаются раскрытыми: смена темы
+            // пересоздаёт экран, и сворачивать всё было бы неудобно.
+            savedInstanceState.getBooleanArray(KEY_GROUPS)?.let { open ->
+                for ((i, g) in groups.withIndex()) {
+                    if (open.getOrElse(i) { false }) {
+                        findViewById<View>(g.second).visibility = View.VISIBLE
+                        findViewById<View>(g.third).rotation = 90f
+                    }
+                }
+            }
             flipper.inAnimation = inA
             flipper.outAnimation = outA
             val y = savedInstanceState.getInt(KEY_SCROLL, 0)
@@ -406,6 +425,8 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putInt(KEY_PAGE, flipper.displayedChild)
+        outState.putBooleanArray(KEY_GROUPS,
+            groups.map { findViewById<View>(it.second).visibility == View.VISIBLE }.toBooleanArray())
         outState.putInt(KEY_SCROLL, (flipper.currentView as? ScrollView)?.scrollY ?: 0)
     }
 
@@ -456,10 +477,13 @@ class MainActivity : AppCompatActivity() {
         renderMeshSummary()
         renderDomainsSummary()
         refresh()
+        // Скачивание обновления шло, пока экран был закрыт, — следим дальше.
+        if (settings.updateDownloadId >= 0) pollDownload()
     }
 
     override fun onPause() {
         TunnelService.onUpdate = null
+        updateNote.removeCallbacks(downloadPoll)
         super.onPause()
     }
 
@@ -1330,6 +1354,12 @@ class MainActivity : AppCompatActivity() {
                 when {
                     result.newer -> {
                         updateNote.text = getString(R.string.update_available, result.latest)
+                        // Кнопка могла остаться «Установить» или «Открыть
+                        // страницу релиза» от прошлой загрузки.
+                        readyDownloadId = -1
+                        (updateDownloadBtn as TextView).setText(R.string.update_download)
+                        updateDownloadBtn.setOnClickListener { onDownloadUpdate() }
+                        findViewById<View>(R.id.updateProgress).visibility = View.GONE
                         updateDownloadBtn.visibility = View.VISIBLE
                     }
                     result.ahead -> updateNote.text = getString(R.string.update_ahead, result.latest)
@@ -1349,6 +1379,12 @@ class MainActivity : AppCompatActivity() {
      * открываем страницу релиза в браузере.
      */
     private fun onDownloadUpdate() {
+        // Уже скачано — кнопка стала «Установить».
+        val ready = readyDownloadId
+        if (ready >= 0) {
+            installDownloaded(ready)
+            return
+        }
         val u = pendingUpdate ?: return
         if (u.apkUrl.isBlank()) {
             updateNote.text = getString(R.string.update_open_release)
@@ -1366,13 +1402,109 @@ class MainActivity : AppCompatActivity() {
                     android.os.Environment.DIRECTORY_DOWNLOADS, "ssh_tunnel-${u.latest}.apk"
                 )
             val dm = getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-            dm.enqueue(req)
+            settings.updateDownloadId = dm.enqueue(req)
             updateNote.text = getString(R.string.update_downloading)
+            updateDownloadBtn.visibility = View.GONE
+            pollDownload()
         } catch (e: Exception) {
             // Менеджер загрузок отключён (такое бывает на прошивках без
             // сервисов Google) — тогда пусть скачивает браузер.
             updateNote.text = getString(R.string.update_open_release)
             openLink(u.releaseUrl)
+        }
+    }
+
+    // Скачанное обновление, которое осталось установить (-1 — нет).
+    private var readyDownloadId = -1L
+
+    private val downloadPoll = Runnable { pollDownload() }
+
+    private fun mb(bytes: Long): String = getString(R.string.mb, bytes / 1048576.0)
+
+    /**
+     * Ход скачивания обновления — полоской и текстом, раз в полсекунды, пока
+     * экран открыт. Раньше загрузка уходила в менеджер загрузок молча, и
+     * было не понять, идёт ли она вообще.
+     */
+    private fun pollDownload() {
+        updateNote.removeCallbacks(downloadPoll)
+        val id = settings.updateDownloadId
+        val bar = findViewById<android.widget.ProgressBar>(R.id.updateProgress)
+        if (id < 0) return
+        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+        val c = try {
+            dm.query(android.app.DownloadManager.Query().setFilterById(id))
+        } catch (e: Exception) {
+            null
+        }
+        c.use { cur ->
+            if (cur == null || !cur.moveToFirst()) {
+                // Загрузку удалили из менеджера — следить не за чем.
+                settings.updateDownloadId = -1
+                bar.visibility = View.GONE
+                return
+            }
+            fun long(col: String) = cur.getLong(cur.getColumnIndexOrThrow(col))
+            val status = cur.getInt(cur.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS))
+            val done = long(android.app.DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+            val total = long(android.app.DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+            bar.visibility = View.VISIBLE
+            when (status) {
+                android.app.DownloadManager.STATUS_SUCCESSFUL -> {
+                    settings.updateDownloadId = -1
+                    readyDownloadId = id
+                    bar.isIndeterminate = false
+                    bar.progress = bar.max
+                    updateNote.setText(R.string.update_done)
+                    (updateDownloadBtn as TextView).setText(R.string.update_install)
+                    updateDownloadBtn.visibility = View.VISIBLE
+                    return
+                }
+                android.app.DownloadManager.STATUS_FAILED -> {
+                    settings.updateDownloadId = -1
+                    bar.visibility = View.GONE
+                    val reason = cur.getInt(cur.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_REASON))
+                    updateNote.text = getString(R.string.update_dl_failed, reason)
+                    dm.remove(id)
+                    pendingUpdate?.let { u ->
+                        (updateDownloadBtn as TextView).setText(R.string.update_release_btn)
+                        updateDownloadBtn.setOnClickListener { openLink(u.releaseUrl) }
+                        updateDownloadBtn.visibility = View.VISIBLE
+                    }
+                    return
+                }
+                android.app.DownloadManager.STATUS_PAUSED -> updateNote.setText(R.string.update_waiting)
+                android.app.DownloadManager.STATUS_PENDING -> updateNote.setText(R.string.update_queued)
+                else -> updateNote.text = if (total > 0) getString(R.string.update_progress, mb(done), mb(total))
+                    else getString(R.string.update_progress_unknown, mb(done))
+            }
+            if (total > 0) {
+                bar.isIndeterminate = false
+                bar.progress = (done * bar.max / total).toInt()
+            } else {
+                bar.isIndeterminate = true
+            }
+        }
+        updateNote.postDelayed(downloadPoll, 500)
+    }
+
+    /** Открывает скачанный APK в системном установщике. */
+    private fun installDownloaded(id: Long) {
+        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+        try {
+            val uri = dm.getUriForDownloadedFile(id) ?: throw Exception("нет файла")
+            startActivity(
+                Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (e: Exception) {
+            // Установщик не открылся — хотя бы список загрузок, APK там.
+            try {
+                startActivity(Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS))
+            } catch (e2: Exception) {
+                updateNote.setText(R.string.update_done)
+            }
         }
     }
 
@@ -1412,6 +1544,16 @@ class MainActivity : AppCompatActivity() {
     private fun onToggle() {
         val running = TunnelService.state != "stopped" && TunnelService.state != "error"
         val meshUp = running && settings.meshConfigured() && TunnelService.meshOn
+        if (running && TunnelService.state != "connected") {
+            // Жёлтое состояние (подключение, переподключение): кнопка —
+            // это «Выключить всё сейчас», без ожидания и без оглядки на сеть
+            // устройств. Раньше с сетью устройств она лишь гасила обход, и
+            // туннель так и висел жёлтым.
+            settings.lastRunning = false
+            settings.lastMesh = false
+            startService(Intent(this, TunnelService::class.java).setAction(TunnelService.ACTION_STOP))
+            return
+        }
         if (running && TunnelService.bypassOn) {
             settings.lastRunning = false
             settings.lastMesh = meshUp
@@ -1730,7 +1872,7 @@ class MainActivity : AppCompatActivity() {
 
         if (state == "error" && TunnelService.detail.isNotBlank()) {
             errorView.text = TunnelService.detail
-            errorView.visibility = View.VISIBLE
+            errorView.visibility = if (TunnelService.detail == dismissedError) View.GONE else View.VISIBLE
             detailView.text = ""
         } else {
             errorView.visibility = View.GONE
