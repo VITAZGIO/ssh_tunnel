@@ -193,6 +193,11 @@ type Config struct {
 	// AdBlockSources — откуда брать списки (ссылки или файлы, по одному на
 	// строку), AdBlockAllowlist — имена, которые не блокируются никогда.
 	// Сам список лежит рядом с настройками, в adblock.list.
+	// HotspotDirect — устройства, которые выходят в интернет через этот
+	// компьютер (мобильная точка доступа Windows), ходят напрямую, а не через
+	// сервер. Только для режима VPN; по умолчанию они идут через VPN.
+	HotspotDirect bool `json:"hotspotDirect,omitempty"`
+
 	AdBlockEnabled   bool   `json:"adBlockEnabled,omitempty"`
 	AdBlockSources   string `json:"adBlockSources,omitempty"`
 	AdBlockAllowlist string `json:"adBlockAllowlist,omitempty"`

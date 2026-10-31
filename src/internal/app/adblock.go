@@ -49,3 +49,10 @@ func (a *App) AdBlocked() int {
 	}
 	return 0
 }
+
+// ConfigLayer — слой VPN, которому нужны общие настройки программы на ходу
+// (сейчас — куда вести устройства точки доступа). Зовётся при подключении
+// слоя и после каждого сохранения настроек.
+type ConfigLayer interface {
+	ApplyConfig(cfg config.Config)
+}

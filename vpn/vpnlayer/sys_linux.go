@@ -460,3 +460,8 @@ func restoreResolvConf() bool {
 	}
 	return err == nil
 }
+
+// setServers — на Linux маршрут к серверу не нужен: свои сокеты привязаны к
+// настоящей сети меткой и устройством, а мобильной точки доступа Windows с её
+// проверкой маршрутов здесь нет.
+func (s *sys) setServers([]netip.Addr) {}

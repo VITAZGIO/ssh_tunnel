@@ -30,6 +30,7 @@ func (s *Server) handleSettingsExport(w http.ResponseWriter, r *http.Request) {
 		StartMode:        cfg.StartMode,
 		MeshStartMode:    cfg.MeshStartMode,
 		AdBlockEnabled:   cfg.AdBlockEnabled,
+		HotspotDirect:    cfg.HotspotDirect,
 		AdBlockSources:   cfg.AdBlockSources,
 		AdBlockAllowlist: cfg.AdBlockAllowlist,
 		Theme:            cfg.Theme,
@@ -106,6 +107,7 @@ func (s *Server) handleSettingsImport(w http.ResponseWriter, r *http.Request) {
 	cfg.StartMode = b.StartMode
 	cfg.MeshStartMode = b.MeshStartMode
 	cfg.AdBlockEnabled = b.AdBlockEnabled
+	cfg.HotspotDirect = b.HotspotDirect
 	cfg.AdBlockSources = b.AdBlockSources
 	cfg.AdBlockAllowlist = b.AdBlockAllowlist
 	cfg.Theme = b.Theme

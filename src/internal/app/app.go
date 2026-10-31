@@ -109,6 +109,9 @@ func (a *App) SetNetLayer(n NetLayer) {
 	if ab, ok := n.(AdBlocker); ok {
 		ab.SetAdBlock(cfg)
 	}
+	if cl, ok := n.(ConfigLayer); ok {
+		cl.ApplyConfig(cfg)
+	}
 }
 
 func New(cfg config.Config) *App {
@@ -187,6 +190,12 @@ func (a *App) SetConfig(cfg config.Config) (string, error) {
 	}
 	if ab := a.adBlocker(); ab != nil {
 		ab.SetAdBlock(cfg)
+	}
+	a.mu.Lock()
+	netLayer := a.net
+	a.mu.Unlock()
+	if cl, ok := netLayer.(ConfigLayer); ok {
+		cl.ApplyConfig(cfg)
 	}
 
 	if running && connectionSettingsChanged(old, cfg) {

@@ -49,6 +49,22 @@ type Layer struct {
 	// заблокированных имён. Атомарно, без mu: запрос состояния не должен
 	// ждать, пока адаптер поднимается или снимается.
 	stats atomic.Pointer[core.Stats]
+
+	// hotspotDirect — устройства точки доступа ходят напрямую, а не через
+	// сервер (config.HotspotDirect, см. ApplyConfig).
+	hotspotDirect atomic.Bool
+}
+
+// ApplyConfig принимает общие настройки программы (реализует app.ConfigLayer).
+func (l *Layer) ApplyConfig(cfg config.Config) {
+	l.hotspotDirect.Store(cfg.HotspotDirect)
+}
+
+// PrepareSelfCheck пускает проверочное соединение самопроверки мимо адаптера
+// (реализует app.SelfCheckLayer).
+func (l *Layer) PrepareSelfCheck(cfg *tunnel.Config) {
+	cfg.ProtectSocket = l.sys.protect
+	cfg.Resolver = l.resolver()
 }
 
 // SetBypass переключает «весь трафик» и «только сеть устройств» (реализует
@@ -107,6 +123,9 @@ func (l *Layer) Attach(tun *tunnel.Tunnel, p config.Profile) error {
 
 	l.current.Store(tun)
 	l.servers, l.sshPort = servers, p.SSHPort
+	// Маршрут к серверу через настоящую сеть — см. sys.setServers. На
+	// поднятом адаптере (переход на запасной сервер) он сразу переезжает.
+	l.sys.setServers(servers)
 	if l.up {
 		return nil
 	}
@@ -286,6 +305,12 @@ func (l *Layer) resolver() *net.Resolver {
 // к прежней карте и почти наверняка мертвы, пересобираем пул сразу.
 func (l *Layer) networkChanged() {
 	l.bus.Infof("Сеть сменилась — переподключаюсь к серверу")
+	// Роутер мог смениться — маршрут к серверу ставим через новый.
+	l.mu.Lock()
+	if l.up {
+		l.sys.setServers(l.servers)
+	}
+	l.mu.Unlock()
 	if t := l.current.Load(); t != nil {
 		t.Kick()
 	}
@@ -324,6 +349,12 @@ func (c *coreSwitch) ServeConn(conn net.Conn, target string, byIP bool) {
 	l.mu.Unlock()
 	if byIP && isServerTarget(target, servers, port) {
 		conn.Close()
+		return
+	}
+	// Устройство на точке доступа, которому велено мимо сервера, — напрямую
+	// через настоящую сеть этого компьютера.
+	if l.hotspotDirect.Load() && isForwarded(conn.RemoteAddr(), localAddrs) {
+		t.ServeConnDirect(conn, target, byIP)
 		return
 	}
 	t.ServeConn(conn, target, byIP)

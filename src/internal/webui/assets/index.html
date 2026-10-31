@@ -2187,6 +2187,8 @@ const I18N = {
       'adapters and tell you if anything would break.</p>',
     verbose:'Verbose log', connect_on_launch:'Connect immediately on launch',
     show_picker:'Show server picker on the home screen',
+    hotspot_vpn:'Devices on the hotspot go through VPN',
+    hotspot_vpn_note:'If this computer shares Wi-Fi (Windows mobile hotspot): checked — connected phones and laptops reach the internet through the server, like the computer itself; unchecked — directly, through the computer's normal network. Applies while blocking bypass is on.',
     auto_pick_fastest:'Connect to the fastest server',
     auto_pick_fastest_note:"When connecting, the program measures every server's response time and picks "+
       "the fastest one. If it doesn't come up or drops, it moves on to the next-best one — visible in the "+
@@ -2875,11 +2877,13 @@ function renderNetModes(){
   $('meshBtnCap').textContent = tr(netModes.mesh ? 'mesh_btn_on' : 'mesh_btn_off');
   b.title = tr('mesh_btn_hint');
   // Туннель держится только ради сети — большая кнопка выглядит выключенной:
-  // обход блокировок и правда выключен.
-  if(running && !netModes.bypass && lastState === 'connected'){
+  // обход блокировок и правда выключен. И пока связь переподключается тоже:
+  // раньше кнопка оставалась жёлтой «Отключить», и следующее нажатие снова
+  // включало обход — человек жал «Отключить», а обход включался по кругу.
+  if(running && !netModes.bypass && (lastState === 'connected' || lastState === 'reconnecting')){
     $('power').className = '';
     $('powerCap').textContent = tr('connect');
-    $('stateText').textContent = tr('state_mesh_only');
+    if(lastState === 'connected') $('stateText').textContent = tr('state_mesh_only');
   }
 }
 async function refreshNetModes(){
@@ -3859,7 +3863,7 @@ function splitEntries(v){
 }
 
 [...FIELDS, ...PROFILE_CHECKS, ...CHECKS, 'directHosts', 'tunnelHosts', 'autoConnect',
- 'customCityName', 'showServerPicker', 'adBlockSources', 'adBlockAllowlist'].forEach(f => {
+ 'customCityName', 'showServerPicker', 'adBlockSources', 'adBlockAllowlist', 'hotspotVpn'].forEach(f => {
   const el = $(f);
   if(el) el.addEventListener('input', () => { formDirty = true; });
 });
@@ -4378,6 +4382,8 @@ $('save').onclick = async () => {
 
   const doc = shareTraffic(docWithProfile(p), p);
   CHECKS.forEach(f => doc[f] = $(f).checked);
+  // Галочка «через VPN», а в настройках — «напрямую»: по умолчанию через VPN.
+  doc.hotspotDirect = !$('hotspotVpn').checked;
   doc.adBlockSources = $('adBlockSources').value.trim();
   doc.adBlockAllowlist = $('adBlockAllowlist').value.trim();
   // Прежние галочки ставим по выбранному режиму — их читают старые версии,
@@ -4484,6 +4490,7 @@ function renderIssuedByPanel(p){
 
 function fillGeneralForm(c){
   CHECKS.forEach(f => { if($(f)) $(f).checked = !!c[f]; });
+  $('hotspotVpn').checked = !c.hotspotDirect;
   $('adBlockSources').value = c.adBlockSources || '';
   $('adBlockAllowlist').value = c.adBlockAllowlist || '';
   $('autoStart').checked = !!c.autoStart;
@@ -4663,6 +4670,8 @@ async function refresh(){
   if(detail && usingBackup) detail += ' (' + tr('backup_server_note') + ')';
   if(st.modes) netModes = st.modes;
   $('toAdBlock').hidden = !st.adBlock;
+  // Раздача через точку доступа есть только у VPN-версии — как и блокировка.
+  $('hotspotRow').hidden = !st.adBlock;
   adBlocked = st.adBlocked || 0;
   $('adBlockCount').textContent = adBlocked;
   renderAdBlockSummary();

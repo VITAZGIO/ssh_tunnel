@@ -62,6 +62,8 @@ type defaultRoute struct {
 	// metric — метрика маршрута плюс метрика интерфейса: так её считает
 	// сама Windows, выбирая, куда слать.
 	metric uint32
+	// nextHop — роутер этой сети; пустой у соединений «точка-точка».
+	nextHop netip.Addr
 }
 
 // pickDefault выбирает интерфейс, через который Windows ходила бы в интернет
@@ -122,4 +124,41 @@ func isServerTarget(target string, serverIPs []netip.Addr, sshPort int) bool {
 		}
 	}
 	return false
+}
+
+// isForwarded — соединение пришло не от самого компьютера, а от устройства,
+// которое выходит в интернет через него (мобильная точка доступа Windows).
+// Свои соединения компьютер шлёт в адаптер с адреса адаптера; приложение,
+// привязанное к адресу сетевой карты, тоже своё — поэтому сверяемся и с
+// адресами самого компьютера (local).
+func isForwarded(src net.Addr, local func() []netip.Addr) bool {
+	ap, err := netip.ParseAddrPort(src.String())
+	if err != nil {
+		return false
+	}
+	a := ap.Addr().Unmap()
+	if a == adapterPrefix4.Addr() || a == adapterPrefix6.Addr() || a.IsLoopback() {
+		return false
+	}
+	for _, l := range local() {
+		if l.Unmap() == a {
+			return false
+		}
+	}
+	return true
+}
+
+// localAddrs — адреса всех сетевых карт компьютера.
+func localAddrs() []netip.Addr {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var out []netip.Addr
+	for _, a := range addrs {
+		if p, err := netip.ParsePrefix(a.String()); err == nil {
+			out = append(out, p.Addr())
+		}
+	}
+	return out
 }
