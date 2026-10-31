@@ -337,6 +337,7 @@
   .chk input{margin-top:2px;flex:none;accent-color:var(--accent)}
   .chk .lbl{font-size:13px}
   .chk-row{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line)}
+  .chk-row[hidden]{display:none}
   .chk-row .chk{border-top:none;flex:1}
 
   /* Значок «?» вместо всегда открытого пояснения под галочкой — наводишь
@@ -501,6 +502,7 @@
   .nav:hover{background:var(--card)}
   /* Профили приложения: полоска вверху настроек. */
   .apBar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0 12px}
+  .apBar[hidden]{display:none}
   .apBar button{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:4px 12px;
         border:1px solid var(--line);background:transparent;color:var(--text);font:inherit;font-size:13px;cursor:pointer}
   .apBar button.on{background:var(--card2);box-shadow:inset 0 -2px 0 var(--accent);font-weight:600}
