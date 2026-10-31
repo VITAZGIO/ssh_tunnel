@@ -324,7 +324,7 @@
         color:var(--dim);font:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
   .chips button.on{background:var(--accent-muted);border-color:var(--accent-muted);color:#fff}
 
-  .mdevs{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
+  .mdevs{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:12px}
   .mdev{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:13px;
         transition:border-color .2s, transform .2s, box-shadow .2s;animation:rise .3s ease both}
   .mdev:hover{transform:translateY(-1px);box-shadow:0 8px 22px -14px rgba(0,0,0,.6)}
@@ -342,9 +342,19 @@
   .dot{width:9px;height:9px;border-radius:50%;background:var(--dim);flex:none}
   .dot.on{background:var(--ok);box-shadow:0 0 0 0 rgba(47,191,113,.6);animation:beat 2s infinite}
   @keyframes beat{0%{box-shadow:0 0 0 0 rgba(47,191,113,.55)}70%{box-shadow:0 0 0 7px rgba(47,191,113,0)}100%{box-shadow:0 0 0 0 rgba(47,191,113,0)}}
-  .mdev .facts{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:11px;font-size:12px}
-  .mdev .facts .k{color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px}
-  .mdev .facts .v{font-family:var(--mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* Адрес и система — отдельной строкой под именем: это то, что ищут
+     глазами первым, и системе нужна вся ширина карточки. */
+  .mdev .idrow{display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 10px;margin-top:11px;
+        padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:9px}
+  .mdev .idrow .ip{font:600 13px var(--mono)}
+  .mdev .idrow .sys{color:var(--dim);font-size:12px;min-width:0;overflow-wrap:anywhere}
+  /* Колонки строго поровну (minmax(0,…)): длинное значение переносится
+     внутри своей колонки, а не раздвигает её и не налезает на соседнюю. */
+  .mdev .facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 14px;margin-top:11px;font-size:12px}
+  .mdev .facts>div{min-width:0}
+  .mdev .facts .k{color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mdev .facts .v{font-family:var(--mono);font-size:12px;line-height:1.35;margin-top:1px;overflow-wrap:anywhere}
   .mdev .acts{display:flex;gap:6px;margin-top:11px}
   .mdev .acts button{flex:1}
   .qual{display:inline-flex;align-items:flex-end;gap:2px;height:13px;vertical-align:-1px;margin-right:6px}
@@ -3161,7 +3171,7 @@ function devicePop(d){
   return popBox(d.display, [
     ['.mesh', d.host + '.mesh'],
     [t('dev_ip'), d.ip],
-    [t('dev_platform'), [PLATFORM_NAME[d.platform] || d.platform, d.os].filter(Boolean).join(' ')],
+    [t('dev_platform'), systemText(d)],
     [t('dev_mode'), d.mode ? t('mode_' + d.mode) : ''],
     [t('dev_latency'), d.online && d.rttMs ? fmtMs(d.rttMs) + ' · ' + t('q_' + d.quality) : ''],
     [t('dev_via'), serverName(d.server)],
@@ -3228,6 +3238,16 @@ function renderMeshDevices(devices){
   });
 }
 
+// systemText — «Windows 10 Pro», «Android 14»: название системы один раз,
+// даже если устройство само прислало его в версии («Windows Windows 10…»).
+function systemText(d){
+  const name = PLATFORM_NAME[d.platform] || d.platform || '';
+  const os = (d.os || '').trim();
+  if (!os) return name;
+  if (!name) return os;
+  return os.toLowerCase().includes(name.toLowerCase()) ? os : name + ' ' + os;
+}
+
 function fillDeviceCard(card, d){
   card.classList.toggle('offline', !d.online);
   card.innerHTML = '';
@@ -3247,6 +3267,12 @@ function fillDeviceCard(card, d){
   top.appendChild(el('span', 'dot' + (d.online ? ' on' : '')));
   card.appendChild(top);
 
+  const idrow = el('div', 'idrow');
+  idrow.appendChild(el('span', 'ip', d.ip || '—'));
+  const sys = systemText(d);
+  if (sys) idrow.appendChild(el('span', 'sys', sys));
+  card.appendChild(idrow);
+
   const facts = el('div', 'facts');
   const fact = (k, v, node) => {
     const f = el('div');
@@ -3257,13 +3283,12 @@ function fillDeviceCard(card, d){
     f.appendChild(vv);
     facts.appendChild(f);
   };
-  fact(t('dev_ip'), d.ip);
-  fact(t('dev_platform'), [PLATFORM_NAME[d.platform] || d.platform || '—', d.os].filter(Boolean).join(' '));
   if (d.online){
     fact(t('dev_latency'), fmtMs(d.rttMs) + (d.jitterMs ? ' ±' + d.jitterMs : ''), qualBars(d.quality));
     fact(t('dev_loss'), (d.lossPct || 0) + '%');
   }
-  fact(t('dev_mode'), d.mode ? t('mode_' + d.mode) : '—');
+  const modeText = d.mode ? t('mode_' + d.mode) : '—';
+  fact(t('dev_mode'), modeText.startsWith('mode_') ? d.mode : modeText);
   if (d.nat) fact(t('dev_nat'), natLabel(d.nat));
   fact(t('dev_via'), serverName(d.server));
   if (d.online && d.direct && d.direct.length) fact(t('dev_direct'), directText(d));
