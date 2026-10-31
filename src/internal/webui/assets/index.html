@@ -54,38 +54,45 @@
   .view::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
 
   /* ---------- главный экран ---------- */
-  .middle{flex:1;display:flex;flex-direction:column;align-items:center;
-          justify-content:center;gap:16px;min-height:0}
+  /* Кнопка — ровно по центру свободного места между шапкой и строками
+     сведений, а сеть устройств, сервер и состояние — блоком под ней.
+     Нижний ряд сетки не бывает меньше блока: в низком окне кнопка сама
+     поднимается, и подписи не наезжают на строку «Соединений». */
+  .middle{flex:1;display:grid;grid-template-rows:minmax(0,1fr) auto minmax(min-content,1fr);
+          justify-items:center;min-height:0;padding-bottom:14px}
+  .middle::before{content:""}
+  .under{display:flex;flex-direction:column;align-items:center;align-self:start;
+         gap:9px;margin-top:16px}
 
-  #power{position:relative;width:172px;height:172px;border-radius:50%;
+  #power{position:relative;width:196px;height:196px;border-radius:50%;
          cursor:pointer;border:2px solid var(--line);background:var(--card);
          color:var(--dim);transition:.25s;font:inherit;padding:0;flex:none}
   /* Знак включения крупный и смещён ниже центра круга — под ним остаётся
      место для подписи, и вместе они читаются как одно целое. */
   #power svg{position:absolute;left:50%;top:47%;transform:translate(-50%,-50%);
-             width:92px;height:92px;fill:none;stroke:currentColor;
+             width:106px;height:106px;fill:none;stroke:currentColor;
              stroke-width:1.9;stroke-linecap:round}
-  #power .cap{position:absolute;left:0;right:0;bottom:20px;
-              font-size:13px;font-weight:600;letter-spacing:.3px}
+  #power .cap{position:absolute;left:0;right:0;bottom:24px;
+              font-size:13.5px;font-weight:600;letter-spacing:.3px}
   #power:hover{border-color:var(--accent);color:var(--accent)}
   #power:disabled{opacity:.55;cursor:default}
 
   .status{text-align:center;flex:none}
-  .status .s{font-size:18px;font-weight:600}
+  .status .s{font-size:15.5px;font-weight:600}
   /* Как и у строки с задержкой, высота держится постоянной: адрес сервера
      появляется только после подключения, и без этого блок состояния подрастал
      сразу на две строки, толкая кнопку вверх. */
-  .status .d{font-size:12.5px;color:var(--dim);margin-top:2px;cursor:pointer;
+  .status .d{font-size:11.5px;color:var(--dim);margin-top:2px;cursor:pointer;
              overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-             height:18px;line-height:18px}
+             height:16px;line-height:16px}
   .status .d:hover{color:var(--accent)}
   /* Задержка: цветом, потому что важно не точное число, а «нормально это
      или нет». Зелёный до 100 мс, жёлтый до 250, дальше красный. */
   /* Высота задана всегда, даже когда замера ещё нет. Иначе строка появляется
      на пустом месте, блок состояния становится выше, а кнопка над ним уезжает
      вверх — на глаз это выглядит как дёрганье интерфейса. */
-  .status .ping{font-size:12.5px;margin-top:2px;font-family:var(--mono);
-                height:18px;line-height:18px}
+  .status .ping{font-size:11.5px;margin-top:2px;font-family:var(--mono);
+                height:16px;line-height:16px}
   .status .ping.good{color:var(--ok)}
   .status .ping.mid{color:var(--warn)}
   .status .ping.bad{color:var(--err)}
@@ -98,12 +105,12 @@
 
   /* Маленькая кнопка сети устройств под большой: сеть включается и
      выключается отдельно от обхода блокировок. */
-  #meshBtn{display:flex;align-items:center;gap:7px;background:var(--card);
-           border:1px solid var(--line);border-radius:999px;padding:6px 13px;
-           font:inherit;font-size:12.5px;font-weight:600;color:var(--dim);
+  #meshBtn{display:flex;align-items:center;gap:6px;background:var(--card);
+           border:1px solid var(--line);border-radius:999px;padding:4px 11px;
+           font:inherit;font-size:11.5px;font-weight:600;color:var(--dim);
            cursor:pointer;flex:none;transition:.2s}
   #meshBtn[hidden]{display:none}
-  #meshBtn .dot{width:8px;height:8px;border-radius:50%;background:var(--line);transition:.2s}
+  #meshBtn .dot{width:7px;height:7px;border-radius:50%;background:var(--line);transition:.2s}
   #meshBtn:hover{border-color:var(--accent);color:var(--accent)}
   #meshBtn.on{border-color:var(--ok);color:var(--ok)}
   #meshBtn.on .dot{background:var(--ok);box-shadow:0 0 6px var(--ok)}
@@ -439,14 +446,14 @@
   /* Виджет выбора сервера на главном экране — плашка между кнопкой питания и
      статусом подключения. Скрыта по умолчанию и не должна раздвигать плитки
      снизу: она часть того же центрированного блока, что и кнопка. */
-  #homePicker{display:flex;align-items:center;gap:8px;background:var(--card);
-              border:1px solid var(--line);border-radius:11px;padding:8px 14px;
+  #homePicker{display:flex;align-items:center;gap:6px;background:var(--card);
+              border:1px solid var(--line);border-radius:9px;padding:5px 11px;
               cursor:pointer;flex:none}
   #homePicker:hover{border-color:var(--accent)}
   #homePicker .flag{font-size:16px;line-height:1}
   #homePicker .vg{font-size:9px;font-weight:800;color:#2de2ff;border:1px solid currentColor;
                   border-radius:4px;padding:1px 3px}
-  #homePicker .nm{font-size:13px;font-weight:600}
+  #homePicker .nm{font-size:12px;font-weight:600}
   #homePicker .chev{color:var(--dim);font-size:10px;margin-left:2px}
 
   .err-box{background:rgba(229,72,77,.13);border:1px solid var(--err);
@@ -669,6 +676,9 @@
         <span class="cap" id="powerCap" data-i18n="connect">Подключить</span>
       </button>
 
+      <!-- Всё, что под кнопкой, — одним блоком: кнопка стоит по центру
+           свободного места, а блок висит под ней (см. .middle). -->
+      <div class="under">
       <!-- Сеть устройств — своей кнопкой: большая включает и выключает обход
            блокировок, а сеть (RDP, имена .mesh) живёт отдельно. Видна, только
            когда у сервера включена сеть устройств. -->
@@ -689,6 +699,7 @@
              data-i18n-title="check_ip_hint"></div>
         <div class="ping" id="ping"></div>
       </div>
+      </div><!-- /.under -->
     </div>
 
     <!-- Цифры — текстом, без рамок: это сведения, а не кнопки. Строка со
