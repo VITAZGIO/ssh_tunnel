@@ -324,6 +324,12 @@
         color:var(--dim);font:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
   .chips button.on{background:var(--accent-muted);border-color:var(--accent-muted);color:#fff}
 
+  /* Ход обновления панели: бегущая полоса — сколько осталось, не знаем, но
+     видно, что дело идёт. */
+  .upd-bar{position:relative;height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:12px}
+  .upd-bar i{position:absolute;top:0;bottom:0;left:-40%;width:40%;border-radius:3px;background:var(--ok);
+        animation:updrun 1.2s ease-in-out infinite}
+  @keyframes updrun{to{left:100%}}
   .mdevs{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:12px}
   .mdev{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:13px;
         transition:border-color .2s, transform .2s, box-shadow .2s;animation:rise .3s ease both}
@@ -855,13 +861,16 @@
         <button class="btn" id="updateCheckBtn" style="margin-top:12px"
           data-i18n="update_check">Проверить обновления</button>
         <div id="updateMsg"></div>
-        <p class="note" id="updateHow" hidden style="margin:10px 0 0">
-          <span data-i18n="update_how">Панель обновляется на самом сервере — командой из
-            docs/PANEL_SETUP.md. Сама себя она не подменяет: файл занят работающей службой,
-            и делать это за спиной у администратора нельзя.</span>
-          <a id="updateLink" href="#" target="_blank" rel="noopener"
-             data-i18n="update_open_release">Открыть страницу релиза</a>
-        </p>
+        <!-- Обновление прямо отсюда: панель скачает свой файл, сверит
+             контрольную сумму, подменит себя и перезапустится. -->
+        <div id="updateHow" hidden style="margin-top:12px">
+          <button class="btn" id="updateInstallBtn"></button>
+          <div class="upd-bar" id="updateBar" hidden><i></i></div>
+          <p class="note" id="updateStage" style="margin:8px 0 0"></p>
+          <p class="note" style="margin:6px 0 0">
+            <a id="updateLink" href="#" target="_blank" rel="noopener"
+               data-i18n="update_open_release">Открыть страницу релиза</a></p>
+        </div>
       </div>
 
       <div class="card">
@@ -1022,9 +1031,15 @@ const I18N = {
     update_failed:'Не удалось связаться с GitHub — проверь, есть ли у сервера выход в интернет',
     update_rate_limited:'GitHub временно ограничил число запросов, попробуй позже',
     update_open_release:'Открыть страницу релиза',
-    update_how:'Панель обновляется на самом сервере — командой из docs/PANEL_SETUP.md. '+
-      'Сама себя она не подменяет: файл занят работающей службой, и делать это за спиной у '+
-      'администратора нельзя.',
+    update_install:'Обновить до {v}',
+    update_confirm:'Обновить панель до версии {v}? Она скачает новую версию с GitHub, сверит контрольную '+
+      'сумму и перезапустится — это займёт около минуты. Подключённые устройства это не затронет.',
+    update_confirm_yes:'Обновить',
+    upd_stage_download:'Скачиваю новую версию…', upd_stage_verify:'Сверяю контрольную сумму…',
+    upd_stage_install:'Ставлю…', upd_stage_restart:'Перезапускаюсь — страница обновится сама…',
+    update_done:'Панель обновлена до версии {v}',
+    update_install_failed:'Обновить не вышло: {e}',
+    update_no_return:'Панель не вернулась за полторы минуты. Проверь на сервере: journalctl -u ssh_tunnel_panel -n 50',
     autostart_title:'Автозапуск', autostart_label:'Запускать при старте системы',
     autostart_note:'Включено — панель поднимется сама после перезагрузки сервера. Снятая галочка '+
       'не выключает панель прямо сейчас, а только не даёт ей стартовать в следующий раз.',
@@ -1269,9 +1284,15 @@ const I18N = {
     update_failed:'Could not reach GitHub — check that the server has internet access',
     update_rate_limited:'GitHub is rate-limiting requests, try again later',
     update_open_release:'Open the release page',
-    update_how:'The panel is updated on the server itself with the command from '+
-      'docs/PANEL_SETUP.md. It never replaces itself: the file is in use by the running service, '+
-      'and doing that behind the administrator\'s back would be wrong.',
+    update_install:'Update to {v}',
+    update_confirm:'Update the panel to {v}? It downloads the new version from GitHub, checks its checksum '+
+      'and restarts — about a minute. Connected devices are not affected.',
+    update_confirm_yes:'Update',
+    upd_stage_download:'Downloading the new version…', upd_stage_verify:'Checking the checksum…',
+    upd_stage_install:'Installing…', upd_stage_restart:'Restarting — the page will reload by itself…',
+    update_done:'The panel is updated to {v}',
+    update_install_failed:'Update failed: {e}',
+    update_no_return:"The panel didn't come back within a minute and a half. Check on the server: journalctl -u ssh_tunnel_panel -n 50",
     autostart_title:'Autostart', autostart_label:'Start on system boot',
     autostart_note:'On — the panel comes back by itself after the server reboots. Turning it off '+
       'does not stop the panel now, it only keeps it from starting next time.',
@@ -2091,16 +2112,73 @@ $('updateCheckBtn').addEventListener('click', async () => {
   if (r.newer){
     showMsg($('updateMsg'), t('update_available').replace('{v}', r.latest), 'ok');
     $('updateLink').href = r.url;
+    UPDATE_TO = r.latest;
+    $('updateInstallBtn').textContent = t('update_install').replace('{v}', r.latest);
+    $('updateInstallBtn').hidden = false;
     $('updateHow').hidden = false;
   } else if (r.ahead){
     showMsg($('updateMsg'), t('update_ahead').replace('{v}', r.latest), 'ok');
   } else if (r.unknown){
     showMsg($('updateMsg'), t('update_unknown').replace('{v}', r.latest), 'ok');
     $('updateLink').href = r.url;
+    // Сборка не из релиза — подменять её релизом без спроса не предлагаем.
+    $('updateInstallBtn').hidden = true;
     $('updateHow').hidden = false;
   } else {
     showMsg($('updateMsg'), t('update_latest'), 'ok');
   }
+});
+
+/* «Обновить до …»: панель сама скачивает, сверяет и ставит новую версию,
+   потом перезапускается (selfupdate.go). Страница следит за шагами, а
+   после перезапуска ждёт, пока панель ответит новой версией, и
+   перезагружается — вход не слетает, сессия переезжает в новую копию. */
+let UPDATE_TO = '';
+$('updateInstallBtn').addEventListener('click', async () => {
+  const yes = await appConfirm(t('update_confirm').replace('{v}', UPDATE_TO), t('update_confirm_yes'));
+  if (!yes) return;
+  const btn = $('updateInstallBtn');
+  btn.disabled = true;
+  $('updateCheckBtn').disabled = true;
+  $('updateBar').hidden = false;
+  $('updateStage').textContent = t('upd_stage_download');
+  const fail = msg => {
+    $('updateBar').hidden = true;
+    $('updateStage').textContent = '';
+    btn.disabled = false;
+    $('updateCheckBtn').disabled = false;
+    showMsg($('updateMsg'), t('update_install_failed').replace('{e}', msg), 'err');
+  };
+  const {ok, data} = await api('/api/update/install', {});
+  if (!ok || data.error){ fail(data.error || t('err_internal')); return; }
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let stage = '';
+  // Шаги до перезапуска.
+  for (let i = 0; i < 400 && stage !== 'restart'; i++){
+    await sleep(1000);
+    let p;
+    try { p = (await api('/api/update/progress')).data; } catch(e){ break; }
+    if (p.error){ fail(p.error); return; }
+    stage = p.stage || stage;
+    if (stage) $('updateStage').textContent = t('upd_stage_' + stage);
+    if (!p.running && !p.error && stage !== 'restart') break;
+  }
+  $('updateStage').textContent = t('upd_stage_restart');
+  // Перезапуск: панель пропадает на несколько секунд и возвращается новой.
+  const deadline = Date.now() + 90000;
+  while (Date.now() < deadline){
+    await sleep(1500);
+    try {
+      const st = await api('/api/status');
+      if (st.ok && st.data.version && st.data.version.replace(/^v/, '') === UPDATE_TO){
+        toast(t('update_done').replace('{v}', UPDATE_TO));
+        setTimeout(() => location.reload(), 800);
+        return;
+      }
+    } catch(e){ /* панель ещё перезапускается */ }
+  }
+  fail(t('update_no_return'));
 });
 
 $('autostartCheck').addEventListener('change', async e => {

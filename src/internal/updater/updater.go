@@ -113,6 +113,15 @@ func Check(ctx context.Context) (Result, error) {
 	return res, nil
 }
 
+// Latest — последний релиз (с тем же часовым кешем, что и у Check).
+func Latest(ctx context.Context) (Release, error) {
+	rel, err := latest(ctx)
+	if err != nil {
+		return Release{}, err
+	}
+	return *rel, nil
+}
+
 func latest(ctx context.Context) (*Release, error) {
 	cacheMu.Lock()
 	if cached != nil && time.Since(cachedAt) < cacheTTL {
@@ -201,6 +210,10 @@ func parse(v string) ([3]int, bool) {
 // предлагать ей обычный файл было бы подменой одной программы другой.
 var VPN bool
 
+// Panel — эта сборка — веб-панель VPS (ssh_tunnel_panel): её файл в релизе
+// свой. Проставляет main панели.
+var Panel bool
+
 // AssetFor выбирает файл релиза для этой системы: на Windows — .exe (архив
 // нужен браузеру, а мы качаем сами), на Linux — файл под свою архитектуру.
 func AssetFor(rel Release, goos, goarch string) (Asset, bool) {
@@ -215,6 +228,9 @@ func AssetFor(rel Release, goos, goarch string) (Asset, bool) {
 		want = "ssh_tunnel_linux"
 		if VPN {
 			want = "ssh_tunnel_vpn_linux"
+		}
+		if Panel {
+			want = "ssh_tunnel_panel"
 		}
 		if goarch == "arm64" {
 			want += "_arm64"

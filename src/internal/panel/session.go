@@ -3,7 +3,9 @@ package panel
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -124,4 +126,62 @@ func isSecure(r *http.Request) bool {
 		return true
 	}
 	return r.Header.Get("X-Forwarded-Proto") == "https"
+}
+
+// handoffTTL — сколько файл с сессиями годен для новой копии панели. Он
+// пишется прямо перед перезапуском при обновлении: старый файл значит, что
+// обновление сорвалось, и подхватывать его нельзя.
+const handoffTTL = 2 * time.Minute
+
+type handoffSession struct {
+	ID         string    `json:"id"`
+	Username   string    `json:"username"`
+	MustChange bool      `json:"mustChange"`
+	Expires    time.Time `json:"expires"`
+}
+
+// saveHandoff сохраняет живые сессии для копии панели, которая придёт на
+// смену при обновлении (см. selfupdate.go): иначе обновление выкидывало бы
+// администратора на страницу входа. Файл только для root.
+func (m *sessionManager) saveHandoff(path string) error {
+	m.mu.Lock()
+	var list []handoffSession
+	now := time.Now()
+	for id, s := range m.byID {
+		if now.Before(s.expires) {
+			list = append(list, handoffSession{ID: id, Username: s.username, MustChange: s.mustChange, Expires: s.expires})
+		}
+	}
+	m.mu.Unlock()
+	data, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+// loadHandoff подхватывает сессии прежней копии и сразу удаляет файл: он
+// одноразовый.
+func (m *sessionManager) loadHandoff(path string) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	data, err := os.ReadFile(path)
+	os.Remove(path)
+	if err != nil || time.Since(st.ModTime()) > handoffTTL {
+		return
+	}
+	var list []handoffSession
+	if json.Unmarshal(data, &list) != nil {
+		return
+	}
+	now := time.Now()
+	m.mu.Lock()
+	for _, h := range list {
+		if h.ID != "" && now.Before(h.Expires) {
+			m.byID[h.ID] = session{username: h.Username, mustChange: h.MustChange, expires: h.Expires}
+		}
+	}
+	m.mu.Unlock()
 }

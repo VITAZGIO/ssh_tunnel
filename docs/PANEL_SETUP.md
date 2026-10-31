@@ -204,6 +204,26 @@ sudo bash install.sh ./ssh_tunnel_panel --lan --ssh-host=203.0.113.10
 переименованием, подключение других серверов кодом. Подробно — в
 [MESH.md](MESH.md).
 
+## Обновление
+
+**Настройки → Версия панели → «Проверить обновления»**: если вышла новая
+версия, появится кнопка «Обновить до …». Панель сама скачает свой файл из
+релиза на GitHub, сверит его с `SHA256SUMS.txt` того же релиза, подменит
+`/usr/local/bin/ssh_tunnel_panel` и перезапустится — примерно за минуту,
+страница обновится сама, входить заново не нужно. Подключённые устройства
+это не затрагивает.
+
+Подменяет файл не сама панель (служба запущена с `ProtectSystem`, `/usr` ей
+только на чтение), а временная служба `systemd-run` — так же, как ставится
+meshd.
+
+Версии до 1.7.3 этой кнопки не имеют — их один раз обновляют командой под
+root, дальше можно из настроек:
+
+```bash
+case $(uname -m) in aarch64|arm64) f=ssh_tunnel_panel_arm64;; *) f=ssh_tunnel_panel;; esac; curl -fsSL -o /tmp/ssh_tunnel_panel "https://github.com/VITAZGIO/ssh_tunnel/releases/latest/download/$f" && install -m 755 /tmp/ssh_tunnel_panel /usr/local/bin/ssh_tunnel_panel && systemctl restart ssh_tunnel_panel
+```
+
 ## Как снять панель
 
 ```bash

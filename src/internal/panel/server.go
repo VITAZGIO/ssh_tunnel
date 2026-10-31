@@ -50,6 +50,12 @@ type Server struct {
 	settings *SettingsStore
 	mesh     *MeshManager
 
+	// dataDir — папка данных панели: сюда скачивается обновление и
+	// сохраняются сессии на время перезапуска (selfupdate.go). Пусто —
+	// обновление из панели недоступно.
+	dataDir string
+	update  selfUpdate
+
 	// connUID узнаёт uid звонящего на входе создания пользователей
 	// (selfservice.go); nil — по /proc/net/tcp. Подменяется в тестах.
 	connUID func(*http.Request) (int, bool)
@@ -58,6 +64,16 @@ type Server struct {
 // WithHistory подключает историю трафика по дням (traffic_history.go).
 func (s *Server) WithHistory(h *TrafficHistory) *Server {
 	s.history = h
+	return s
+}
+
+// WithDataDir задаёт папку данных панели и подхватывает сессии, оставленные
+// прежней копией при обновлении.
+func (s *Server) WithDataDir(dir string) *Server {
+	s.dataDir = dir
+	if dir != "" {
+		s.sessions.loadHandoff(handoffPath(dir))
+	}
 	return s
 }
 
@@ -99,6 +115,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/traffic", s.requireAuth(s.handleTraffic))
 	mux.HandleFunc("/api/autostart", s.requireAuth(s.handleAutostart))
 	mux.HandleFunc("/api/update", s.requireAuth(s.handleUpdate))
+	mux.HandleFunc("/api/update/install", s.requireAuth(s.handleUpdateInstall))
+	mux.HandleFunc("/api/update/progress", s.requireAuth(s.handleUpdateProgress))
 	s.meshRoutes(mux)
 	return mux
 }
