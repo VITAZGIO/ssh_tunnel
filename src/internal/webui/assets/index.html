@@ -337,6 +337,7 @@
   .chk input{margin-top:2px;flex:none;accent-color:var(--accent)}
   .chk .lbl{font-size:13px}
   .chk-row{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line)}
+  .chk-row[hidden]{display:none}
   .chk-row .chk{border-top:none;flex:1}
 
   /* Значок «?» вместо всегда открытого пояснения под галочкой — наводишь
@@ -501,6 +502,7 @@
   .nav:hover{background:var(--card)}
   /* Профили приложения: полоска вверху настроек. */
   .apBar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0 12px}
+  .apBar[hidden]{display:none}
   .apBar button{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:4px 12px;
         border:1px solid var(--line);background:transparent;color:var(--text);font:inherit;font-size:13px;cursor:pointer}
   .apBar button.on{background:var(--card2);box-shadow:inset 0 -2px 0 var(--accent);font-weight:600}
@@ -1070,12 +1072,12 @@
       </div>
       <div class="chk-row" id="hotspotRow" hidden>
         <label class="chk"><input type="checkbox" id="hotspotVpn">
-          <span class="lbl" data-i18n="hotspot_vpn">Устройства на точке доступа — через VPN</span>
+          <span class="lbl" data-i18n="hotspot_vpn">Раздавать VPN на мобильную точку доступа</span>
           <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)"
             >?<span class="tip" data-i18n="hotspot_vpn_note">Если этот компьютер раздаёт Wi-Fi (мобильная
-            точка доступа Windows): галочка стоит — подключённые телефоны и ноутбуки ходят в интернет через
-            сервер, как и сам компьютер; снята — напрямую, через обычную сеть компьютера. Работает, когда
-            включён обход блокировок.</span></span></label>
+            точка доступа Windows), при включённом обходе подключённые телефоны и ноутбуки ходят в интернет
+            через сервер, как и сам компьютер. Галочка снята — им доступен только твой сервер (например, свой
+            VPN на телефоне), остальной интернет — нет. Включи точку доступа до обхода.</span></span></label>
       </div>
       <div class="chk-row" id="showPickerRow" style="display:none">
         <label class="chk"><input type="checkbox" id="showServerPicker">
@@ -1132,11 +1134,7 @@
       <button type="button" class="btn" id="adBlockPaste" data-i18n="adblock_paste">Вставить из буфера</button>
       <button type="button" class="btn" id="adBlockCopy" data-i18n="adblock_copy">Скопировать</button>
     </div>
-    <div class="wideRow">
-      <button class="btn primary" id="adBlockUpdate" data-i18n="adblock_update">Обновить список</button>
-      <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)">?<span class="tip" data-i18n="adblock_help"></span></span>
-    </div>
-    <span class="hint" id="adBlockNote" style="display:block;margin-top:6px"></span>
+    <span class="hint" id="adBlockNote" style="display:block;margin-top:6px" data-i18n="adblock_help"></span>
   </div>
 
   <!-- ИСКЛЮЧЕНИЯ ДОМЕНОВ: два списка рядом, переключаются кнопками сверху и
@@ -1894,8 +1892,8 @@ const I18N = {
     adblock_sources:'Списки блокировки', adblock_update:'Обновить список', adblock_allow:'Никогда не блокировать',
     adblock_loading:'скачиваю…', adblock_count:'загружено имён: {n}',
     adblock_help:'Как на телефоне: запрос имени из списка получает отказ, и реклама не грузится ни в одной '+
-      'программе. Списки — ссылки или файлы в формате hosts, по одному на строку. Скачиваются только кнопкой '+
-      '«Обновить список» и дальше работают без сети.',
+      'программе. Списки — ссылки или файлы в формате hosts, по одному на строку. Скачиваются по кнопке '+
+      '«Сохранить» и дальше работают без сети.',
     direct_label:'Всегда напрямую', scan_net:'Проверить сеть',
     direct_ph:'intranet.example.com\n.corp.example\n10.8.0.0/16',
     direct_help_html:'<p>Сети и домены, которые не надо вести через сервер. Домашние и офисные '+
@@ -1909,8 +1907,8 @@ const I18N = {
       'компьютера и скажет, сломается что-нибудь или нет.</p>',
     verbose:'Подробный журнал', connect_on_launch:'Подключаться сразу при запуске',
     show_picker:'Показывать выбор сервера на главном экране',
-    hotspot_vpn:'Устройства на точке доступа — через VPN',
-    hotspot_vpn_note:'Если этот компьютер раздаёт Wi-Fi (мобильная точка доступа Windows): галочка стоит — подключённые телефоны и ноутбуки ходят в интернет через сервер, как и сам компьютер; снята — напрямую, через обычную сеть компьютера. Работает, когда включён обход блокировок.',
+    hotspot_vpn:'Раздавать VPN на мобильную точку доступа',
+    hotspot_vpn_note:'Если этот компьютер раздаёт Wi-Fi (мобильная точка доступа Windows), при включённом обходе подключённые телефоны и ноутбуки ходят в интернет через сервер, как и сам компьютер. Галочка снята — им доступен только твой сервер (например, свой VPN на телефоне), остальной интернет — нет. Включи точку доступа до обхода.',
     app_profiles_on:'Профили приложения', app_profile:'Профиль', app_profile_add:'Новый профиль',
     app_profiles_note:'Несколько полных наборов настроек — серверы, программы, галочки. Вверху настроек появится полоска «Профиль 1 +»: плюс создаёт новый профиль с нуля, щелчок переключает, крестик удаляет. Удобно настроить профиль для другого человека и отдать ему экспортом.',
     app_profile_del:'Удалить профиль «{n}» со всеми его настройками и серверами?',
@@ -2205,8 +2203,8 @@ const I18N = {
     adblock_sources:'Block lists', adblock_update:'Update list', adblock_allow:'Never block',
     adblock_loading:'downloading…', adblock_count:'names loaded: {n}',
     adblock_help:'Same as on the phone: a lookup of a listed name is refused, so ads don\'t load in any '+
-      'program. Lists are links or files in hosts format, one per line. They are downloaded only by the '+
-      '"Update list" button and then work offline.',
+      'program. Lists are links or files in hosts format, one per line. They are downloaded when you press '+
+      '"Save" and then work offline.',
     direct_label:'Always direct', scan_net:'Scan network',
     direct_ph:'intranet.example.com\n.corp.example\n10.8.0.0/16',
     direct_help_html:'<p>Networks and domains that shouldn\'t go through the server. Home and office '+
@@ -2220,11 +2218,11 @@ const I18N = {
       'adapters and tell you if anything would break.</p>',
     verbose:'Verbose log', connect_on_launch:'Connect immediately on launch',
     show_picker:'Show server picker on the home screen',
-    hotspot_vpn:'Devices on the hotspot go through VPN',
+    hotspot_vpn:'Share VPN over the mobile hotspot',
     app_profiles_on:'App profiles', app_profile:'Profile', app_profile_add:'New profile',
     app_profiles_note:'Several complete sets of settings — servers, apps, checkboxes. A “Profile 1 +” strip appears at the top of settings: plus creates a new empty profile, a click switches, the cross deletes. Handy to set up a profile for someone else and hand it over by export.',
     app_profile_del:'Delete profile “{n}” with all its settings and servers?',
-    hotspot_vpn_note:'If this computer shares Wi-Fi (Windows mobile hotspot): checked — connected phones and laptops reach the internet through the server, like the computer itself; unchecked — directly, through the computer’s normal network. Applies while blocking bypass is on.',
+    hotspot_vpn_note:'If this computer shares Wi-Fi (Windows mobile hotspot), connected phones and laptops reach the internet through the server while blocking bypass is on, like the computer itself. Unchecked — they can reach only your server (e.g. their own VPN), not the rest of the internet. Turn the hotspot on before the bypass.',
     auto_pick_fastest:'Connect to the fastest server',
     auto_pick_fastest_note:"When connecting, the program measures every server's response time and picks "+
       "the fastest one. If it doesn't come up or drops, it moves on to the next-best one — visible in the "+
@@ -3549,18 +3547,14 @@ $('adBlockCopy').onclick = async () => {
   $('adBlockNote').textContent = ok ? tr('copied') : tr('copy_manually');
   setTimeout(() => $('adBlockNote').textContent = '', 3000);
 };
-/* Скачать списки и сразу применить. Источники берём из поля, даже если
-   «Сохранить» ещё не нажали, — человек ждёт, что кнопка возьмёт то, что видит. */
-$('adBlockUpdate').onclick = async () => {
-  if(adBlockTab !== 'block'){ adBlockTab = 'block'; renderAdBlockTab(); }
-  if(!$('adBlockSources').value.trim()){ $('adBlockNote').textContent = tr('adblock_sources_ph'); return; }
-  $('adBlockUpdate').disabled = true;
+/* Скачать списки и сразу применить. Отдельной кнопки нет: это делает
+   «Сохранить» на странице рекламы (см. обработчик сохранения). */
+async function updateAdBlockLists(){
+  if(!$('adBlockEnabled').checked || !$('adBlockSources').value.trim()) return;
   $('adBlockNote').textContent = tr('adblock_loading');
-  try {
-    const r = await api('/api/adblock/update', {sources: $('adBlockSources').value});
-    $('adBlockNote').textContent = r.error ? r.error : tr('adblock_count').replace('{n}', r.count);
-  } finally { $('adBlockUpdate').disabled = false; }
-};
+  const r = await api('/api/adblock/update', {sources: $('adBlockSources').value});
+  $('adBlockNote').textContent = r.error ? r.error : tr('adblock_count').replace('{n}', r.count);
+}
 
 /* ---------- исключения доменов ---------- */
 /* Два списка: «всегда напрямую» и «всегда в туннель». Кнопки сверху
@@ -4440,6 +4434,8 @@ $('save').onclick = async () => {
   applyDoc(r.config);
   $('savedNote').textContent = r.note ? tr('saved') + ' — ' + r.note : tr('saved');
   setTimeout(() => $('savedNote').textContent = '', 4000);
+  // На странице рекламы «Сохранить» заодно скачивает списки.
+  if(current === 'viewAdBlock') updateAdBlockLists();
 };
 
 function fillProfileForm(p){

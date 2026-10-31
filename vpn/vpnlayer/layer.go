@@ -49,15 +49,14 @@ type Layer struct {
 	// заблокированных имён. Атомарно, без mu: запрос состояния не должен
 	// ждать, пока адаптер поднимается или снимается.
 	stats atomic.Pointer[core.Stats]
-
-	// hotspotDirect — устройства точки доступа ходят напрямую, а не через
-	// сервер (config.HotspotDirect, см. ApplyConfig).
-	hotspotDirect atomic.Bool
 }
 
-// ApplyConfig принимает общие настройки программы (реализует app.ConfigLayer).
+// ApplyConfig принимает общие настройки программы (реализует app.ConfigLayer):
+// раздавать ли VPN на мобильную точку доступа Windows.
 func (l *Layer) ApplyConfig(cfg config.Config) {
-	l.hotspotDirect.Store(cfg.HotspotDirect)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.sys.setShare(!cfg.HotspotDirect)
 }
 
 // PrepareSelfCheck пускает проверочное соединение самопроверки мимо адаптера
@@ -195,6 +194,7 @@ func (l *Layer) bringDown() {
 	// Сначала адаптер, потом всё остальное (запрет DNS, настройки DNS
 	// системы): наоборот на долю секунды открылось бы окно, когда DNS ещё
 	// смотрит в адаптер, а защиты уже нет.
+	l.sys.beforeClose()
 	if l.engine != nil {
 		l.engine.Close() // закрывает и устройство
 		l.engine = nil
@@ -349,12 +349,6 @@ func (c *coreSwitch) ServeConn(conn net.Conn, target string, byIP bool) {
 	l.mu.Unlock()
 	if byIP && isServerTarget(target, servers, port) {
 		conn.Close()
-		return
-	}
-	// Устройство на точке доступа, которому велено мимо сервера, — напрямую
-	// через настоящую сеть этого компьютера.
-	if l.hotspotDirect.Load() && isForwarded(conn.RemoteAddr(), localAddrs) {
-		t.ServeConnDirect(conn, target, byIP)
 		return
 	}
 	t.ServeConn(conn, target, byIP)

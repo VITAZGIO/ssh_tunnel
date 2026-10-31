@@ -1,7 +1,6 @@
 package vpnlayer
 
 import (
-	"net"
 	"net/netip"
 	"testing"
 )
@@ -65,30 +64,5 @@ func TestМаршрутыНеПерекрываютDNSАдаптера(t *testin
 	fake := netip.MustParsePrefix(fakeNet)
 	if !adapterPrefix4.Contains(fake.Addr()) || fake.Contains(dnsAddr) {
 		t.Fatal("подставные адреса — в подсети адаптера, но не на месте DNS")
-	}
-}
-
-// Свои соединения приходят в адаптер с адреса адаптера (или с адреса своей
-// сетевой карты), чужие — с адресов устройств точки доступа.
-func TestIsForwarded(t *testing.T) {
-	local := func() []netip.Addr {
-		return []netip.Addr{netip.MustParseAddr("192.168.2.101"), netip.MustParseAddr("192.168.137.1")}
-	}
-	cases := map[string]bool{
-		"198.18.0.1:50000":          false, // сам компьютер через адаптер
-		"[fd00:c0de:7075::1]:50000": false,
-		"192.168.2.101:50000":       false, // приложение привязано к сетевой карте
-		"127.0.0.1:50000":           false,
-		"192.168.137.23:50000":      true, // телефон на точке доступа
-		"[fe80::1234%25eth0]:50000": true,
-	}
-	for src, want := range cases {
-		addr, err := net.ResolveTCPAddr("tcp", src)
-		if err != nil {
-			t.Fatalf("%s: %v", src, err)
-		}
-		if got := isForwarded(addr, local); got != want {
-			t.Errorf("%s: isForwarded=%v, ожидалось %v", src, got, want)
-		}
 	}
 }

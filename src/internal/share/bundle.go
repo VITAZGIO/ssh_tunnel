@@ -47,7 +47,7 @@ type Bundle struct {
 	AdBlockEnabled   bool   `json:"adBlockEnabled,omitempty"`
 	AdBlockSources   string `json:"adBlockSources,omitempty"`
 	AdBlockAllowlist string `json:"adBlockAllowlist,omitempty"`
-	// HotspotDirect — устройства точки доступа Windows мимо сервера.
+	// HotspotDirect — не раздавать VPN на мобильную точку доступа Windows.
 	HotspotDirect bool `json:"hotspotDirect,omitempty"`
 
 	// Mobile — раздел телефона (DNS, режим блокировки рекламы, белый список,

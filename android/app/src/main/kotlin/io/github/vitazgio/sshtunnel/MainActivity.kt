@@ -1437,6 +1437,7 @@ class MainActivity : AppCompatActivity() {
                         // Кнопка могла остаться «Установить» или «Открыть
                         // страницу релиза» от прошлой загрузки.
                         readyDownloadId = -1
+                        readyApk = null
                         (updateDownloadBtn as TextView).setText(R.string.update_download)
                         updateDownloadBtn.setOnClickListener { onDownloadUpdate() }
                         findViewById<View>(R.id.updateProgress).visibility = View.GONE
@@ -1453,13 +1454,15 @@ class MainActivity : AppCompatActivity() {
     private var pendingUpdate: UpdateCheck.Result? = null
 
     /**
-     * Скачивает APK системным менеджером загрузок: он умеет докачивать,
-     * показывает прогресс в шторке и кладёт файл в общие «Загрузки», откуда
-     * человек откроет его и установит сам. Если у релиза APK почему-то нет —
-     * открываем страницу релиза в браузере.
+     * Скачивает APK сама программа и открывает установщик. Раньше качал
+     * системный менеджер загрузок, и на части телефонов (Xiaomi) при
+     * включённом VPN он намертво вставал «в очередь» / «жду сети». Сама
+     * программа исключена из VPN, поэтому идёт к GitHub напрямую. Если у
+     * релиза APK почему-то нет — открываем страницу релиза в браузере.
      */
     private fun onDownloadUpdate() {
         // Уже скачано — кнопка стала «Установить».
+        readyApk?.let { if (it.exists()) { installApk(it); return } }
         val ready = readyDownloadId
         if (ready >= 0) {
             installDownloaded(ready)
@@ -1471,26 +1474,101 @@ class MainActivity : AppCompatActivity() {
             openLink(u.releaseUrl)
             return
         }
+        downloadApk(u)
+    }
+
+    // Скачанный самой программой APK, который осталось установить.
+    private var readyApk: java.io.File? = null
+
+    private fun downloadApk(u: UpdateCheck.Result) {
+        // Старую загрузку менеджера загрузок (из прошлой версии) снимаем.
+        if (settings.updateDownloadId >= 0) {
+            try {
+                (getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager)
+                    .remove(settings.updateDownloadId)
+            } catch (_: Exception) {
+            }
+            settings.updateDownloadId = -1
+        }
+        val bar = findViewById<android.widget.ProgressBar>(R.id.updateProgress)
+        bar.visibility = View.VISIBLE
+        bar.isIndeterminate = true
+        updateNote.text = getString(R.string.update_downloading)
+        updateDownloadBtn.visibility = View.GONE
+        Thread {
+            val dir = java.io.File(cacheDir, "updates").apply { mkdirs() }
+            dir.listFiles()?.forEach { it.delete() }
+            val file = java.io.File(dir, "ssh_tunnel-${u.latest}.apk")
+            val part = java.io.File(dir, file.name + ".part")
+            try {
+                val conn = java.net.URL(u.apkUrl).openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 15000
+                conn.readTimeout = 30000
+                conn.instanceFollowRedirects = true
+                if (conn.responseCode != 200) throw Exception("HTTP ${conn.responseCode}")
+                val total = conn.contentLengthLong
+                var done = 0L
+                var shown = 0L
+                conn.inputStream.use { inp ->
+                    part.outputStream().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        while (true) {
+                            val n = inp.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            done += n
+                            val now = System.currentTimeMillis()
+                            if (now - shown > 300) {
+                                shown = now
+                                val d = done
+                                runOnUiThread {
+                                    updateNote.text = if (total > 0) getString(R.string.update_progress, mb(d), mb(total))
+                                        else getString(R.string.update_progress_unknown, mb(d))
+                                    if (total > 0) {
+                                        bar.isIndeterminate = false
+                                        bar.progress = (d * bar.max / total).toInt()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (total > 0 && done != total) throw Exception("оборвалось на $done из $total")
+                if (!part.renameTo(file)) throw Exception("не удалось сохранить файл")
+                runOnUiThread {
+                    readyApk = file
+                    bar.isIndeterminate = false
+                    bar.progress = bar.max
+                    updateNote.setText(R.string.update_done)
+                    (updateDownloadBtn as TextView).setText(R.string.update_install)
+                    updateDownloadBtn.setOnClickListener { onDownloadUpdate() }
+                    updateDownloadBtn.visibility = View.VISIBLE
+                    installApk(file)
+                }
+            } catch (e: Exception) {
+                part.delete()
+                runOnUiThread {
+                    bar.visibility = View.GONE
+                    updateNote.text = getString(R.string.update_open_release)
+                    (updateDownloadBtn as TextView).setText(R.string.update_release_btn)
+                    updateDownloadBtn.setOnClickListener { openLink(u.releaseUrl) }
+                    updateDownloadBtn.visibility = View.VISIBLE
+                }
+            }
+        }.start()
+    }
+
+    /** Открывает скачанный программой APK в системном установщике. */
+    private fun installApk(file: java.io.File) {
         try {
-            val req = android.app.DownloadManager.Request(Uri.parse(u.apkUrl))
-                .setTitle("ssh_tunnel ${u.latest}")
-                .setMimeType("application/vnd.android.package-archive")
-                .setNotificationVisibility(
-                    android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-                )
-                .setDestinationInExternalPublicDir(
-                    android.os.Environment.DIRECTORY_DOWNLOADS, "ssh_tunnel-${u.latest}.apk"
-                )
-            val dm = getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-            settings.updateDownloadId = dm.enqueue(req)
-            updateNote.text = getString(R.string.update_downloading)
-            updateDownloadBtn.visibility = View.GONE
-            pollDownload()
+            val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", file)
+            startActivity(
+                Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
         } catch (e: Exception) {
-            // Менеджер загрузок отключён (такое бывает на прошивках без
-            // сервисов Google) — тогда пусть скачивает браузер.
-            updateNote.text = getString(R.string.update_open_release)
-            openLink(u.releaseUrl)
+            pendingUpdate?.let { openLink(it.releaseUrl) }
         }
     }
 

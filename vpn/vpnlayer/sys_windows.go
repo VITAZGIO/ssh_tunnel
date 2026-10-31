@@ -37,6 +37,12 @@ type sys struct {
 	servers []netip.Addr
 	pinned  []pinnedRoute
 
+	// shareWanted — раздавать VPN на мобильную точку доступа (см.
+	// hotspot_windows.go); sharePrev — какое подключение было общим до нас
+	// (пусто — мы ничего не меняли).
+	shareWanted bool
+	sharePrev   string
+
 	dev   *device
 	guard *wfp.Guard
 	v6    bool // у адаптера есть IPv6 — маршруты ::/1 ставить есть куда
@@ -231,6 +237,7 @@ func (s *sys) setFull(full bool) error {
 		// Сначала запрет DNS и DNS адаптера, потом маршруты — порядок не
 		// важен для утечек (обход выключают нарочно), но так Windows быстрее
 		// перестаёт спрашивать у нас имена обычных сайтов.
+		s.unshare()
 		s.guard.Close()
 		s.guard = nil
 		s.unpinServers()
@@ -274,6 +281,9 @@ func (s *sys) setFull(full bool) error {
 	}
 	s.full = true
 	s.pinServers()
+	if s.shareWanted {
+		s.share()
+	}
 	return nil
 }
 
@@ -454,3 +464,50 @@ func (s *sys) unpinServers() {
 	}
 	s.pinned = nil
 }
+
+// setShare — галочка «Раздавать VPN на мобильную точку доступа». При
+// включённом обходе применяется сразу.
+func (s *sys) setShare(want bool) {
+	s.shareWanted = want
+	if !s.full {
+		return
+	}
+	if want {
+		s.share()
+	} else {
+		s.unshare()
+	}
+}
+
+func (s *sys) share() {
+	if s.sharePrev != "" {
+		return
+	}
+	prev, err := hotspotOn(adapterName)
+	if err != nil {
+		s.bus.Warnf("Не удалось раздать VPN на точку доступа: %v", err)
+		return
+	}
+	if prev != "" {
+		s.sharePrev = prev
+		s.bus.Infof("Точка доступа раздаёт интернет через VPN")
+	}
+}
+
+// unshare возвращает точке доступа прежнее общее подключение. Зовётся и
+// перед тем, как адаптер исчезнет (beforeClose).
+func (s *sys) unshare() {
+	if s.sharePrev == "" {
+		return
+	}
+	if err := hotspotOff(adapterName, s.sharePrev); err != nil {
+		s.bus.Warnf("Не удалось вернуть точку доступа на обычное подключение: %v. "+
+			"Выключи и включи её в параметрах Windows", err)
+	} else {
+		s.bus.Infof("Точка доступа снова раздаёт обычный интернет")
+	}
+	s.sharePrev = ""
+}
+
+// beforeClose — то, что надо сделать, пока адаптер ещё существует.
+func (s *sys) beforeClose() { s.unshare() }
