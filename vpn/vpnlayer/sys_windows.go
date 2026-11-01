@@ -110,6 +110,12 @@ func findDefault(family winipcfg.AddressFamily, ours uint64) (defaultRoute, bool
 		if err != nil || !iface.Connected {
 			continue
 		}
+		// Отключённый Wi-Fi бывает «подключён» на уровне IP и держит
+		// маршрут по умолчанию живым ещё долго. Привязав к нему прямые
+		// соединения, мы оставили бы их висеть в SYN_SENT до перезагрузки.
+		if ifr, err := row.InterfaceLUID.Interface(); err != nil || ifr.OperStatus != winipcfg.IfOperStatusUp {
+			continue
+		}
 		routes = append(routes, defaultRoute{
 			luid:    uint64(row.InterfaceLUID),
 			ifIndex: row.InterfaceIndex,
