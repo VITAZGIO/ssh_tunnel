@@ -4,6 +4,9 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+
+	"golang.org/x/sys/windows"
+	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
 // Раздача VPN на мобильную точку доступа Windows.
@@ -16,6 +19,11 @@ import (
 // WireGuard: сделать общим подключением сам адаптер VPN (вкладка «Доступ» в
 // его свойствах). Тогда телефон ходит через сервер, как и сам компьютер.
 //
+// Мобильная точка доступа Windows 10/11 включает ICS по-своему: её адаптер
+// (Microsoft Wi-Fi Direct Virtual Adapter) не помечен как «домашняя сеть»,
+// и ни одно подключение не значится общим. Поэтому домашней сетью делаем сам
+// этот адаптер, если он подключён.
+//
 // Делается это через COM-объект HNetCfg.HNetShare — тот же, что стоит за
 // вкладкой «Доступ». Проще всего достать его из PowerShell: служба VPN и
 // так работает с правами системы.
@@ -27,14 +35,16 @@ import (
 func hotspotOn(adapter string) (string, error) {
 	out, err := runPS(`
 $m = New-Object -ComObject HNetCfg.HNetShare
-$pub = $null; $pubName = ''; $priv = $null; $tun = $null
+$pub = $null; $pubName = ''; $priv = $null; $hot = $null; $tun = $null
 foreach ($c in $m.EnumEveryConnection) {
   $p = $m.NetConnectionProps.Invoke($c)
   $s = $m.INetSharingConfigurationForINetConnection.Invoke($c)
   if ($p.Name -eq '` + adapter + `') { $tun = $s; continue }
   if ($s.SharingEnabled -and $s.SharingConnectionType -eq 0) { $pub = $s; $pubName = $p.Name }
   if ($s.SharingEnabled -and $s.SharingConnectionType -eq 1) { $priv = $s }
+  elseif (-not $hot -and $p.Status -eq 2 -and $p.DeviceName -like '*Wi-Fi Direct Virtual Adapter*') { $hot = $s }
 }
+if (-not $priv) { $priv = $hot }
 if (-not $priv -or -not $tun) { exit 0 }
 if ($tun.SharingEnabled -and $tun.SharingConnectionType -eq 0) { exit 0 }
 if ($pub) { $pub.DisableSharing() }
@@ -78,9 +88,24 @@ foreach ($c in $m.EnumEveryConnection) {
 }
 if ($tun -and $tun.SharingEnabled) { $tun.DisableSharing() }
 if ($back) { $back.EnableSharing(0) }
-if ($priv -and $back) { $priv.EnableSharing(1) }
+if ($priv -and $back) { $priv.EnableSharing(1) } elseif ($priv) { $priv.DisableSharing() }
 `)
 	return err
+}
+
+// hotspotUp — включена ли сейчас мобильная точка доступа: её адаптер
+// подключён. Дёшево, без PowerShell — зовётся раз в несколько секунд.
+func hotspotUp() bool {
+	ads, err := winipcfg.GetAdaptersAddresses(windows.AF_UNSPEC, winipcfg.GAAFlagDefault)
+	if err != nil {
+		return false
+	}
+	for _, a := range ads {
+		if a.OperStatus == winipcfg.IfOperStatusUp && strings.Contains(a.Description(), "Wi-Fi Direct Virtual Adapter") {
+			return true
+		}
+	}
+	return false
 }
 
 func runPS(script string) (string, error) {
