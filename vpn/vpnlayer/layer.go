@@ -38,8 +38,8 @@ type Layer struct {
 	unwatch func()
 	// stopHotspot останавливает слежку за точкой доступа (watchHotspot).
 	stopHotspot chan struct{}
-	servers []netip.Addr
-	sshPort int
+	servers     []netip.Addr
+	sshPort     int
 	// meshOnly — обход блокировок выключен: в адаптер идёт только сеть
 	// устройств, интернет — как без VPN (см. SetBypass).
 	meshOnly bool
@@ -186,9 +186,13 @@ func (l *Layer) bringUp() error {
 	return nil
 }
 
-// watchHotspot раз в несколько секунд проверяет, не включили ли (не
-// выключили ли) мобильную точку доступа: Windows об этом не сообщает, а
-// раздавать VPN надо и тогда, когда точку доступа включили после VPN.
+// watchHotspot раз в несколько секунд сверяет то, о чём система сообщает
+// ненадёжно или никак:
+//   - настоящую сеть: пропавший Wi-Fi не всегда убирает свой маршрут по
+//     умолчанию, уведомления о смене нет, и прямые соединения так и шли бы
+//     в мёртвую карту (NetBird, «всегда напрямую», исключённые программы);
+//   - мобильную точку доступа: раздавать VPN надо и тогда, когда её
+//     включили после VPN.
 func (l *Layer) watchHotspot(stop chan struct{}) {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
@@ -198,11 +202,16 @@ func (l *Layer) watchHotspot(stop chan struct{}) {
 			return
 		case <-t.C:
 		}
+		changed := false
 		l.mu.Lock()
 		if l.up {
+			changed = l.sys.refresh()
 			l.sys.syncShare()
 		}
 		l.mu.Unlock()
+		if changed {
+			l.networkChanged()
+		}
 	}
 }
 
