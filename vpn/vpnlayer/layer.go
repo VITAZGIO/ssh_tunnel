@@ -36,6 +36,8 @@ type Layer struct {
 	engine  *core.Engine
 	up      bool
 	unwatch func()
+	// stopHotspot останавливает слежку за точкой доступа (watchHotspot).
+	stopHotspot chan struct{}
 	servers []netip.Addr
 	sshPort int
 	// meshOnly — обход блокировок выключен: в адаптер идёт только сеть
@@ -178,8 +180,30 @@ func (l *Layer) bringUp() error {
 	} else {
 		l.unwatch = unwatch
 	}
+	l.stopHotspot = make(chan struct{})
+	go l.watchHotspot(l.stopHotspot)
 	l.sys.flushDNS()
 	return nil
+}
+
+// watchHotspot раз в несколько секунд проверяет, не включили ли (не
+// выключили ли) мобильную точку доступа: Windows об этом не сообщает, а
+// раздавать VPN надо и тогда, когда точку доступа включили после VPN.
+func (l *Layer) watchHotspot(stop chan struct{}) {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+		}
+		l.mu.Lock()
+		if l.up {
+			l.sys.syncShare()
+		}
+		l.mu.Unlock()
+	}
 }
 
 func (l *Layer) bringDown() {
@@ -190,6 +214,10 @@ func (l *Layer) bringDown() {
 	if l.unwatch != nil {
 		l.unwatch()
 		l.unwatch = nil
+	}
+	if l.stopHotspot != nil {
+		close(l.stopHotspot)
+		l.stopHotspot = nil
 	}
 	// Сначала адаптер, потом всё остальное (запрет DNS, настройки DNS
 	// системы): наоборот на долю секунды открылось бы окно, когда DNS ещё

@@ -41,6 +41,7 @@ type sys struct {
 	// hotspot_windows.go); sharePrev — какое подключение было общим до нас
 	// (пусто — мы ничего не меняли).
 	shareWanted bool
+	shareTried  bool
 	sharePrev   string
 
 	dev   *device
@@ -281,9 +282,7 @@ func (s *sys) setFull(full bool) error {
 	}
 	s.full = true
 	s.pinServers()
-	if s.shareWanted {
-		s.share()
-	}
+	s.syncShare()
 	return nil
 }
 
@@ -469,12 +468,23 @@ func (s *sys) unpinServers() {
 // включённом обходе применяется сразу.
 func (s *sys) setShare(want bool) {
 	s.shareWanted = want
-	if !s.full {
-		return
-	}
-	if want {
+	s.syncShare()
+}
+
+// syncShare приводит раздачу в соответствие с тем, что сейчас: точку доступа
+// включают и выключают когда угодно, и до VPN, и после. Зовётся при
+// включении обхода, при смене галочки и раз в несколько секунд (см.
+// Layer.watchHotspot).
+func (s *sys) syncShare() {
+	up := s.full && s.shareWanted && hotspotUp()
+	switch {
+	case up && s.sharePrev == "" && !s.shareTried:
+		// Не вышло раз — не пытаемся каждые пять секунд, пока точку
+		// доступа не перезапустят.
+		s.shareTried = true
 		s.share()
-	} else {
+	case !up:
+		s.shareTried = false
 		s.unshare()
 	}
 }

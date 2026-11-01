@@ -469,4 +469,5 @@ func (s *sys) setServers([]netip.Addr) {}
 // setShare и beforeClose — раздача VPN на мобильную точку доступа есть
 // только на Windows (см. hotspot_windows.go).
 func (s *sys) setShare(bool) {}
+func (s *sys) syncShare()     {}
 func (s *sys) beforeClose()  {}
