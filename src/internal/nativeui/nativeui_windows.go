@@ -19,7 +19,6 @@
 package nativeui
 
 import (
-	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -469,7 +468,6 @@ func Quit() {
 	}
 }
 
-
 // Run создаёт окно и крутит цикл сообщений до выхода из программы.
 // Возвращается только когда пользователь выбрал «Выход».
 func Run(opts Options) error {
@@ -478,7 +476,7 @@ func Run(opts Options) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	view := webview2.NewWithOptions(webview2.WebViewOptions{
+	view, err := newView(webview2.WebViewOptions{
 		Debug:     false,
 		AutoFocus: true,
 		DataPath:  opts.DataPath,
@@ -490,8 +488,8 @@ func Run(opts Options) error {
 			Center: true,
 		},
 	})
-	if view == nil {
-		return fmt.Errorf("не удалось создать окно (нет компонента WebView2)")
+	if err != nil {
+		return err
 	}
 
 	u := &ui{opts: opts, view: view, hwnd: uintptr(view.Window())}
