@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"sshtunnel/internal/config"
@@ -74,28 +75,27 @@ func (a *App) connectCandidates(cfg config.Config) []config.Profile {
 // поднимется. Ошибка из-за ключа или имени пользователя останавливает попытки
 // совсем: другой сервер её не чинит, а незаметно подключиться не туда — хуже
 // честной ошибки (см. tunnel.IsAuthError).
-func (a *App) connectFrom(cfg config.Config, candidates []config.Profile, idx int, gen int64) error {
+//
+// Режим (адаптер, системный прокси) здесь не включается — это дело ядра:
+// после подключения оно применит режим целиком (driver.Apply).
+func (a *App) connectFrom(ctx context.Context, cfg config.Config, candidates []config.Profile, idx int, gen int64) error {
 	var lastErr error
 	for i := idx; i < len(candidates); i++ {
 		p := candidates[i]
 		tun, socksAddr, httpAddr := a.buildTunnel(cfg, p)
-		ctx, cancel := context.WithCancel(context.Background())
 		a.mu.Lock()
-		if a.gen != gen {
-			a.mu.Unlock()
-			cancel()
+		stale := a.gen != gen
+		a.mu.Unlock()
+		if stale || ctx.Err() != nil {
 			return errNotConnected
 		}
-		a.connectCancel = cancel
-		a.mu.Unlock()
-		err := tun.StartContext(ctx)
+		err := startTunnel(ctx, tun)
 		if err != nil {
-			cancel()
 			a.mu.Lock()
 			stopped := a.gen != gen
 			a.mu.Unlock()
-			if stopped {
-				// Нажали «Отключить» — запасные серверы не пробуем.
+			if stopped || ctx.Err() != nil {
+				// Нажали «Выключить» — запасные серверы не пробуем.
 				return errNotConnected
 			}
 			lastErr = err
@@ -106,40 +106,20 @@ func (a *App) connectFrom(cfg config.Config, candidates []config.Profile, idx in
 		}
 
 		a.mu.Lock()
-		netLayer := a.net
-		a.mu.Unlock()
-		if ml, ok := netLayer.(ModeLayer); ok {
-			ml.SetBypass(a.bypassOn())
-		}
-		if netLayer != nil {
-			// Адаптер — дело всей системы, а не одного сервера: не поднялся он
-			// у этого, не поднимется и у запасного. Пробовать дальше незачем.
-			if err := netLayer.Attach(tun, p); err != nil {
-				tun.Stop()
-				netLayer.Detach()
-				return err
-			}
-		}
-
-		a.mu.Lock()
-		if a.gen != gen {
+		if a.gen != gen || ctx.Err() != nil {
 			// Пока подключались, кто-то нажал «стоп» или перехватил
 			// failover — поднятое никому не нужно.
 			a.mu.Unlock()
-			if netLayer != nil {
-				netLayer.Detach()
-			}
 			tun.Stop()
 			return errNotConnected
 		}
 		a.tun = tun
 		a.running = true
-		// Туннель поднят: отменять его контекст больше нельзя, остановка —
-		// уже обычным tun.Stop.
-		a.connectCancel = nil
 		a.proxyURL = "http://" + httpAddr
-		if netLayer != nil {
+		if a.net != nil {
 			a.proxyURL = "" // локального прокси в режиме VPN нет
+		} else {
+			a.sysProxyArgs = &sysProxyArgs{cfg: cfg, p: p, httpAddr: httpAddr, socksAddr: socksAddr}
 		}
 		a.effectiveProfile = p.ID
 		a.mu.Unlock()
@@ -149,20 +129,53 @@ func (a *App) connectFrom(cfg config.Config, candidates []config.Profile, idx in
 		} else if idx > 0 {
 			a.Bus.Infof("подключились к запасному серверу: %s", p.Name)
 		}
-
-		if netLayer == nil {
-			a.enableSysProxy(cfg, p, httpAddr, socksAddr)
-		}
 		go a.watchFailover(cfg, candidates, i, gen)
 		return nil
 	}
 	return lastErr
 }
 
+// startTunnel поднимает туннель: отмена ctx прерывает подключение, но после
+// успеха туннель живёт сам по себе — его слив должен пережить снятие связи
+// (следующее включение вернёт к жизни тот же туннель, см. resumeDraining).
+func startTunnel(ctx context.Context, tun *tunnel.Tunnel) error {
+	life, abort := context.WithCancel(context.Background())
+	var mu sync.Mutex
+	started := false
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			mu.Lock()
+			if !started {
+				abort()
+			}
+			mu.Unlock()
+		case <-done:
+		}
+	}()
+	err := tun.StartContext(life)
+	mu.Lock()
+	started = err == nil
+	mu.Unlock()
+	close(done)
+	if err != nil {
+		abort()
+	}
+	return err
+}
+
 func (a *App) buildTunnel(cfg config.Config, p config.Profile) (tun *tunnel.Tunnel, socksAddr, httpAddr string) {
 	tunCfg, socksAddr, httpAddr := a.tunnelConfig(cfg, p)
 	tun = tunnel.New(tunCfg, a.Bus)
-	a.applyModes(tun)
+	// Режим, применённый сейчас (переход на запасной сервер): новый туннель
+	// должен сразу вести соединения по тем же правилам. Ядро всё равно
+	// применит режим заново, когда переход закончится.
+	a.mu.Lock()
+	m := a.modes
+	a.mu.Unlock()
+	tun.SetBypass(m.Bypass)
+	tun.SetMeshPaused(!m.Mesh)
 	return tun, socksAddr, httpAddr
 }
 
@@ -240,27 +253,19 @@ func meshConfig(p config.Profile, mode string) *mesh.Config {
 	}
 }
 
-func (a *App) enableSysProxy(cfg config.Config, p config.Profile, httpAddr, socksAddr string) {
-	if !cfg.SysProxy {
+func (a *App) enableSysProxy(args *sysProxyArgs) {
+	if !args.cfg.SysProxy {
 		return
 	}
-	a.mu.Lock()
-	a.sysProxyArgs = &sysProxyArgs{cfg: cfg, p: p, httpAddr: httpAddr, socksAddr: socksAddr}
-	off := a.bypassOff
-	a.mu.Unlock()
-	// Обход блокировок выключен (туннель держится только ради сети
-	// устройств) — системный прокси не нужен: браузер ходит напрямую.
-	if off {
-		return
-	}
-	if err := a.sys.Enable(httpAddr, socksAddr, cfg.SetEnvVars, !p.LocalViaTunnel, routing.CleanEntries(p.DirectHosts)); err != nil {
+	cfg, p := args.cfg, args.p
+	if err := a.sys.Enable(args.httpAddr, args.socksAddr, cfg.SetEnvVars, !p.LocalViaTunnel, routing.CleanEntries(p.DirectHosts)); err != nil {
 		a.Bus.Warnf("Не удалось включить системный прокси: %v. Туннель работает, но приложения надо настроить вручную.", err)
 		return
 	}
 	a.mu.Lock()
-	a.sysOn = true
+	a.sysOn, a.sysApplied = true, args
 	a.mu.Unlock()
-	a.Bus.Infof("Системный прокси включён: %s (SOCKS доступен на %s)", httpAddr, socksAddr)
+	a.Bus.Infof("Системный прокси включён: %s (SOCKS доступен на %s)", args.httpAddr, args.socksAddr)
 	if cfg.SetEnvVars {
 		a.Bus.Infof("HTTPS_PROXY прописан в переменные среды — программы вроде Claude Code подхватят его при следующем запуске")
 	}
@@ -323,11 +328,17 @@ func (a *App) failoverTo(cfg config.Config, candidates []config.Profile, idx int
 		tun.Stop()
 	}
 
-	err := a.connectFrom(cfg, candidates, idx+1, newGen)
+	err := a.connectFrom(context.Background(), cfg, candidates, idx+1, newGen)
 	a.mu.Lock()
 	a.transitioning = false
 	a.mu.Unlock()
 	if err != nil {
 		a.Bus.Errorf("не удалось перейти на запасной сервер: %v", err)
+		// Связи больше нет: ядро выключит кнопки с этой ошибкой и снимет
+		// адаптер и прокси — интернет не должен остаться в пустом туннеле.
+		a.machine.LinkLost(err)
+		return
 	}
+	// Новый туннель — ядро применяет режим к нему заново, целиком.
+	a.machine.Reapply()
 }

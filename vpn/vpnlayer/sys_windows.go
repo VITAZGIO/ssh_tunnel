@@ -14,6 +14,7 @@ import (
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 
 	"sshtunnel/android/core"
+	core2 "sshtunnel/internal/core"
 	"sshtunnel/internal/events"
 	"sshtunnel/vpn/internal/wfp"
 )
@@ -43,6 +44,12 @@ type sys struct {
 	shareWanted bool
 	shareTried  bool
 	sharePrev   string
+
+	// pins — маршруты через настоящую сеть к адресам прямых соединений (см.
+	// pinDirect); pinOn — план велит их ставить.
+	pinMu sync.Mutex
+	pins  map[netip.Addr]*directPin
+	pinOn bool
 
 	dev   *device
 	guard *wfp.Guard
@@ -353,6 +360,7 @@ func (s *sys) close() {
 	// не исчезает.
 	s.unpinServers()
 	removeMeshDNSRule()
+	s.setDirectPins(false)
 	s.full = false
 	s.mu.Lock()
 	s.dev, s.ours = nil, 0
@@ -415,7 +423,9 @@ type pinnedRoute struct {
 // setServers запоминает адреса сервера; при включённом обходе маршруты к
 // ним сразу перекладываются (сменился сервер или роутер).
 func (s *sys) setServers(addrs []netip.Addr) {
+	s.mu.Lock()
 	s.servers = append([]netip.Addr(nil), addrs...)
+	s.mu.Unlock()
 	if s.full {
 		s.pinServers()
 	}
@@ -433,9 +443,9 @@ func (s *sys) setServers(addrs []netip.Addr) {
 func (s *sys) pinServers() {
 	s.unpinServers()
 	s.mu.RLock()
-	up4, up6 := s.up4, s.up6
+	up4, up6, servers := s.up4, s.up6, s.servers
 	s.mu.RUnlock()
-	for _, a := range s.servers {
+	for _, a := range servers {
 		up, bits, any := up4, 32, netip.IPv4Unspecified()
 		if a.Is6() {
 			up, bits, any = up6, 128, netip.IPv6Unspecified()
@@ -527,3 +537,156 @@ func (s *sys) unshare() {
 
 // beforeClose — то, что надо сделать, пока адаптер ещё существует.
 func (s *sys) beforeClose() { s.unshare() }
+
+func (s *sys) hasV6() bool     { return s.v6 }
+func (s *sys) wantShare() bool { return s.shareWanted }
+
+// apply приводит адаптер к плану ядра целиком. Повторный вызов с тем же
+// планом заново ставит то, что зависит от настоящей сети: маршрут к серверу,
+// маршруты прямых соединений, раздачу на точку доступа — после смены сети это
+// и нужно.
+func (s *sys) apply(p core2.VPNPlan) error {
+	if err := s.setFull(p.DNSAll); err != nil {
+		return err
+	}
+	if p.PinServer {
+		s.pinServers()
+	}
+	if p.Share {
+		s.syncShare()
+	}
+	s.setDirectPins(p.PinDirect)
+	return nil
+}
+
+// directPin — маршрут к адресу прямого соединения и сколько соединений им
+// пользуются.
+type directPin struct {
+	refs  int
+	route pinnedRoute
+	ok    bool // маршрут поставили мы (уже стоявший чужой не трогаем)
+	timer *time.Timer
+}
+
+const (
+	// maxDirectPins — потолок числа маршрутов: дальше прямые соединения идут
+	// только с привязкой сокета к карте.
+	maxDirectPins = 2048
+	// pinLinger — сколько маршрут живёт после закрытия последнего соединения:
+	// приложения часто тут же открывают новое к тому же адресу.
+	pinLinger = 2 * time.Minute
+)
+
+func (s *sys) pinner() func(netip.Addr) func() { return s.pinDirect }
+
+// pinDirect ставит маршрут к адресу через настоящую сеть на время прямого
+// соединения (tunnel.Config.PinDirect). Привязки сокета к карте (IP_UNICAST_IF)
+// Windows бывает мало: при включённой точке доступа и других фильтрах система
+// сверяет ответы с таблицей маршрутов — по ней адрес ведёт в наш адаптер, и
+// ответ выкидывается, соединение висит в SYN_SENT. Отдельный маршрут делает
+// таблицу честной, как для сервера (pinServers).
+func (s *sys) pinDirect(a netip.Addr) func() {
+	a = a.Unmap()
+	s.pinMu.Lock()
+	defer s.pinMu.Unlock()
+	if !s.pinOn || !pinnable(a) || s.isServer(a) {
+		return func() {}
+	}
+	p := s.pins[a]
+	if p == nil {
+		if len(s.pins) >= maxDirectPins {
+			return func() {}
+		}
+		p = &directPin{}
+		p.route, p.ok = s.addPin(a)
+		if s.pins == nil {
+			s.pins = map[netip.Addr]*directPin{}
+		}
+		s.pins[a] = p
+	}
+	if p.timer != nil {
+		p.timer.Stop()
+		p.timer = nil
+	}
+	p.refs++
+	var once sync.Once
+	return func() { once.Do(func() { s.releasePin(a, p) }) }
+}
+
+func (s *sys) releasePin(a netip.Addr, p *directPin) {
+	s.pinMu.Lock()
+	defer s.pinMu.Unlock()
+	if p.refs--; p.refs > 0 || s.pins[a] != p {
+		return
+	}
+	p.timer = time.AfterFunc(pinLinger, func() {
+		s.pinMu.Lock()
+		defer s.pinMu.Unlock()
+		if p.refs == 0 && s.pins[a] == p {
+			delPin(p)
+			delete(s.pins, a)
+		}
+	})
+}
+
+func (s *sys) isServer(a netip.Addr) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, srv := range s.servers {
+		if srv == a {
+			return true
+		}
+	}
+	return false
+}
+
+// addPin ставит маршрут к адресу через роутер настоящей сети.
+func (s *sys) addPin(a netip.Addr) (pinnedRoute, bool) {
+	s.mu.RLock()
+	up4, up6 := s.up4, s.up6
+	s.mu.RUnlock()
+	up, bits, any := up4, 32, netip.IPv4Unspecified()
+	if a.Is6() {
+		up, bits, any = up6, 128, netip.IPv6Unspecified()
+	}
+	if up.luid == 0 {
+		return pinnedRoute{}, false
+	}
+	next := up.nextHop
+	if !next.IsValid() {
+		next = any
+	}
+	r := pinnedRoute{luid: winipcfg.LUID(up.luid), dst: netip.PrefixFrom(a, bits), next: next}
+	if err := r.luid.AddRoute(r.dst, r.next, 0); err != nil {
+		return pinnedRoute{}, false
+	}
+	return r, true
+}
+
+func delPin(p *directPin) {
+	if p.timer != nil {
+		p.timer.Stop()
+		p.timer = nil
+	}
+	if p.ok {
+		_ = p.route.luid.DeleteRoute(p.route.dst, p.route.next)
+		p.ok = false
+	}
+}
+
+// setDirectPins включает или выключает маршруты прямых соединений. Включённые
+// ставятся заново: настоящая сеть могла смениться, и старые маршруты ведут
+// через прежний роутер.
+func (s *sys) setDirectPins(on bool) {
+	s.pinMu.Lock()
+	defer s.pinMu.Unlock()
+	s.pinOn = on
+	for a, p := range s.pins {
+		delPin(p)
+		if on && p.refs > 0 {
+			p.route, p.ok = s.addPin(a)
+			continue
+		}
+		delete(s.pins, a)
+	}
+}

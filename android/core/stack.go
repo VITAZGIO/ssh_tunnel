@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 	"sync"
 	"time"
@@ -38,6 +39,15 @@ import (
 // потому что перекачкой данных занимается тоже ядро.
 type Core interface {
 	ServeConn(conn net.Conn, target string, byIP bool)
+}
+
+// UDPCore — необязательное расширение Core: решение «куда» для UDP. RouteUDP
+// получает, откуда поток (по этому адресу находится программа) и куда он
+// идёт (имя, если адрес был подставным), и отдаёт обработчик потока — или nil,
+// если поток не брать (стек ответит «порт недоступен»). Без него UDP, кроме
+// DNS, идёт как раньше: через UDPRelay или отказом.
+type UDPCore interface {
+	RouteUDP(src netip.AddrPort, target string, byIP bool) func(conn net.Conn)
 }
 
 // Resolver превращает адрес назначения обратно в имя хоста.
@@ -131,6 +141,26 @@ type Handler struct {
 	// Ping отдаёт того, кто отвечает на ping к своим адресам (сеть устройств,
 	// см. ping.go); nil или вызов, вернувший nil, — ping туда не отвечается.
 	Ping func() Pinger
+
+	// Fake — подсеть подставных адресов: соединение на такой адрес, которого
+	// нет в таблице (выдан в прошлом режиме, таблицу сбросили), отбивается
+	// сразу — приложение спросит имя заново. nil — не проверять.
+	Fake func(ip string) bool
+}
+
+// target восстанавливает, куда шло приложение: имя из таблицы подставных
+// адресов или сам адрес. stale — адрес подставной, но в таблице его нет.
+func (h *Handler) target(addr tcpip.Address, port uint16) (target string, byIP, stale bool) {
+	host := addr.String()
+	byIP = true
+	if h.Resolve != nil {
+		if name, ok := h.Resolve(host); ok {
+			host, byIP = name, false
+		} else if h.Fake != nil && h.Fake(host) {
+			stale = true
+		}
+	}
+	return net.JoinHostPort(host, strconv.Itoa(int(port))), byIP, stale
 }
 
 func (h *Handler) logf(format string, a ...any) {
@@ -215,6 +245,12 @@ func StartDevice(dev device.Device, h *Handler) (*Engine, error) {
 		if id.LocalAddress.Len() == 16 {
 			h.Stats.v6()
 		}
+		// Подставной адрес из прошлого режима — сразу отказ (RST), а не
+		// попытка соединиться неизвестно куда.
+		if _, _, stale := h.target(id.LocalAddress, id.LocalPort); stale {
+			r.Complete(true)
+			return
+		}
 
 		var wq waiter.Queue
 		ep, epErr := r.CreateEndpoint(&wq)
@@ -248,6 +284,28 @@ func StartDevice(dev device.Device, h *Handler) (*Engine, error) {
 	// UDPRelay). Отдельный forwarder, а не общий с DNS: тому всегда нужен
 	// serveDNS, а этому — только когда клиент ретранслятора вообще поднят.
 	udpRelayFwd := udp.NewForwarder(s, func(r *udp.ForwarderRequest) bool {
+		id := r.ID()
+		if uc, ok := h.Core.(UDPCore); ok {
+			target, byIP, stale := h.target(id.LocalAddress, id.LocalPort)
+			if stale {
+				return false
+			}
+			src := netip.AddrPortFrom(addrOf(id.RemoteAddress), id.RemotePort)
+			serve := uc.RouteUDP(src, target, byIP)
+			if serve == nil {
+				return false
+			}
+			var wq waiter.Queue
+			ep, epErr := r.CreateEndpoint(&wq)
+			if epErr != nil {
+				return false
+			}
+			go serve(gonet.NewUDPConn(&wq, ep))
+			return true
+		}
+		if h.UDPRelay == nil {
+			return false
+		}
 		relay := h.UDPRelay()
 		if relay == nil {
 			return false
@@ -266,7 +324,7 @@ func StartDevice(dev device.Device, h *Handler) (*Engine, error) {
 			if id.LocalPort == 53 && h.DNS != nil {
 				return udpFwd.HandlePacket(id, pkt)
 			}
-			if h.UDPRelay != nil && udpRelayFwd.HandlePacket(id, pkt) {
+			if udpRelayFwd.HandlePacket(id, pkt) {
 				return true
 			}
 			h.Stats.udp()
@@ -299,6 +357,12 @@ func StartDevice(dev device.Device, h *Handler) (*Engine, error) {
 	return &Engine{dev: dev, stack: s}, nil
 }
 
+// addrOf переводит адрес стека в netip.
+func addrOf(a tcpip.Address) netip.Addr {
+	ip, _ := netip.AddrFromSlice(a.AsSlice())
+	return ip.Unmap()
+}
+
 // logUDP сообщает о каждом новом адресе, куда ломился UDP, — но только один
 // раз про каждый. Иначе журнал состоял бы из одной строки, повторённой сто раз.
 func (h *Handler) logUDP(id stack.TransportEndpointID) {
@@ -326,17 +390,10 @@ func (h *Handler) logUDP(id stack.TransportEndpointID) {
 }
 
 // serveTCP восстанавливает адрес назначения и передаёт соединение в ядро.
+// Имя, восстановленное из таблицы fake-IP, дальше разрешит сервер (или, если
+// ядро решит «напрямую», DNS настоящей сети). Наружу DNS-запрос не уходит.
 func (h *Handler) serveTCP(conn net.Conn, id stack.TransportEndpointID) {
-	host := id.LocalAddress.String()
-	byIP := true
-	if h.Resolve != nil {
-		if name, ok := h.Resolve(host); ok {
-			// Имя восстановлено из таблицы fake-IP: дальше его разрешит сервер,
-			// как и на компьютере. Наружу DNS-запрос не уходит.
-			host, byIP = name, false
-		}
-	}
-	target := net.JoinHostPort(host, strconv.Itoa(int(id.LocalPort)))
+	target, byIP, _ := h.target(id.LocalAddress, id.LocalPort)
 	h.Stats.tcp(target)
 	h.Core.ServeConn(conn, target, byIP)
 }
