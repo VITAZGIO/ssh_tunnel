@@ -3,7 +3,8 @@
 ## Ядро 2.0 — карта
 
 ```
-  экран (один HTML: окно ПК/Linux, позже Android WebView)
+  экран (один HTML, internal/uiassets: окно ПК/Linux; на Android пока
+         Книга и доп. приложения — WebView через internal/uihost)
   PowerShell, MCP, сторонние программы
          │  GET/POST /api/state, GET /api, события /events (docs/API.md)
          ▼

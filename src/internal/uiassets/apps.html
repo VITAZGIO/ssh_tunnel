@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ssh_tunnel</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="pages.css">
+<style>
+  /* Плитки добавленных приложений. */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  .tile{position:relative;background:var(--card);border:1px solid var(--line);border-radius:12px;
+        padding:12px;cursor:pointer;display:flex;flex-direction:column;gap:8px;min-height:112px}
+  .tile:hover{border-color:var(--accent)}
+  .tile .ic{width:34px;height:34px;color:var(--accent)}
+  .tile .nm{font-weight:600}
+  .tile .bg{font-size:12px;color:var(--dim)}
+  .tile .tools{position:absolute;top:6px;right:6px;display:flex;gap:2px}
+  .tile .tools .ico{width:28px;height:28px}
+  .tile .foot{margin-top:auto;display:flex;align-items:center;gap:8px}
+  .tile.off .ic,.tile.off .nm{opacity:.45}
+  .tile.na{cursor:default;opacity:.55}
+  .tile.na:hover{border-color:var(--line)}
+  .tile .why{font-size:12px;color:var(--dim)}
+
+  /* Выключатель фонового приложения. */
+  .sw{position:relative;width:36px;height:20px;border-radius:10px;background:var(--line);
+      border:0;cursor:pointer;flex:none;padding:0}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
+             background:var(--dim);transition:.15s}
+  .sw.on{background:var(--accent-muted)}
+  .sw.on::after{left:18px;background:#fff}
+
+  .menu{position:absolute;top:34px;right:6px;z-index:5;background:var(--card2);border:1px solid var(--line);
+        border-radius:9px;padding:4px;min-width:130px}
+  .menu button{display:block;width:100%;text-align:left;background:transparent;border:0;padding:7px 10px;
+               border-radius:6px;cursor:pointer}
+  .menu button:hover{background:var(--card)}
+
+  /* Каталог. */
+  .cat{display:flex;flex-direction:column;gap:10px}
+  .item{display:flex;gap:12px;align-items:flex-start}
+  .item .ic{width:30px;height:30px;color:var(--accent);margin-top:2px}
+  .item .tx{flex:1;min-width:0}
+  .item .nm{font-weight:600}
+  .item.na{opacity:.55}
+
+  /* Приложение внутри страницы. */
+  #appFrame{flex:1;border:0;width:100%;background:transparent}
+  .first{margin:0 14px 10px}
+  .first p{margin:0 0 8px}
+  .first .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .view{display:none;flex:1;min-height:0;flex-direction:column}
+  .view.on{display:flex}
+  html.android #winBtn{display:none}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Добавленные на этом устройстве. -->
+  <div class="view on" id="vList">
+    <div class="head">
+      <button class="ico" id="backList" title="Назад">&#8203;</button>
+      <span class="t" id="listTitle"></span>
+      <button class="ico" id="addBtn"></button>
+    </div>
+    <div class="body"><div id="grid"></div></div>
+  </div>
+
+  <!-- Каталог: что можно добавить. -->
+  <div class="view" id="vCat">
+    <div class="head">
+      <button class="ico" id="backCat"></button>
+      <span class="t" id="catTitle"></span>
+    </div>
+    <div class="body"><div class="cat" id="cat"></div></div>
+  </div>
+
+  <!-- Открытое приложение. -->
+  <div class="view" id="vApp">
+    <div class="head">
+      <button class="ico" id="backApp"></button>
+      <span class="t" id="appTitle"></span>
+      <button class="ico" id="helpBtn"></button>
+      <button class="tb" id="winBtn"></button>
+    </div>
+    <div class="first card" id="first" hidden>
+      <p id="firstText"></p>
+      <div class="row"><a href="#" id="firstMore"></a><span style="flex:1"></span>
+        <button class="btn primary" id="firstOk">OK</button></div>
+    </div>
+    <iframe id="appFrame" title=""></iframe>
+  </div>
+
+</div>
+<script src="pages.js"></script>
+<script>
+/* Дополнительные приложения: что добавлено на этом устройстве, каталог и
+   само приложение. Всё состояние — у ядра (/api/addons); страница рисует его
+   и шлёт просьбы. */
+let ST = {catalog: [], added: [], windows: false};
+let current = null; // id открытого приложения
+
+const manifest = id => ST.catalog.find(m => m.id === id);
+const entry = id => ST.added.find(e => e.id === id);
+
+function show(v){ ['vList','vCat','vApp'].forEach(x => $(x).classList.toggle('on', x === v)); }
+
+function setIcons(){
+  $('backList').innerHTML = $('backCat').innerHTML = $('backApp').innerHTML = icon('arrow_back');
+  $('backList').title = $('backCat').title = $('backApp').title = L('Назад', 'Back');
+  $('addBtn').innerHTML = icon('add');
+  $('addBtn').title = L('Добавить приложение', 'Add an app');
+  $('helpBtn').innerHTML = icon('help');
+  $('helpBtn').title = L('Справка в Книге', 'Help in the Book');
+  $('winBtn').innerHTML = icon('open_in_new') + '<span>' + L('В окне', 'Window') + '</span>';
+  $('winBtn').title = L('Открыть в отдельном окне', 'Open in a separate window');
+  $('listTitle').textContent = L('Дополнительные приложения', 'More apps');
+  $('catTitle').textContent = L('Каталог', 'Catalog');
+  $('firstMore').textContent = L('Подробнее — в Книге', 'More in the Book');
+  document.title = L('Дополнительные приложения', 'More apps') + ' — ssh_tunnel';
+}
+
+async function load(){
+  ST = await api('/api/addons');
+  renderList();
+  renderCatalog();
+}
+
+async function op(o, id, value){
+  const r = await api('/api/addons', {op: o, id, value});
+  if(r.error){ alert(r.error); return; }
+  ST = r;
+  renderList();
+  renderCatalog();
+  changed();
+}
+
+function renderList(){
+  const g = $('grid');
+  if(!ST.added.length){
+    g.className = 'empty';
+    g.textContent = L('Пока пусто. Нажми «+», чтобы добавить приложение из каталога.',
+                      'Nothing here yet. Press "+" to add an app from the catalog.');
+    return;
+  }
+  g.className = 'grid';
+  g.innerHTML = '';
+  for(const e of ST.added){
+    const m = manifest(e.id);
+    if(!m) continue;
+    const t = document.createElement('div');
+    t.className = 'tile' + (m.unavailable ? ' na' : '') + (m.background && !e.on ? ' off' : '');
+    t.innerHTML =
+      `<span class="tools">
+         <button class="ico star${e.star ? ' on' : ''}" title="${esc(L('В быстрый доступ', 'Quick access'))}">${icon(e.star ? 'star_fill' : 'star')}</button>
+         <button class="ico more" title="${esc(L('Ещё', 'More'))}">${icon('more_horiz')}</button>
+       </span>
+       ${icon(m.icon, 'ic')}
+       <span class="nm">${esc(appName(m))}</span>
+       ${m.unavailable ? `<span class="why">${esc(m.unavailable)}</span>` : ''}
+       ${m.background && !m.unavailable ? `<span class="foot"><button class="sw${e.on ? ' on' : ''}" title="${esc(e.on ? L('Выключить', 'Turn off') : L('Включить', 'Turn on'))}"></button><span class="bg">${esc(L('в фоне', 'background'))}</span></span>` : ''}`;
+    t.querySelector('.star').onclick = ev => { ev.stopPropagation(); op('star', e.id, !e.star); };
+    t.querySelector('.more').onclick = ev => { ev.stopPropagation(); tileMenu(t, e.id); };
+    const sw = t.querySelector('.sw');
+    if(sw) sw.onclick = ev => { ev.stopPropagation(); op('on', e.id, !e.on); };
+    t.onclick = () => { if(!m.unavailable) openApp(e.id); };
+    g.appendChild(t);
+  }
+}
+
+function tileMenu(tile, id){
+  document.querySelectorAll('.menu').forEach(x => x.remove());
+  const mnu = document.createElement('div');
+  mnu.className = 'menu';
+  const rm = document.createElement('button');
+  rm.textContent = L('Убрать', 'Remove');
+  rm.onclick = ev => { ev.stopPropagation(); mnu.remove(); op('remove', id); };
+  mnu.appendChild(rm);
+  tile.appendChild(mnu);
+  setTimeout(() => document.addEventListener('click', () => mnu.remove(), {once: true}), 0);
+}
+
+function renderCatalog(){
+  const c = $('cat');
+  c.innerHTML = '';
+  if(!ST.catalog.length){
+    c.innerHTML = `<div class="empty">${esc(L('В этой версии приложений пока нет.', 'No apps in this version yet.'))}</div>`;
+    return;
+  }
+  for(const m of ST.catalog){
+    const has = !!entry(m.id);
+    const it = document.createElement('div');
+    it.className = 'card item' + (m.unavailable ? ' na' : '');
+    it.innerHTML = `${icon(m.icon, 'ic')}
+      <span class="tx"><span class="nm">${esc(appName(m))}</span>
+        ${m.background ? `<span class="hint"> · ${esc(L('в фоне', 'background'))}</span>` : ''}
+        <div class="hint">${esc(m.unavailable || appHint(m))}</div></span>
+      <button class="btn${has ? '' : ' primary'}"${has || m.unavailable ? ' disabled' : ''}>${esc(has ? L('Добавлено', 'Added') : L('Добавить', 'Add'))}</button>`;
+    it.querySelector('button').onclick = () => op('add', m.id);
+    c.appendChild(it);
+  }
+}
+
+// openApp — открыть приложение. С пометкой «в отдельном окне» на ПК оно
+// сразу уходит в окно; не вышло (или телефон) — открывается здесь.
+async function openApp(id, here){
+  const m = manifest(id), e = entry(id);
+  if(!m || !e) return;
+  if(!e.active){
+    alert(L('Приложение выключено — включи его на плитке.', 'The app is off — turn it on on its tile.'));
+    return;
+  }
+  if(m.window && !here && !SOLO && !ANDROID && await popOut(id)) return;
+  current = id;
+  $('appTitle').innerHTML = icon(m.icon) + '<span>' + esc(appName(m)) + '</span>';
+  $('helpBtn').hidden = !m.book;
+  $('winBtn').hidden = SOLO || ANDROID;
+  $('backApp').hidden = SOLO && !Q.get('back');
+  $('appFrame').src = pageURL(m.page, {});
+  $('first').hidden = e.seen;
+  $('firstText').textContent = appHint(m);
+  $('firstMore').hidden = !m.book;
+  show('vApp');
+  if(SOLO) document.title = appName(m) + ' — ssh_tunnel';
+}
+
+function popOut(id){
+  const m = manifest(id);
+  return openWindow(id, appName(m) + ' — ssh_tunnel', pageURL('apps.html', {open: id, solo: '1', key: id}));
+}
+
+$('first').querySelector('#firstOk').onclick = () => { $('first').hidden = true; if(current) op('seen', current); };
+$('firstMore').onclick = ev => { ev.preventDefault(); const m = manifest(current); if(m) openBook(m.book); };
+$('helpBtn').onclick = () => { const m = manifest(current); if(m) openBook(m.book); };
+$('winBtn').onclick = async () => {
+  const id = current;
+  if(await popOut(id)){ $('appFrame').src = 'about:blank'; current = null; show('vList'); }
+};
+$('backApp').onclick = () => {
+  $('appFrame').src = 'about:blank';
+  current = null;
+  if(Q.get('open') && (EMBED || ANDROID)) closePage(); else show('vList');
+};
+$('backList').onclick = () => closePage();
+$('addBtn').onclick = () => show('vCat');
+$('backCat').onclick = () => show('vList');
+$('backList').hidden = SOLO;
+
+setIcons();
+load().then(() => {
+  const id = Q.get('open');
+  if(id) openApp(id, true);
+}).catch(() => {
+  $('grid').className = 'empty';
+  $('grid').textContent = L('Нет связи с программой.', 'No connection to the app.');
+});
+</script>
+</body>
+</html>

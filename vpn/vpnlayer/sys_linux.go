@@ -44,6 +44,14 @@ type sys struct {
 	dnsVia string // "resolved", "file" или "" — как мы настроили DNS системы
 	v6     bool   // у интерфейса есть IPv6 — маршруты ::/1 ставить есть куда
 	full   bool   // стоят маршруты всего интернета (обход блокировок включён)
+
+	// Настоящая сеть для маршрутов к прямым адресам и серверу (pins_linux.go):
+	// номер карты и роутер.
+	idx4, idx6 int
+	gw4, gw6   net.IP
+	servers    []netip.Addr
+
+	pin pins
 }
 
 func newSys(bus *events.Bus) *sys {
@@ -52,6 +60,9 @@ func newSys(bus *events.Bus) *sys {
 	// сразу, до всего остального.
 	if restoreResolvConf() {
 		bus.Warnf("Нашёл /etc/resolv.conf, оставшийся от аварийно закрытого прошлого запуска, — вернул как было")
+	}
+	if n := dropStalePins(); n > 0 {
+		bus.Warnf("Снял %d маршрутов, оставшихся от аварийно закрытого прошлого запуска", n)
 	}
 	return s
 }
@@ -64,14 +75,15 @@ func (s *sys) refresh() bool {
 	ours := s.ours
 	s.mu.RUnlock()
 
-	up4 := findDefault(netlink.FAMILY_V4, ours)
-	up6 := findDefault(netlink.FAMILY_V6, ours)
+	up4, idx4, gw4 := findDefaultRoute(netlink.FAMILY_V4, ours)
+	up6, idx6, gw6 := findDefaultRoute(netlink.FAMILY_V6, ours)
 	dns := physicalDNS(up4)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	changed := s.up4 != up4 || s.up6 != up6
+	changed := s.up4 != up4 || s.up6 != up6 || !gw4.Equal(s.gw4) || !gw6.Equal(s.gw6)
 	s.up4, s.up6, s.dns = up4, up6, dns
+	s.idx4, s.idx6, s.gw4, s.gw6 = idx4, idx6, gw4, gw6
 	return changed
 }
 
@@ -87,13 +99,14 @@ func (s *sys) dnsServers() []netip.Addr {
 	return s.dns
 }
 
-// findDefault — имя интерфейса с маршрутом по умолчанию и наименьшей
-// метрикой, кроме нашего.
-func findDefault(family int, ours int) string {
+// findDefaultRoute — интерфейс с маршрутом по умолчанию и наименьшей
+// метрикой, кроме нашего: имя, номер и роутер.
+func findDefaultRoute(family int, ours int) (string, int, net.IP) {
 	routes, err := netlink.RouteList(nil, family)
 	if err != nil {
-		return ""
+		return "", 0, nil
 	}
+	gws := map[int]net.IP{}
 	var cand []defaultRoute
 	for _, r := range routes {
 		if r.Dst != nil {
@@ -105,16 +118,19 @@ func findDefault(family int, ours int) string {
 			continue
 		}
 		cand = append(cand, defaultRoute{luid: uint64(r.LinkIndex), ifIndex: uint32(r.LinkIndex), metric: uint32(r.Priority)})
+		if _, seen := gws[r.LinkIndex]; !seen {
+			gws[r.LinkIndex] = gatewayOf(r)
+		}
 	}
 	best, ok := pickDefault(cand, uint64(ours))
 	if !ok {
-		return ""
+		return "", 0, nil
 	}
 	link, err := netlink.LinkByIndex(int(best.ifIndex))
 	if err != nil {
-		return ""
+		return "", 0, nil
 	}
-	return link.Attrs().Name
+	return link.Attrs().Name, int(best.ifIndex), gws[int(best.ifIndex)]
 }
 
 // protect привязывает сокет к настоящей сети: ядро отправит его пакеты через
@@ -282,6 +298,9 @@ func (s *sys) configureDNS(full bool) error {
 
 // close возвращает то, что не исчезает вместе с интерфейсом.
 func (s *sys) close() {
+	// Маршруты через настоящую карту живут и без TUN — снимаем сами.
+	s.setDirectPins(false)
+	s.unpinServers()
 	switch s.dnsVia {
 	case "resolved":
 		_ = exec.Command("resolvectl", "revert", linuxIfName).Run()
@@ -462,20 +481,23 @@ func restoreResolvConf() bool {
 	return err == nil
 }
 
-// setServers — на Linux маршрут к серверу не нужен: свои сокеты привязаны к
-// настоящей сети меткой и устройством, а мобильной точки доступа Windows с её
-// проверкой маршрутов здесь нет.
-func (s *sys) setServers([]netip.Addr) {}
-
 func (s *sys) hasV6() bool     { return s.v6 }
 func (s *sys) wantShare() bool { return false }
 
-// pinner — маршрутов к адресам прямых соединений на Linux не ставим: сокет
-// привязан к настоящей карте через SO_BINDTODEVICE (см. docs/decisions.md).
-func (s *sys) pinner() func(netip.Addr) func() { return nil }
-
-// apply приводит интерфейс к плану ядра целиком.
-func (s *sys) apply(p core2.VPNPlan) error { return s.setFull(p.DNSAll) }
+// apply приводит интерфейс к плану ядра целиком. Повторный вызов заново
+// ставит маршруты к серверу и прямым адресам — после смены сети это и нужно.
+func (s *sys) apply(p core2.VPNPlan) error {
+	if err := s.setFull(p.DNSAll); err != nil {
+		return err
+	}
+	if p.PinServer {
+		s.pinServers()
+	} else {
+		s.unpinServers()
+	}
+	s.setDirectPins(p.PinDirect)
+	return nil
+}
 
 // setShare и beforeClose — раздача VPN на мобильную точку доступа есть
 // только на Windows (см. hotspot_windows.go).

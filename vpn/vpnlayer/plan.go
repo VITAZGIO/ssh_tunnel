@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"time"
 
 	"sshtunnel/internal/core"
 )
@@ -39,6 +40,15 @@ var (
 	dnsAddr        = core.DNSAddr
 	routes4        = core.InternetRoutes4
 	routes6        = core.InternetRoutes6
+)
+
+const (
+	// maxDirectPins — потолок числа маршрутов к прямым адресам: дальше прямые
+	// соединения идут только с привязкой сокета к карте.
+	maxDirectPins = 2048
+	// pinLinger — сколько маршрут живёт после закрытия последнего соединения:
+	// приложения часто тут же открывают новое к тому же адресу.
+	pinLinger = 2 * time.Minute
 )
 
 // pinnable — к этому адресу имеет смысл ставить маршрут через настоящую сеть

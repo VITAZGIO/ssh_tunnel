@@ -1,0 +1,34 @@
+/* Цвета и темы интерфейса — одни на все страницы: главное окно, Книга,
+   дополнительные приложения, ПК и Android. Тему выбирает атрибут
+   data-theme у <html> (dark, light, console); без него — как у системы. */
+:root{
+  --bg:#0d1017; --card:#161a23; --card2:#1d222d; --line:#272d3a;
+  --text:#e8ebf2; --dim:#828b9e; --accent:#4c8dff;
+  /* Приглушённый синий для крупных заливок (кнопки-кнопки, а не мелкие
+     акценты текста/рамок) — тот же оттенок, что и accent, но темнее и
+     менее насыщенный, как на телефоне: там весь яркий синий пришлось
+     притушить, чтобы не резал глаз на тёмной теме. Сам --accent остаётся
+     ярким — для рамок при наведении, текста и мелких точек-переключателей. */
+  --accent-muted:#3d5f8a; --accent-muted-dark:#2c4665;
+  --ok:#2fbf71; --warn:#e8b339; --err:#e5484d;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme: light){
+  :root{ --bg:#eef1f6; --card:#fff; --card2:#f3f5f9; --line:#dde2ec;
+         --text:#141821; --dim:#616b7f; }
+}
+
+/* ---------- темы ---------- */
+/* «Оригинал» — как было: тёмная, а при светлой теме системы светлая. */
+:root[data-theme="dark"]{--bg:#000;--card:#0e0e0e;--card2:#171717;--line:#2a2a2a;--text:#ededed;
+  --dim:#8f8f8f;--accent:#cfcfcf;--accent-muted:#3a3a3a;--accent-muted-dark:#262626}
+:root[data-theme="light"]{--bg:#eef1f6;--card:#fff;--card2:#e8ecf2;--line:#d3d9e3;--text:#141821;
+  --dim:#566074;--accent:#2f6fde;--accent-muted:#3d5f8a;--accent-muted-dark:#2c4665;--ok:#17904f}
+:root[data-theme="console"]{--bg:#020702;--card:#04110a;--card2:#071a0d;--line:#0f4a20;--text:#46ff85;
+  --dim:#2aa957;--accent:#46ff85;--accent-muted:#0d3b1b;--accent-muted-dark:#082a12;--ok:#46ff85;
+  --warn:#d7ff46;--mono:ui-monospace,"Cascadia Mono",Consolas,monospace}
+:root[data-theme="console"] body{font-family:var(--mono)}
+:root[data-theme="console"] *:not(#power):not(.rad){border-radius:0 !important}
+:root[data-theme="console"] #power{border-style:dashed}
+:root[data-theme="console"] .hexbtn.on{background:#0d3b1b;color:#46ff85}
+

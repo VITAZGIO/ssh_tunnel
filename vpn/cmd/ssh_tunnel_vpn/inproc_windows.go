@@ -41,6 +41,7 @@ func runInProcess(tray, noWindow bool) {
 		fmt.Println(url)
 		select {}
 	}
+	e.srv.Addons().SetOpener(nativeui.Opener("http://"+e.srv.Addr(), config.Dir()))
 	runWindow(url, tray, a.Running, toggleApp(a), a.StopNow)
 }
 

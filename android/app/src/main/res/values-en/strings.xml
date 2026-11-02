@@ -227,6 +227,11 @@
     <string name="mesh_cancel">Cancel</string>
     <string name="users_title">New user</string>
     <string name="users_summary">Create a user on the server</string>
+    <string name="addons_title">More apps</string>
+    <string name="addons_summary">Add what you need yourself</string>
+    <string name="book_title">Book</string>
+    <string name="book_summary">Help: getting started, modes, common problems</string>
+    <string name="quick_title">Quick access</string>
     <string name="users_intro">A new user on the server you are connected to. Works if the server panel allows this device to create users. The new user gets your access groups and cannot create others.</string>
     <string name="users_name">Name</string>
     <string name="users_name_hint">Work laptop</string>

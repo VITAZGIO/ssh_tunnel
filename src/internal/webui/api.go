@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"sort"
 
+	"sshtunnel/internal/addons"
+	"sshtunnel/internal/book"
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/updater"
 )
@@ -37,6 +39,15 @@ type route struct {
 }
 
 func (s *Server) routes() []route {
+	rs := s.coreRoutes()
+	// Дополнительные приложения и Книга — общие с Android (internal/uihost).
+	for _, r := range s.addons.Routes() {
+		rs = append(rs, route{r.Path, r.Methods, r.Desc, r.H})
+	}
+	return append(rs, route{"/api/book", "GET", "Книга: все главы на языке ?lang=ru|en (Markdown), вместе с главами приложений каталога.", book.Handler(addons.BookChapters)})
+}
+
+func (s *Server) coreRoutes() []route {
 	return []route{
 		{"/api", "GET", "Самоописание: версия API и список всех адресов.", s.handleAPIIndex},
 		{"/api/state", "GET, POST", "Состояние ядра: две кнопки (tunnel, mesh), режим, связь, модули. POST {\"tunnel\":bool,\"mesh\":bool} — «хочу» (любую можно не указывать).", s.handleState},

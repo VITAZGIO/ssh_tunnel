@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"sshtunnel/internal/addons"
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/nativeui"
@@ -65,6 +66,10 @@ func runClient(tray, noWindow bool) {
 	if err != nil {
 		fatal("Не удалось запустить интерфейс: " + err.Error())
 	}
+	// Отдельные окна (Книга, приложения) открывает окно: у службы нет
+	// рабочего стола. Можно ли открыть приложение, проверит служба, отдавая
+	// его страницу.
+	c.p.Local["/api/window"] = addons.WindowHandler(nativeui.Opener("http://"+ln.Addr().String(), dir), nil)
 	go (&http.Server{Handler: c.p, ReadHeaderTimeout: 10 * time.Second}).Serve(ln)
 	pageURL := fmt.Sprintf("http://%s/?t=%s", ln.Addr(), c.p.Token)
 	if noWindow {

@@ -226,6 +226,11 @@
     <string name="mesh_cancel">Отмена</string>
     <string name="users_title">Новый пользователь</string>
     <string name="users_summary">Завести пользователя на сервере</string>
+    <string name="addons_title">Дополнительные приложения</string>
+    <string name="addons_summary">Добавляешь сам, что нужно</string>
+    <string name="book_title">Книга</string>
+    <string name="book_summary">Справка: с чего начать, режимы, частые проблемы</string>
+    <string name="quick_title">Быстрый доступ</string>
     <string name="users_intro">Новый пользователь на сервере, к которому ты подключён. Работает, если в панели сервера этому устройству включено «Может создавать пользователей». Новый получает твои группы доступа и сам создавать не может.</string>
     <string name="users_name">Имя</string>
     <string name="users_name_hint">Ноутбук Маши</string>

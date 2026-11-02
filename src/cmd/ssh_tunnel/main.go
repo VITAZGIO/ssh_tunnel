@@ -93,6 +93,9 @@ func main() {
 			"ssh_tunnel.exe -nowindow")
 	}
 
+	// Книга и дополнительные приложения открываются отдельными окнами.
+	srv.Addons().SetOpener(nativeui.Opener("http://"+srv.Addr(), config.Dir()))
+
 	err = nativeui.Run(nativeui.Options{
 		Title:    windowTitle,
 		URL:      url,

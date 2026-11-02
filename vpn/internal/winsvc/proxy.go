@@ -9,6 +9,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -77,7 +78,7 @@ func (p *Proxy) Forget() {
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Сама страница открыта всем, кто знает адрес (как и у службы), а всё
 	// остальное — только со своим ключом и не с чужого сайта.
-	if r.URL.Path != "/" {
+	if !publicPath(r.URL.Path) {
 		if !p.allowed(r) {
 			http.Error(w, "запрещено", http.StatusForbidden)
 			return
@@ -88,6 +89,14 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	p.rp.ServeHTTP(w, r)
+}
+
+// publicPath — открытые без ключа адреса: страницы интерфейса, стили,
+// значки (internal/uiassets). Это код, а не данные: данные — только через
+// /api, /events и страницы приложений /addons/.
+func publicPath(p string) bool {
+	return !strings.HasPrefix(p, "/api") && !strings.HasPrefix(p, "/events") &&
+		!strings.HasPrefix(p, "/addons/")
 }
 
 // rewrite отправляет запрос службе с её текущим ключом вместо ключа окна.

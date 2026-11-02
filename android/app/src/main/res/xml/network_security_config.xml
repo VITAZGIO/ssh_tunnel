@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Общие страницы интерфейса (Книга, дополнительные приложения) отдаёт ядро
+     на 127.0.0.1 по http — только этот адрес, остальное по-прежнему только
+     https. Наружу этот сервер не слушает. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>
