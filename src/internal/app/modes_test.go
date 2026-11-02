@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"sshtunnel/internal/config"
+	"sshtunnel/internal/core"
 )
 
 // meshVPNApp — приложение в режиме VPN с сервером, у которого включена сеть
@@ -31,16 +32,16 @@ func wantModes(t *testing.T, a *App, bypass, mesh bool) {
 	}
 }
 
-// Большая кнопка выключает только обход: туннель держится ради сети
-// устройств, адаптер переходит в режим «только сеть», а не снимается.
+// Круглая кнопка выключает только обход: туннель держится ради сети
+// устройств, адаптер получает режим «только сеть», а не снимается.
 func TestBypassOffKeepsMesh(t *testing.T) {
 	layer := &fakeNetLayer{}
 	a := meshVPNApp(t, layer, true)
-	if err := a.Start(); err != nil {
+	if err := a.WantWait(on(), on()); err != nil {
 		t.Fatal(err)
 	}
-	if on, ok := layer.lastBypass(); !ok || !on {
-		t.Fatalf("при подключении адаптер должен получить «весь трафик», получил %v (было ли: %v)", on, ok)
+	if b, ok := layer.lastBypass(); !ok || !b {
+		t.Fatalf("при подключении адаптер должен получить «весь трафик», получил %v (было ли: %v)", b, ok)
 	}
 	wantModes(t, a, true, true)
 
@@ -50,7 +51,7 @@ func TestBypassOffKeepsMesh(t *testing.T) {
 	if !a.Running() {
 		t.Fatal("туннель погас, хотя сеть устройств включена")
 	}
-	if on, _ := layer.lastBypass(); on {
+	if b, _ := layer.lastBypass(); b {
 		t.Fatal("адаптер не переведён в режим «только сеть устройств»")
 	}
 	a.mu.Lock()
@@ -74,12 +75,12 @@ func TestBypassOffKeepsMesh(t *testing.T) {
 	wantModes(t, a, true, true)
 }
 
-// Маленькая кнопка выключает только сеть; когда выключены обе — туннель
-// гаснет целиком, а следующее «Подключить» снова включает всё.
+// Каждая кнопка помнит своё: выключили обе — туннель гаснет целиком, а
+// следующее включение круглой не включает сеть устройств.
 func TestMeshOffThenBypassOffStops(t *testing.T) {
 	layer := &fakeNetLayer{}
 	a := meshVPNApp(t, layer, true)
-	if err := a.Start(); err != nil {
+	if err := a.WantWait(on(), on()); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.SetMesh(false); err != nil {
@@ -104,18 +105,28 @@ func TestMeshOffThenBypassOffStops(t *testing.T) {
 	if err := a.Start(); err != nil {
 		t.Fatal(err)
 	}
-	wantModes(t, a, true, true)
+	wantModes(t, a, true, false)
 }
 
-// Сеть устройств можно включить отдельно: туннель поднимается без обхода.
+// Сеть устройств включается отдельно: туннель поднимается без обхода, а
+// круглая кнопка потом её не трогает.
 func TestMeshOnlyStart(t *testing.T) {
 	layer := &fakeNetLayer{}
 	a := meshVPNApp(t, layer, true)
 	if err := a.SetMesh(true); err != nil {
 		t.Fatal(err)
 	}
-	if on, _ := layer.lastBypass(); on {
+	if b, _ := layer.lastBypass(); b {
 		t.Fatal("адаптер поднят в режиме «весь трафик», а просили только сеть")
+	}
+	wantModes(t, a, false, true)
+
+	if err := a.Start(); err != nil {
+		t.Fatal(err)
+	}
+	wantModes(t, a, true, true)
+	if err := a.SetBypass(false); err != nil {
+		t.Fatal(err)
 	}
 	wantModes(t, a, false, true)
 
@@ -127,8 +138,8 @@ func TestMeshOnlyStart(t *testing.T) {
 	}
 }
 
-// Без сети устройств большая кнопка работает как раньше, а маленькая
-// честно отказывает.
+// Без сети устройств круглая кнопка работает как обычно, а «Сеть
+// устройств» честно отказывает.
 func TestNoMeshButtons(t *testing.T) {
 	layer := &fakeNetLayer{}
 	a := meshVPNApp(t, layer, false)
@@ -147,5 +158,28 @@ func TestNoMeshButtons(t *testing.T) {
 	}
 	if a.Running() {
 		t.Fatal("без сети устройств выключение обхода должно останавливать туннель")
+	}
+}
+
+// Смена режима доходит до слоя VPN вместе с гигиеной перехода: выключили
+// обход — сброс подставных адресов и закрытие соединений из адаптера.
+func TestПереключениеПередаётГигиену(t *testing.T) {
+	layer := &fakeNetLayer{}
+	a := meshVPNApp(t, layer, true)
+	if err := a.WantWait(on(), on()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SetBypass(false); err != nil {
+		t.Fatal(err)
+	}
+	layer.mu.Lock()
+	h := layer.hygiene[len(layer.hygiene)-1]
+	layer.mu.Unlock()
+	want := core.Transition(core.Modes{Bypass: true, Mesh: true}, core.Modes{Mesh: true})
+	if h != want {
+		t.Fatalf("гигиена %+v, ожидалась %+v", h, want)
+	}
+	if !h.ResetFakeIP || !h.CloseStackInternet || !h.FlushDNS {
+		t.Fatalf("выключение обхода без сброса: %+v", h)
 	}
 }

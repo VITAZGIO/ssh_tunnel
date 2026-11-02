@@ -2898,6 +2898,43 @@ function setState(s, detail){
   $('speedtest').disabled = !running || speedRunning;
   if(!running) netModes = {...netModes, bypass:false, mesh:false};
   renderNetModes();
+  if(core) renderCore(core);
+}
+
+/* ---------- ядро: две независимые кнопки ---------- */
+/* Экран ничего не хранит и не решает: рисует состояние ядра (событие core,
+   GET /api/state) и шлёт обратно только «хочу» (POST /api/state). Круглая
+   кнопка — туннель, «Сеть устройств» — своя; каждая меняет только своё. */
+let core = null;
+function renderCore(st){
+  if(!st || !st.tunnel) return;
+  if(core && st.seq && core.seq && st.seq < core.seq) return;
+  core = st;
+  netModes = {bypass: st.tunnel.phase === 'on', mesh: st.mesh.phase === 'on', meshConfigured: st.meshAvailable};
+  const t = st.tunnel.phase, reconnecting = st.link === 'reconnecting';
+  const look = {off:['connect',''], connecting:['cancel','busy'], on:['disconnect','on'], error:['connect','bad']}[t] || ['connect',''];
+  $('powerCap').textContent = tr(look[0]);
+  $('power').className = (t === 'on' && reconnecting) ? 'busy' : look[1];
+  let key = {off:'state_stopped', connecting:'state_connecting', on:'state_connected', error:'state_error'}[t] || 'state_stopped';
+  if(t === 'on' && reconnecting) key = 'state_reconnecting';
+  else if(t !== 'on' && t !== 'connecting' && st.mode === 'mesh') key = 'state_mesh_only';
+  $('stateText').textContent = tr(key);
+  $('stateDetail').textContent = st.link === 'connected' ? (st.detail || '') : '';
+  running = st.link !== 'stopped';
+  $('speedtest').disabled = !running || speedRunning;
+  const b = $('meshBtn');
+  b.hidden = !st.meshAvailable;
+  b.classList.toggle('on', st.mesh.phase === 'on');
+  b.classList.toggle('busy', st.mesh.phase === 'connecting');
+  $('meshBtnCap').textContent = tr(st.mesh.want ? 'mesh_btn_on' : 'mesh_btn_off');
+  const failed = t === 'error' ? st.tunnel : st.mesh.phase === 'error' ? st.mesh : null;
+  showError(failed ? connErrorText(failed.errorKind, failed.error) : '');
+}
+async function wantCore(body){
+  showError('');
+  const r = await api('/api/state', body);
+  if(r && r.error) showError(r.error);
+  renderCore(r && r.state ? r.state : r);
 }
 
 /* ---------- обход блокировок и сеть устройств ---------- */
@@ -2924,26 +2961,8 @@ async function refreshNetModes(){
   const st = await api('/api/status');
   if(st && st.modes){ netModes = st.modes; renderNetModes(); }
 }
-// Как и большая: включение из выключенного — это подключение, и его можно
-// отменить большой кнопкой, поэтому на это время ничего не блокируем.
-let meshBusy = false;
-$('meshBtn').onclick = async () => {
-  if(meshBusy) return;
-  showError('');
-  const starting = !running;
-  if(starting) setState('connecting', '');
-  else { meshBusy = true; $('meshBtn').disabled = true; }
-  try{
-    const r = starting ? await api('/api/meshmode', {on: true})
-                       : await apiWithin(4000, '/api/meshmode', {on: !netModes.mesh});
-    if(r.error) showError(connErrorText(r.errorKind, r.error));
-    if(r.modes){ netModes = r.modes; renderNetModes(); }
-  } finally {
-    meshBusy = false;
-    $('meshBtn').disabled = false;
-    refresh();
-  }
-};
+// Кнопка «Сеть устройств» — только своё «хочу», круглую не трогает.
+$('meshBtn').onclick = () => wantCore({mesh: !(core && core.mesh.want)});
 $('error').onclick = () => showError('');
 function showError(msg, where){
   const box = $(where || 'error');
@@ -3030,10 +3049,9 @@ function connectEvents(){
     if(e.kind === 'speed')    return onSpeed(e);
     if(e.kind === 'log')      return addMsg(e);
     if(e.kind === 'vpssetup') return onVpsSetupEvent(e);
+    if(e.kind === 'core') return renderCore(e.core);
     if(e.kind === 'state'){
       setState(e.state, e.state === 'connected' ? e.detail : '');
-      showError(e.state === 'error' ? connErrorText(e.errorKind, e.detail) : '');
-      if(e.state === 'connected' || e.state === 'stopped') refreshNetModes();
       return;
     }
     if(e.kind === 'stats'){
@@ -3071,37 +3089,9 @@ function showPing(ms){
 }
 
 /* ---------- кнопка ---------- */
-// Подключение может идти минуту (плохая сеть, повторы), поэтому кнопку на
-// это время не блокируем: «Подключение…» видно сразу, а повторное нажатие —
-// «Отменить» — прерывает его (app.Stop отменяет идущее подключение).
-// Блокируется кнопка только на короткие запросы выключения.
-let powerBusy = false;
-$('power').onclick = async () => {
-  if(powerBusy) return;
-  showError('');
-  if(!running){
-    setState('connecting', '');
-    const r = await api('/api/start', {});
-    if(r.error){ showError(connErrorText(r.errorKind, r.error)); show('viewMain'); }
-    refresh();
-    return;
-  }
-  powerBusy = true;
-  $('power').disabled = true;
-  try{
-    // Есть сеть устройств — большая кнопка отвечает только за обход
-    // блокировок: выключение оставляет сеть работать. В жёлтом состоянии
-    // (подключение, переподключение) — это «выключить всё сейчас».
-    const r = netModes.meshConfigured && lastState === 'connected'
-            ? await apiWithin(4000, '/api/bypass', {on: !netModes.bypass})
-            : await apiWithin(4000, '/api/stop', {});
-    if(r.error){ showError(connErrorText(r.errorKind, r.error)); show('viewMain'); }
-  } finally {
-    powerBusy = false;
-    $('power').disabled = false;
-    refresh();
-  }
-};
+// Круглая — только своё «хочу». Нажатие во время «Подключаюсь…» отменяет
+// подключение (ядро снимает «хочу»), сеть устройств при этом не трогается.
+$('power').onclick = () => wantCore({tunnel: !(core && core.tunnel.want)});
 
 /* Отдельной плитки с внешним адресом больше нет — он и так написан под
    состоянием. Но проверить, что трафик действительно выходит через сервер,
@@ -4759,6 +4749,7 @@ async function refresh(){
   let detail = st.state === 'connected' ? active.host : '';
   if(detail && usingBackup) detail += ' (' + tr('backup_server_note') + ')';
   if(st.modes) netModes = st.modes;
+  if(st.core) renderCore(st.core);
   $('toAdBlock').hidden = !st.adBlock;
   // Раздача через точку доступа есть только у VPN-версии — как и блокировка.
   $('hotspotRow').hidden = !st.adBlock;

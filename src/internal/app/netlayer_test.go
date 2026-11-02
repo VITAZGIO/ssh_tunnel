@@ -6,31 +6,42 @@ import (
 	"testing"
 
 	"sshtunnel/internal/config"
+	"sshtunnel/internal/core"
 	"sshtunnel/internal/tunnel"
 )
 
+// fakeNetLayer — слой VPN для тестов: запоминает, какие режимы ему
+// применяли (PlanLayer) и сколько раз снимали.
 type fakeNetLayer struct {
-	mu        sync.Mutex
-	prepared  int
-	attached  []*tunnel.Tunnel
-	detached  int
-	attachErr error
-	bypass    []bool // что приходило в SetBypass (ModeLayer)
+	mu       sync.Mutex
+	prepared int
+	applied  []core.Modes
+	hygiene  []core.Hygiene
+	tuns     []*tunnel.Tunnel
+	detached int
+	applyErr error
 }
 
-func (f *fakeNetLayer) SetBypass(on bool) {
+func (f *fakeNetLayer) Apply(tun *tunnel.Tunnel, _ config.Profile, m core.Modes, h core.Hygiene) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.bypass = append(f.bypass, on)
+	if f.applyErr != nil {
+		return f.applyErr
+	}
+	f.applied = append(f.applied, m)
+	f.hygiene = append(f.hygiene, h)
+	f.tuns = append(f.tuns, tun)
+	return nil
 }
 
+// lastBypass — что было в последнем применённом режиме у круглой кнопки.
 func (f *fakeNetLayer) lastBypass() (bool, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.bypass) == 0 {
+	if len(f.applied) == 0 {
 		return false, false
 	}
-	return f.bypass[len(f.bypass)-1], true
+	return f.applied[len(f.applied)-1].Bypass, true
 }
 
 func (f *fakeNetLayer) Prepare(cfg *tunnel.Config) {
@@ -38,16 +49,6 @@ func (f *fakeNetLayer) Prepare(cfg *tunnel.Config) {
 	defer f.mu.Unlock()
 	f.prepared++
 	cfg.SocksAddr, cfg.HTTPAddr = "", ""
-}
-
-func (f *fakeNetLayer) Attach(tun *tunnel.Tunnel, _ config.Profile) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.attachErr != nil {
-		return f.attachErr
-	}
-	f.attached = append(f.attached, tun)
-	return nil
 }
 
 func (f *fakeNetLayer) Detach() {
@@ -68,8 +69,9 @@ func vpnApp(t *testing.T, layer *fakeNetLayer) *App {
 	return a
 }
 
-// В режиме VPN системный прокси не трогается, адаптер поднимается на
-// подключённом туннеле, а «Отключить» снимает его сразу, без слива.
+// В режиме VPN системный прокси не трогается, режим применяется к адаптеру
+// целиком на подключённом туннеле, а «Выключить» снимает его сразу, без
+// слива.
 func TestVPNРежимПоднимаетИСнимаетАдаптер(t *testing.T) {
 	layer := &fakeNetLayer{}
 	a := vpnApp(t, layer)
@@ -78,10 +80,10 @@ func TestVPNРежимПоднимаетИСнимаетАдаптер(t *testin
 		t.Fatalf("подключение: %v", err)
 	}
 	layer.mu.Lock()
-	prepared, attached := layer.prepared, len(layer.attached)
+	prepared, applied := layer.prepared, len(layer.applied)
 	layer.mu.Unlock()
-	if prepared == 0 || attached != 1 {
-		t.Fatalf("Prepare=%d Attach=%d, ожидалось хотя бы 1 и ровно 1", prepared, attached)
+	if prepared == 0 || applied != 1 {
+		t.Fatalf("Prepare=%d Apply=%d, ожидалось хотя бы 1 и ровно 1", prepared, applied)
 	}
 	a.mu.Lock()
 	sysOn, cfg := a.sysOn, a.tun.Config()
@@ -98,7 +100,7 @@ func TestVPNРежимПоднимаетИСнимаетАдаптер(t *testin
 	detached := layer.detached
 	layer.mu.Unlock()
 	if detached == 0 {
-		t.Error("после «Отключить» адаптер должен сниматься")
+		t.Error("после «Выключить» адаптер должен сниматься")
 	}
 	a.mu.Lock()
 	draining := a.draining
@@ -108,9 +110,9 @@ func TestVPNРежимПоднимаетИСнимаетАдаптер(t *testin
 	}
 }
 
-// Не поднялся адаптер — подключение считается неудачным, туннель не висит.
+// Не встал адаптер — кнопка гаснет с ошибкой, туннель не висит.
 func TestVPNОшибкаАдаптераОстанавливаетТуннель(t *testing.T) {
-	layer := &fakeNetLayer{attachErr: errors.New("нет драйвера")}
+	layer := &fakeNetLayer{applyErr: errors.New("нет драйвера")}
 	a := vpnApp(t, layer)
 
 	if err := a.Start(); err == nil {
@@ -118,5 +120,8 @@ func TestVPNОшибкаАдаптераОстанавливаетТуннель
 	}
 	if a.Running() {
 		t.Error("туннель не должен считаться запущенным")
+	}
+	if st := a.CoreState(); st.Tunnel.Phase != core.PhaseError || st.Tunnel.Error == "" {
+		t.Errorf("кнопка %+v, ожидалась ошибка с текстом", st.Tunnel)
 	}
 }

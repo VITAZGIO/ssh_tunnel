@@ -11,11 +11,13 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"sshtunnel/internal/config"
+	"sshtunnel/internal/core"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/mesh"
 	"sshtunnel/internal/routing"
@@ -72,29 +74,32 @@ type App struct {
 	// сетевым адаптером, а не системным прокси. nil — обычный режим прокси.
 	net NetLayer
 
-	// bypassOff и meshOff — две кнопки главного экрана (см. modes.go):
-	// большая включает и выключает обход блокировок, маленькая — сеть
-	// устройств. Туннель держится, пока нужна хотя бы одна из них.
-	bypassOff bool
-	meshOff   bool
-	// connectCancel прерывает идущее подключение (Start ещё не вернулся):
-	// «Отключить» во время него срабатывает сразу. nil — подключения нет.
-	connectCancel context.CancelFunc
-	// sysProxyArgs — с чем включать системный прокси, когда обход
-	// блокировок включают обратно на живом туннеле.
+	// machine — ядро: две независимые кнопки и единственное место, где их
+	// выбор применяется к системе (см. modes.go и internal/core).
+	machine *core.Machine
+	// modes — режим, применённый сейчас (последний driver.Apply).
+	modes core.Modes
+	// hardStop — следующее снятие связи без слива: выход из программы.
+	hardStop atomic.Bool
+	// linkDetail — подробность последнего состояния связи (адрес сервера).
+	linkDetail string
+	// sysProxyArgs — с чем включать системный прокси (адреса локальных
+	// прокси подключённого сервера); sysApplied — с чем он включён сейчас.
 	sysProxyArgs *sysProxyArgs
+	sysApplied   *sysProxyArgs
+
+	stateMu   sync.Mutex
+	lastState string // последнее разосланное состояние ядра (см. publishState)
 }
 
 // NetLayer заворачивает в туннель весь трафик системы — вместо системного
 // прокси. Так устроен режим VPN (ssh_tunnel_vpn.exe): сам он живёт в отдельном
 // модуле с тяжёлыми зависимостями, а здесь только точка подключения к нему.
+// Режим он получает целиком через PlanLayer.Apply (см. modes.go).
 type NetLayer interface {
 	// Prepare правит настройки туннеля перед подключением: пометка своих
 	// сокетов, свой резолвер, отказ от локальных прокси.
 	Prepare(cfg *tunnel.Config)
-	// Attach поднимает адаптер (или переключает уже поднятый на новый
-	// туннель — при переходе на запасной сервер).
-	Attach(tun *tunnel.Tunnel, p config.Profile) error
 	// Detach снимает адаптер и возвращает сеть как было. Вызывать можно
 	// сколько угодно раз.
 	Detach()
@@ -112,6 +117,16 @@ func (a *App) SetNetLayer(n NetLayer) {
 	if cl, ok := n.(ConfigLayer); ok {
 		cl.ApplyConfig(cfg)
 	}
+	// Сменилась настоящая сеть — ядро применяет режим заново, целиком.
+	if nn, ok := n.(NetworkNotifier); ok {
+		nn.SetNetworkHook(a.machine.Reapply)
+	}
+}
+
+// NetworkNotifier — слой, который сообщает о смене настоящей сети (Wi-Fi ↔
+// кабель, пробуждение).
+type NetworkNotifier interface {
+	SetNetworkHook(func())
 }
 
 func New(cfg config.Config) *App {
@@ -125,14 +140,27 @@ func New(cfg config.Config) *App {
 		tunneled: routing.NewDirectList(active.TunnelHosts),
 		seenApps: map[string]struct{}{},
 	}
+	a.machine = core.NewMachine((*driver)(a), core.Options{
+		Save:      a.saveWant,
+		Changed:   a.publishState,
+		ErrorKind: errorKind,
+	})
 	go a.collectSeenApps()
 	return a
 }
 
-// collectSeenApps запоминает имена программ из событий соединений.
+// collectSeenApps запоминает имена программ из событий соединений и
+// подробность состояния связи (адрес сервера) для экрана.
 func (a *App) collectSeenApps() {
 	ch, _ := a.Bus.Subscribe()
 	for e := range ch {
+		if e.Kind == events.KindState {
+			a.mu.Lock()
+			a.linkDetail = e.Detail
+			a.mu.Unlock()
+			a.publishState()
+			continue
+		}
 		if e.Kind != events.KindConn || e.Process == "" {
 			continue
 		}
@@ -173,16 +201,19 @@ func (a *App) Config() config.Config {
 // он остаётся выключенным.
 func (a *App) ReplaceConfig(cfg config.Config) error {
 	running := a.Running()
-	if running {
-		a.Stop()
-	}
 	if _, err := a.SetConfig(cfg); err != nil {
 		return err
 	}
-	if running && cfg.Active().Host != "" {
-		return a.Start()
+	if !running {
+		return nil
 	}
-	return nil
+	if cfg.Active().Host == "" {
+		a.machine.Restore(core.Want{})
+		return a.settle(nil, nil)
+	}
+	a.machine.Restart()
+	w := a.machine.Want()
+	return a.settle(&w.Tunnel, &w.Mesh)
 }
 
 func (a *App) SetConfig(cfg config.Config) (string, error) {
@@ -216,10 +247,24 @@ func (a *App) SetConfig(cfg config.Config) (string, error) {
 		cl.ApplyConfig(cfg)
 	}
 
+	// Правила поменялись — ядро применяет режим заново: соединения, которые
+	// по новым правилам пошли бы другим путём, закрываются и открываются
+	// заново уже по ним.
+	if running && rulesChanged(old.Active(), active) {
+		a.machine.Reapply()
+	}
 	if running && connectionSettingsChanged(old, cfg) {
 		return "часть настроек вступит в силу после переподключения", nil
 	}
 	return "", nil
+}
+
+// rulesChanged — поменялись правила «куда» у активного сервера.
+func rulesChanged(a, b config.Profile) bool {
+	return a.ID != b.ID || a.FilterMode != b.FilterMode || a.LocalViaTunnel != b.LocalViaTunnel ||
+		strings.Join(a.FilterApps, "\n") != strings.Join(b.FilterApps, "\n") ||
+		strings.Join(a.DirectHosts, "\n") != strings.Join(b.DirectHosts, "\n") ||
+		strings.Join(a.TunnelHosts, "\n") != strings.Join(b.TunnelHosts, "\n")
 }
 
 // SwitchProfile переключает активный сервер. Работающий туннель принадлежит
@@ -246,21 +291,12 @@ func (a *App) SwitchProfile(id string) (string, error) {
 	// Выключенный туннель так и остаётся выключенным — включать его без
 	// просьбы было бы сюрпризом.
 	if wasRunning {
-		// Кнопки главного экрана переживают смену сервера: был включён
-		// только режим сети устройств — так и останется, если сеть есть и у
-		// нового сервера.
-		a.mu.Lock()
-		bypassOff, meshOff := a.bypassOff, a.meshOff
-		a.mu.Unlock()
-		a.Stop()
-		if bypassOff && !a.meshConfigured() {
-			bypassOff, meshOff = false, false
-		}
-		a.mu.Lock()
-		a.bypassOff, a.meshOff = bypassOff, meshOff
-		a.mu.Unlock()
-		if err := a.Start(); err != nil {
-			a.resetModes()
+		// Кнопки переживают смену сервера: что было включено, то и
+		// включается на новом. Сети устройств у нового сервера нет — гаснет
+		// только её кнопка (и говорит почему), круглая не трогается.
+		a.machine.Restart()
+		w := a.machine.Want()
+		if err := a.settle(&w.Tunnel, &w.Mesh); err != nil {
 			return "", fmt.Errorf("сервер переключён, но подключиться к нему не вышло: %w", err)
 		}
 		return "сервер переключён — туннель поднят на новом", nil
@@ -309,7 +345,8 @@ func (a *App) RemoveProfile(id string) (string, error) {
 		return "", err
 	}
 	if wasActive && wasRunning {
-		a.Stop()
+		a.machine.Restore(core.Want{})
+		a.settle(nil, nil)
 		return "удалённый сервер был подключён — туннель остановлен", nil
 	}
 	return "", nil
@@ -337,25 +374,6 @@ func (a *App) Running() bool {
 	return a.running
 }
 
-// RememberRunning запоминает, что сейчас включено — обход блокировок и сеть
-// устройств, — для режимов запуска «как при закрытии» (config.StartLast).
-// Зовётся только на действия человека (кнопки, значок в трее): остановка при
-// выходе из программы сюда не попадает.
-func (a *App) RememberRunning() {
-	m := a.Modes()
-	a.mu.Lock()
-	if a.cfg.LastRunning == m.Bypass && a.cfg.LastMesh == m.Mesh {
-		a.mu.Unlock()
-		return
-	}
-	a.cfg.LastRunning, a.cfg.LastMesh = m.Bypass, m.Mesh
-	cfg := a.cfg
-	a.mu.Unlock()
-	if err := cfg.Save(); err != nil {
-		a.Bus.Errorf("не удалось запомнить состояние туннеля: %v", err)
-	}
-}
-
 // RecoverStaleProxy чинит настройки, оставшиеся от аварийно завершённого
 // прошлого запуска. Вызывать при старте, до всего остального.
 func (a *App) RecoverStaleProxy() {
@@ -364,12 +382,39 @@ func (a *App) RecoverStaleProxy() {
 	}
 }
 
-// Start поднимает туннель. Без автовыбора (cfg.AutoPickFastest) ведёт себя
-// как раньше — подключается к ActiveProfile. С автовыбором и несколькими
-// серверами сначала меряет отклик у всех и подключается к тому, что ответил
-// быстрее; если он не поднимется, по очереди пробует остальных — см.
-// failover.go.
+// Start включает круглую кнопку (туннель) и ждёт результата. Сеть устройств
+// не трогается. Для консоли, трея и тестов; экран шлёт «хочу» (Want).
 func (a *App) Start() error {
+	if a.Config().Active().Host == "" {
+		return errors.New("не указан адрес сервера")
+	}
+	return a.WantWait(on(), nil)
+}
+
+// Stop — «Выключено»: обе кнопки выключаются, связь с сервером снимается
+// мягко, со сливом (см. tunnel.Drain и docs/DRAIN_SPEC.md).
+func (a *App) Stop() {
+	a.WantWait(off(), off())
+}
+
+// StopNow — резкая остановка без слива: выход из программы и замена всех
+// настроек. Выбор человека при этом не запоминается: при следующем запуске
+// «как при закрытии» восстановит то, что было до выхода.
+func (a *App) StopNow() {
+	a.hardStop.Store(true)
+	defer a.hardStop.Store(false)
+	a.machine.Restore(core.Want{})
+	a.settle(nil, nil)
+	// Связь могла подниматься мимо ядра (переход на запасной сервер) —
+	// добиваем всё, что осталось.
+	a.stop(false)
+}
+
+// startLink поднимает связь с сервером (core.Driver.Connect). Без автовыбора
+// подключается к ActiveProfile; с автовыбором и несколькими серверами сначала
+// меряет отклик у всех и подключается к тому, что ответил быстрее; если он не
+// поднимется, по очереди пробует остальных — см. failover.go.
+func (a *App) startLink(ctx context.Context) error {
 	a.mu.Lock()
 	if a.running || a.transitioning {
 		a.mu.Unlock()
@@ -381,12 +426,14 @@ func (a *App) Start() error {
 	gen := a.gen
 	draining := a.draining
 	a.mu.Unlock()
-
-	candidates := a.connectCandidates(cfg)
-	if len(candidates) == 0 {
+	defer func() {
 		a.mu.Lock()
 		a.transitioning = false
 		a.mu.Unlock()
+	}()
+
+	candidates := a.connectCandidates(cfg)
+	if len(candidates) == 0 {
 		return errors.New("не указан адрес сервера")
 	}
 
@@ -397,9 +444,6 @@ func (a *App) Start() error {
 	// VPN, а он не действует, пока не перезапустишь браузер».
 	if draining != nil && draining.Draining() {
 		if err := a.resumeDraining(draining, cfg, candidates[0]); err == nil {
-			a.mu.Lock()
-			a.transitioning = false
-			a.mu.Unlock()
 			return nil
 		}
 		// Не вышло (сервер пропал, порты у нового профиля другие) — туннель
@@ -410,14 +454,9 @@ func (a *App) Start() error {
 		a.mu.Unlock()
 	}
 
-	err := a.connectFrom(cfg, candidates, 0, gen)
-	a.mu.Lock()
-	a.transitioning = false
-	stopped := a.gen != gen
-	a.mu.Unlock()
-	if err != nil && stopped {
-		// Подключение прервали «Отключить» — это не ошибка подключения.
-		return nil
+	err := a.connectFrom(ctx, cfg, candidates, 0, gen)
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err() // отменили — это не ошибка подключения
 	}
 	return err
 }
@@ -433,46 +472,25 @@ func (a *App) Start() error {
 // слушатели-то остались прежние. Тогда возвращается ошибка, и обычный путь
 // строит туннель заново.
 func (a *App) resumeDraining(tun *tunnel.Tunnel, cfg config.Config, p config.Profile) error {
-	newCfg, _, _ := a.tunnelConfig(cfg, p)
-	a.applyModes(tun)
+	newCfg, socksAddr, httpAddr := a.tunnelConfig(cfg, p)
 	err := tun.Rebind(newCfg)
 
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.draining = nil
 	if err != nil {
-		a.mu.Unlock()
 		return err
 	}
 	a.tun = tun
 	a.running = true
 	a.effectiveProfile = p.ID
-	a.proxyURL = "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(p.HTTPPort))
-	a.mu.Unlock()
-
-	a.enableSysProxy(cfg, p,
-		net.JoinHostPort("127.0.0.1", strconv.Itoa(p.HTTPPort)),
-		net.JoinHostPort("127.0.0.1", strconv.Itoa(p.SocksPort)))
+	a.proxyURL = "http://" + httpAddr
+	a.sysProxyArgs = &sysProxyArgs{cfg: cfg, p: p, httpAddr: httpAddr, socksAddr: socksAddr}
 	return nil
 }
 
-// Stop — обычное «Отключить» из интерфейса: мягкая остановка со сливом.
-// Снаружи (состояние, экран, /api/status) она неотличима от прежней резкой:
-// «выключен» появляется сразу же. Разница только в том, что происходит потом
-// — см. tunnel.Drain и docs/DRAIN_SPEC.md.
-func (a *App) Stop() {
-	a.resetModes()
-	a.stop(true)
-}
-
-// StopNow — резкая остановка без слива: авария и выход из программы. Водить
-// трафик напрямую после аварии человек не просил, а при выходе сливать нечего
-// — процесс всё равно умирает. Смена сервера идёт через обычный Stop: там
-// слив как раз и нужен, чтобы сокеты браузера пережили переключение.
-func (a *App) StopNow() {
-	a.resetModes()
-	a.stop(false)
-}
-
+// stop снимает связь с сервером (core.Driver.Disconnect). drain — мягко, со
+// сливом: локальные прокси ещё донашивают соединения приложений напрямую.
 func (a *App) stop(drain bool) {
 	a.mu.Lock()
 	netLayer := a.net
@@ -482,15 +500,12 @@ func (a *App) stop(drain bool) {
 		drain = false
 	}
 	tun, sysOn := a.tun, a.sysOn
-	if a.connectCancel != nil {
-		a.connectCancel()
-		a.connectCancel = nil
-	}
-	a.running, a.sysOn = false, false
+	a.running, a.sysOn, a.sysApplied = false, false, nil
 	a.effectiveProfile = ""
-	// Ссылку на туннель при сливе сохраняем: он ещё живёт фоном, и следующий
-	// Start должен именно его вернуть к жизни, а не строить новый — иначе
-	// новый не сможет занять тот же локальный порт.
+	a.modes = core.Modes{}
+	// Ссылку на туннель при сливе сохраняем: он ещё живёт фоном, и следующее
+	// подключение должно именно его вернуть к жизни, а не строить новый —
+	// иначе новый не сможет занять тот же локальный порт.
 	if drain {
 		a.draining = tun
 	} else {
@@ -517,9 +532,8 @@ func (a *App) stop(drain bool) {
 		netLayer.Detach()
 	}
 	if tun == nil {
-		// Туннеля нет, но слив ещё идёт — значит человек нажал «Отключить»
-		// второй раз (кнопка-то уже показывает «выключен»). Это просьба
-		// «да выключай уже»: добиваем слив немедленно.
+		// Туннеля нет, но слив ещё идёт — значит человек нажал «Выключить»
+		// второй раз. Это просьба «да выключай уже»: добиваем слив немедленно.
 		a.mu.Lock()
 		leftover := a.draining
 		a.draining = nil

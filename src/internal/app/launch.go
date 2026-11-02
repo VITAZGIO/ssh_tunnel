@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	"sshtunnel/internal/core"
 	"sshtunnel/internal/tunnel"
 )
 
@@ -34,13 +35,17 @@ func (a *App) StartOnLaunch() { a.StartOnLaunchWithin(launchRetryFor) }
 // сеть, — сдаться через три минуты значило бы потерять его до перезагрузки.
 func (a *App) StartOnLaunchWithin(limit time.Duration) {
 	deadline := time.Now().Add(limit)
+	human := a.machine.HumanSeq()
 	for attempt := 1; ; attempt++ {
 		err := a.StartLaunchMode()
-		if err == nil || a.Running() {
+		if err == nil {
 			if attempt > 1 {
 				a.Bus.Infof("Автозапуск: подключились с %d-й попытки", attempt)
 			}
 			return
+		}
+		if a.machine.HumanSeq() != human {
+			return // человек уже нажал кнопку сам — решение за ним
 		}
 		if tunnel.IsAuthError(err) || errors.Is(err, errNoMesh) || (limit > 0 && time.Now().After(deadline)) {
 			a.Bus.Errorf("Автозапуск не удался: %v", err)
@@ -49,45 +54,33 @@ func (a *App) StartOnLaunchWithin(limit time.Duration) {
 		if attempt == 1 {
 			a.Bus.Warnf("Автозапуск: пока не подключиться (%v) — возможно, сеть ещё не поднялась, пробую снова", err)
 		}
-
-		a.mu.Lock()
-		gen := a.gen
-		a.mu.Unlock()
 		time.Sleep(launchRetryEvery)
-		a.mu.Lock()
-		touched := a.gen != gen || a.running || a.transitioning
-		a.mu.Unlock()
-		if touched {
+		if a.machine.HumanSeq() != human {
 			return
 		}
 	}
 }
 
-// StartLaunchMode включает туннель так, как выбрано в настройках запуска:
-// «Туннель при запуске» (обход блокировок) и «Сеть устройств при запуске» —
-// два отдельных выбора. Только сеть нужна домашним серверам: их видно с
-// других устройств, а свой интернет идёт напрямую. Без сети устройств у
-// сервера «только сеть» не подключает ничего: пустить весь трафик через VPS
-// вместо этого было бы ровно тем, чего не просили.
+// StartLaunchMode включает кнопки так, как выбрано в настройках запуска:
+// «Туннель при запуске» и «Сеть устройств при запуске» — два отдельных
+// выбора, «как при закрытии» восстанавливает обе кнопки. Только сеть нужна
+// домашним серверам: их видно с других устройств, а свой интернет идёт
+// напрямую. Без сети устройств у сервера «только сеть» не подключает ничего:
+// пустить весь трафик через VPS вместо этого было бы ровно тем, чего не
+// просили.
 //
 // Сюда приходят, когда запускаться уже решено (config.ConnectOnStart), — у
 // конфига старого формата это решила прежняя галочка, поэтому legacy здесь
 // «да».
 func (a *App) StartLaunchMode() error {
 	cfg := a.Config()
-	bypass, meshOn := cfg.BypassOnStart(true), cfg.MeshOnStart(true)
+	w := core.Want{Tunnel: cfg.BypassOnStart(true), Mesh: cfg.MeshOnStart(true)}
 	switch {
-	case bypass:
-		a.mu.Lock()
-		a.bypassOff, a.meshOff = false, !meshOn
-		a.mu.Unlock()
-		if err := a.Start(); err != nil {
-			a.resetModes()
-			return err
-		}
+	case !w.Tunnel && !w.Mesh:
 		return nil
-	case meshOn:
-		return a.SetMesh(true)
+	case !w.Tunnel && !a.meshConfigured():
+		return errNoMesh
 	}
-	return nil
+	a.machine.Restore(w)
+	return a.settle(&w.Tunnel, &w.Mesh)
 }

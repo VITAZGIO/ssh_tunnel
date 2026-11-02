@@ -22,6 +22,7 @@ import (
 
 	"sshtunnel/android/core"
 	"sshtunnel/internal/config"
+	core2 "sshtunnel/internal/core"
 	"sshtunnel/internal/events"
 )
 
@@ -466,8 +467,18 @@ func restoreResolvConf() bool {
 // проверкой маршрутов здесь нет.
 func (s *sys) setServers([]netip.Addr) {}
 
+func (s *sys) hasV6() bool     { return s.v6 }
+func (s *sys) wantShare() bool { return false }
+
+// pinner — маршрутов к адресам прямых соединений на Linux не ставим: сокет
+// привязан к настоящей карте через SO_BINDTODEVICE (см. docs/decisions.md).
+func (s *sys) pinner() func(netip.Addr) func() { return nil }
+
+// apply приводит интерфейс к плану ядра целиком.
+func (s *sys) apply(p core2.VPNPlan) error { return s.setFull(p.DNSAll) }
+
 // setShare и beforeClose — раздача VPN на мобильную точку доступа есть
 // только на Windows (см. hotspot_windows.go).
 func (s *sys) setShare(bool) {}
-func (s *sys) syncShare()     {}
+func (s *sys) syncShare()    {}
 func (s *sys) beforeClose()  {}

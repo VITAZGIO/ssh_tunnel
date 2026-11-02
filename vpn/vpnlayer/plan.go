@@ -15,6 +15,8 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+
+	"sshtunnel/internal/core"
 )
 
 const (
@@ -25,35 +27,33 @@ const (
 	// adapterMTU — пакеты дальше адаптера не уходят (соединения собираются
 	// заново у нас), поэтому обычный размер Ethernet — безопасный выбор.
 	adapterMTU = 1500
-	// fakeNet — подставные адреса для имён, как на Android (mobile.FakeNet).
+	// fakeNet — подставные адреса для имён (core.FakeNet).
 	fakeNet = "198.18.128.0/17"
 )
 
+// Адреса адаптера, наш DNS и маршруты всего интернета решает ядро
+// (core.PlanVPN) — здесь только короткие имена для кода платформы.
 var (
-	// Адреса адаптера. 198.18.0.0/15 зарезервирован под тесты сетевого
-	// оборудования: настоящих сайтов там нет, спутать не с чем.
-	adapterPrefix4 = netip.MustParsePrefix("198.18.0.1/15")
-	adapterPrefix6 = netip.MustParsePrefix("fd00:c0de:7075::1/64")
-
-	// dnsAddr — наш DNS. Отдельный адрес, не адрес самого адаптера: пакет на
-	// собственный адрес система обработала бы сама и нам бы не отдала.
-	dnsAddr = netip.MustParseAddr("198.18.0.53")
-
-	// Весь интернет двумя половинками, а не одним маршрутом 0.0.0.0/0: так
-	// наши маршруты всегда точнее маршрута по умолчанию настоящей сети, и
-	// метрики сравнивать не приходится. Своя локальная подсеть (роутер,
-	// принтер) остаётся ещё точнее и идёт мимо адаптера.
-	routes4 = []netip.Prefix{
-		netip.MustParsePrefix("0.0.0.0/1"),
-		netip.MustParsePrefix("128.0.0.0/1"),
-	}
-	// IPv6 заворачиваем всегда, даже если сервер его не умеет: иначе
-	// соединения по шестой версии уходили бы мимо туннеля — утечка.
-	routes6 = []netip.Prefix{
-		netip.MustParsePrefix("::/1"),
-		netip.MustParsePrefix("8000::/1"),
-	}
+	adapterPrefix4 = core.AdapterPrefix4
+	adapterPrefix6 = core.AdapterPrefix6
+	dnsAddr        = core.DNSAddr
+	routes4        = core.InternetRoutes4
+	routes6        = core.InternetRoutes6
 )
+
+// pinnable — к этому адресу имеет смысл ставить маршрут через настоящую сеть
+// на время прямого соединения: обычный адрес в интернете. Локальные сети,
+// служебные адреса и подсеть самого адаптера — нет: их маршруты система и
+// так знает лучше, а маршрут «через роутер» к соседу по сети его бы сломал.
+func pinnable(a netip.Addr) bool {
+	a = a.Unmap()
+	if !a.IsValid() || a.IsLoopback() || a.IsMulticast() || a.IsUnspecified() ||
+		a.IsLinkLocalUnicast() || a.IsPrivate() || adapterPrefix4.Masked().Contains(a) {
+		return false
+	}
+	// 100.64.0.0/10 — mesh-VPN (NetBird, Tailscale): у них свои маршруты.
+	return !netip.MustParsePrefix("100.64.0.0/10").Contains(a)
+}
 
 // defaultRoute — маршрут по умолчанию одной из сетевых карт.
 type defaultRoute struct {

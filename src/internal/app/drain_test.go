@@ -34,12 +34,9 @@ func drainApp(t *testing.T) (*App, config.Config, string) {
 
 	a := New(cfg)
 	t.Cleanup(a.StopNow)
-	if err := a.connectFrom(cfg, cfg.Profiles, 0, 0); err != nil {
+	if err := a.Start(); err != nil {
 		t.Fatalf("подключение: %v", err)
 	}
-	a.mu.Lock()
-	a.running = true
-	a.mu.Unlock()
 	return a, cfg, net.JoinHostPort("127.0.0.1", strconv.Itoa(p.SocksPort))
 }
 
@@ -131,11 +128,10 @@ func TestСменаСервераПереиспользуетСлушатели(
 	cfg := config.Config{Profiles: []config.Profile{p1, p2}, ActiveProfile: p1.ID}
 	a := New(cfg)
 	t.Cleanup(a.StopNow)
-	if err := a.connectFrom(cfg, []config.Profile{p1}, 0, 0); err != nil {
+	if err := a.Start(); err != nil {
 		t.Fatalf("подключение: %v", err)
 	}
 	a.mu.Lock()
-	a.running = true
 	before := a.tun
 	a.mu.Unlock()
 
@@ -169,12 +165,9 @@ func TestВключениеПослеСливаБерётСвежиеНастр�
 
 	a := New(cfg)
 	t.Cleanup(a.StopNow)
-	if err := a.connectFrom(cfg, cfg.Profiles, 0, 0); err != nil {
+	if err := a.Start(); err != nil {
 		t.Fatalf("подключение: %v", err)
 	}
-	a.mu.Lock()
-	a.running = true
-	a.mu.Unlock()
 
 	a.Stop()
 

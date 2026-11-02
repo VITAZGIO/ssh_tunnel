@@ -13,6 +13,7 @@ import (
 
 	"sshtunnel/android/core"
 	"sshtunnel/internal/config"
+	core2 "sshtunnel/internal/core"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/mesh"
 	"sshtunnel/internal/routing"
@@ -40,9 +41,14 @@ type Layer struct {
 	stopHotspot chan struct{}
 	servers     []netip.Addr
 	sshPort     int
-	// meshOnly — обход блокировок выключен: в адаптер идёт только сеть
-	// устройств, интернет — как без VPN (см. SetBypass).
-	meshOnly bool
+	// modes — режим, применённый к адаптеру (см. Apply).
+	modes core2.Modes
+	// pool — таблица подставных адресов поднятого адаптера (сбрасывается при
+	// смене режима, см. core.Hygiene).
+	pool *core.FakePool
+	// onNetChange — сообщить ядру, что сменилась сеть: оно применит режим
+	// заново, целиком (см. SetNetworkHook).
+	onNetChange func()
 
 	// block — блокировка рекламы (см. adblock.go). Один и тот же объект на
 	// всё время жизни: настройки меняют его содержимое, а не указатель.
@@ -68,29 +74,12 @@ func (l *Layer) PrepareSelfCheck(cfg *tunnel.Config) {
 	cfg.Resolver = l.resolver()
 }
 
-// SetBypass переключает «весь трафик» и «только сеть устройств» (реализует
-// app.ModeLayer). На поднятом адаптере меняются маршруты и DNS, сам адаптер
-// не пересоздаётся — соединения к устройствам сети (RDP и прочее) не рвутся.
-func (l *Layer) SetBypass(on bool) {
+// SetNetworkHook — куда сообщать о смене настоящей сети (реализует
+// app.NetworkNotifier): ядро в ответ применяет режим заново, целиком.
+func (l *Layer) SetNetworkHook(f func()) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.meshOnly == !on {
-		return
-	}
-	l.meshOnly = !on
-	if !l.up {
-		return
-	}
-	if err := l.sys.setFull(on); err != nil {
-		l.bus.Errorf("Не удалось переключить VPN: %v", err)
-		return
-	}
-	l.sys.flushDNS()
-	if on {
-		l.bus.Infof("VPN: весь трафик системы снова идёт через адаптер %s", l.sys.name())
-	} else {
-		l.bus.Infof("VPN: через адаптер идёт только сеть устройств, интернет — напрямую")
-	}
+	l.onNetChange = f
+	l.mu.Unlock()
 }
 
 // New готовит слой. Адаптер появится только при подключении.
@@ -105,6 +94,7 @@ func (l *Layer) Prepare(cfg *tunnel.Config) {
 	// запущена рядом.
 	cfg.SocksAddr, cfg.HTTPAddr = "", ""
 	cfg.ProtectSocket = l.sys.protect
+	cfg.PinDirect = l.sys.pinner()
 	cfg.Resolver = l.resolver()
 	cfg.TunProcessRules = true
 
@@ -113,8 +103,13 @@ func (l *Layer) Prepare(cfg *tunnel.Config) {
 	l.mu.Unlock()
 }
 
-// Attach поднимает адаптер или переключает уже поднятый на новый туннель.
-func (l *Layer) Attach(tun *tunnel.Tunnel, p config.Profile) error {
+// Apply приводит адаптер к режиму m целиком (реализует app.PlanLayer): план
+// считает ядро (core.PlanVPN), здесь он только исполняется. Не поднят адаптер
+// — поднимается; поднят — меняются маршруты и DNS, сам адаптер не
+// пересоздаётся, и соединения к устройствам сети (RDP) не рвутся. Тот же
+// вызов переводит адаптер на новый туннель (переход на запасной сервер) и
+// заново ставит всё, что зависит от настоящей сети, после её смены.
+func (l *Layer) Apply(tun *tunnel.Tunnel, p config.Profile, m core2.Modes, h core2.Hygiene) error {
 	// До блокировки: поиск адреса может занять секунды, а под блокировкой
 	// ждали бы и все соединения из адаптера.
 	servers := l.lookupServer(p.Host)
@@ -124,21 +119,35 @@ func (l *Layer) Attach(tun *tunnel.Tunnel, p config.Profile) error {
 
 	l.current.Store(tun)
 	l.servers, l.sshPort = servers, p.SSHPort
-	// Маршрут к серверу через настоящую сеть — см. sys.setServers. На
-	// поднятом адаптере (переход на запасной сервер) он сразу переезжает.
-	l.sys.setServers(servers)
-	if l.up {
-		return nil
+	wasUp, prev := l.up, l.modes
+	l.modes = m
+	if !l.up {
+		if err := l.bringUp(); err != nil {
+			l.bringDown()
+			l.current.Store(nil)
+			return err
+		}
 	}
-	if err := l.bringUp(); err != nil {
-		l.bringDown()
-		l.current.Store(nil)
+	l.sys.setServers(servers)
+	plan := core2.PlanVPN(m, core2.PlanOptions{IPv6: l.sys.hasV6(), ShareWanted: l.sys.wantShare()})
+	if err := l.sys.apply(plan); err != nil {
 		return err
 	}
-	if l.meshOnly {
-		l.bus.Infof("VPN включён: через адаптер %s идёт только сеть устройств", l.sys.name())
-	} else {
+	if h.ResetFakeIP && l.pool != nil {
+		l.pool.Reset()
+	}
+	if h.FlushDNS {
+		l.sys.flushDNS()
+	}
+	switch {
+	case !wasUp && m.Bypass:
 		l.bus.Infof("VPN включён: весь трафик системы идёт через адаптер %s", l.sys.name())
+	case !wasUp:
+		l.bus.Infof("VPN включён: через адаптер %s идёт только сеть устройств", l.sys.name())
+	case prev.Bypass && !m.Bypass:
+		l.bus.Infof("VPN: через адаптер идёт только сеть устройств, интернет — напрямую")
+	case !prev.Bypass && m.Bypass:
+		l.bus.Infof("VPN: весь трафик системы снова идёт через адаптер %s", l.sys.name())
 	}
 	return nil
 }
@@ -170,7 +179,8 @@ func (l *Layer) bringUp() error {
 	if err := l.startStack(dev); err != nil {
 		return err
 	}
-	if err := l.sys.configure(!l.meshOnly); err != nil {
+	// Адреса адаптера; маршруты и DNS режима ставит apply по плану ядра.
+	if err := l.sys.configure(false); err != nil {
 		return err
 	}
 
@@ -246,6 +256,7 @@ func (l *Layer) startStack(dev core.Device) error {
 		dev.Close()
 		return err
 	}
+	l.pool = pool
 	stats := &core.Stats{}
 	l.stats.Store(stats)
 	resolver := l.resolver()
@@ -264,21 +275,15 @@ func (l *Layer) startStack(dev core.Device) error {
 			}
 			return mesh.StaticDNS(m, name)
 		},
-		// Мимо туннеля — те же имена, что и в режиме прокси: локальная
-		// сеть и список «всегда напрямую».
+		// Настоящим адресом (мимо туннеля) отвечает то, что решило ядро
+		// (core.DecideDNS): локальная сеть, «всегда напрямую», и всё подряд,
+		// когда обход выключен.
 		Direct: func(name string) bool {
 			t := l.current.Load()
-			// «Всегда через сервер» сильнее обоих правил ниже.
-			if t != nil && t.ListedTunnel(name) {
+			if t == nil {
 				return false
 			}
-			if t != nil && !t.LocalViaTunnel() && routing.IsLocalHost(name) {
-				return true
-			}
-			l.mu.Lock()
-			d := l.direct
-			l.mu.Unlock()
-			return d != nil && d.Match(name)
+			return core2.DecideDNS(t.Rules(), name) == core2.DNSReal
 		},
 		Local: func(name string) ([]net.IP, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -299,6 +304,7 @@ func (l *Layer) startStack(dev core.Device) error {
 	engine, err := core.StartDevice(dev, &core.Handler{
 		Core:    (*coreSwitch)(l),
 		Resolve: pool.Resolver(),
+		Fake:    pool.Contains,
 		DNS:     dns,
 		Stats:   stats,
 		Log:     func(line string) { l.bus.Infof("%s", line) },
@@ -339,17 +345,22 @@ func (l *Layer) resolver() *net.Resolver {
 }
 
 // networkChanged — сменилась настоящая сеть: старые SSH-соединения привязаны
-// к прежней карте и почти наверняка мертвы, пересобираем пул сразу.
+// к прежней карте и почти наверняка мертвы, пересобираем пул сразу, а ядро
+// применяет режим заново (маршрут к серверу и прямые маршруты — через новый
+// роутер).
 func (l *Layer) networkChanged() {
 	l.bus.Infof("Сеть сменилась — переподключаюсь к серверу")
-	// Роутер мог смениться — маршрут к серверу ставим через новый.
 	l.mu.Lock()
-	if l.up {
+	hook := l.onNetChange
+	if l.up && hook == nil {
 		l.sys.setServers(l.servers)
 	}
 	l.mu.Unlock()
 	if t := l.current.Load(); t != nil {
 		t.Kick()
+	}
+	if hook != nil {
+		hook()
 	}
 }
 
@@ -373,6 +384,16 @@ func (l *Layer) lookupServer(host string) []netip.Addr {
 
 // coreSwitch отдаёт соединения из адаптера текущему туннелю.
 type coreSwitch Layer
+
+// RouteUDP — UDP-поток из адаптера: куда его вести, решает ядро через
+// текущий туннель (см. tunnel.RouteUDP).
+func (c *coreSwitch) RouteUDP(src netip.AddrPort, target string, byIP bool) func(net.Conn) {
+	t := (*Layer)(c).current.Load()
+	if t == nil {
+		return nil
+	}
+	return t.RouteUDP(src, target, byIP)
+}
 
 func (c *coreSwitch) ServeConn(conn net.Conn, target string, byIP bool) {
 	l := (*Layer)(c)

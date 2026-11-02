@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"sshtunnel/android/core"
+	core2 "sshtunnel/internal/core"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/mesh"
 	"sshtunnel/internal/routing"
@@ -65,8 +66,11 @@ type Callbacks interface {
 type Tunnel struct {
 	mu sync.Mutex
 
-	cb     Callbacks
-	cfg    tunnel.Config
+	cb  Callbacks
+	cfg tunnel.Config
+	// pool — таблица подставных адресов поднятого стека (сбрасывается при
+	// смене режима).
+	pool   *core.FakePool
 	direct *routing.DirectList
 	block  *core.BlockList
 	// tunneled — «всегда через сервер» (см. SetTunnelHosts).
@@ -378,23 +382,12 @@ func (t *Tunnel) StartStack(tunFD int, mtu int) error {
 
 	dns := &core.DNS{
 		Pool: pool,
-		// Мимо туннеля идут те же имена, что и на компьютере: локальная сеть
-		// и то, что человек внёс в список сам.
-		//
-		// Правила читаем в момент запроса, а не запоминаем при старте: стек
-		// переживает слив и Resume, а настройки к тому времени могли смениться.
+		// Настоящим адресом отвечает то, что решило ядро (core.DecideDNS) —
+		// то же, что на компьютере: локальная сеть, «всегда напрямую», и всё
+		// подряд, когда обход выключен. Правила читаются в момент запроса:
+		// стек переживает слив и Resume, а настройки могли смениться.
 		Direct: func(name string) bool {
-			t.mu.Lock()
-			direct, localViaTunnel, tunneled := t.direct, t.cfg.LocalViaTunnel, t.tunneled
-			t.mu.Unlock()
-			// «Всегда через сервер» сильнее обоих правил ниже.
-			if tunneled.Match(name) {
-				return false
-			}
-			if !localViaTunnel && routing.IsLocalHost(name) {
-				return true
-			}
-			return direct != nil && direct.Match(name)
+			return core2.DecideDNS(tun.Rules(), name) == core2.DNSReal
 		},
 		Local: func(name string) ([]net.IP, error) {
 			if cb == nil {
@@ -420,6 +413,7 @@ func (t *Tunnel) StartStack(tunFD int, mtu int) error {
 	eng, err := core.Start(tunFD, uint32(mtu), &core.Handler{
 		Core:    tun,
 		Resolve: pool.Resolver(),
+		Fake:    pool.Contains,
 		DNS:     dns,
 		Stats:   stackStats,
 		Log: func(line string) {
@@ -445,7 +439,7 @@ func (t *Tunnel) StartStack(tunFD int, mtu int) error {
 	}
 
 	t.mu.Lock()
-	t.engine, t.stack = eng, stackStats
+	t.engine, t.stack, t.pool = eng, stackStats, pool
 	t.mu.Unlock()
 	return nil
 }
@@ -576,15 +570,26 @@ func (t *Tunnel) SetTunnelHosts(text string) {
 // сервер), mesh — сеть устройств. Выключенный обход при включённой сети
 // оставляет туннель ради неё, а трафик приложений идёт напрямую. Действует
 // сразу; заданное до StartCore применяется при подключении.
+//
+// Переключение — как на компьютере (core.Transition): подставные адреса
+// старого режима забываются, соединения, открытые по его правилам,
+// закрываются — состояние такое же, как после чистого запуска в новом.
 func (t *Tunnel) SetModes(bypass, mesh bool) {
 	t.mu.Lock()
+	prev := core2.Modes{Bypass: !t.bypassOff, Mesh: !t.meshOff}
 	t.bypassOff, t.meshOff = !bypass, !mesh
-	tun := t.core
+	tun, pool := t.core, t.pool
 	t.mu.Unlock()
-	if tun != nil {
-		tun.SetBypass(bypass)
-		tun.SetMeshPaused(!mesh)
+	if tun == nil {
+		return
 	}
+	tun.SetBypass(bypass)
+	tun.SetMeshPaused(!mesh)
+	h := core2.Transition(prev, core2.Modes{Bypass: bypass, Mesh: mesh})
+	if h.ResetFakeIP && pool != nil {
+		pool.Reset()
+	}
+	tun.ApplyHygiene(h)
 }
 
 // Resume возвращает к жизни туннель, который был в сливе. Интерфейс VPN при

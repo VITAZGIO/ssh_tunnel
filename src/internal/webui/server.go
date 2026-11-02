@@ -42,6 +42,7 @@ import (
 
 	"sshtunnel/internal/app"
 	"sshtunnel/internal/config"
+	"sshtunnel/internal/core"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/filedialog"
 	"sshtunnel/internal/procinfo"
@@ -176,51 +177,22 @@ func localIP() string {
 func (s *Server) Serve() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
-	mux.HandleFunc("/events", s.guard(s.handleEvents))
-	mux.HandleFunc("/api/status", s.guard(s.handleStatus))
-	mux.HandleFunc("/api/start", s.guard(s.handleStart))
-	mux.HandleFunc("/api/stop", s.guard(s.handleStop))
-	mux.HandleFunc("/api/bypass", s.guard(s.handleBypass))
-	mux.HandleFunc("/api/meshmode", s.guard(s.handleMeshMode))
-	mux.HandleFunc("/api/config", s.guard(s.handleConfig))
-	mux.HandleFunc("/api/profile/add", s.guard(s.handleProfileAdd))
-	mux.HandleFunc("/api/profile/remove", s.guard(s.handleProfileRemove))
-	mux.HandleFunc("/api/profile/select", s.guard(s.handleProfileSelect))
-	mux.HandleFunc("/api/profile/export", s.guard(s.handleProfileExport))
-	mux.HandleFunc("/api/profile/import", s.guard(s.handleProfileImport))
-	mux.HandleFunc("/api/androidkey", s.guard(s.handleAndroidKey))
-	mux.HandleFunc("/api/vpsscript", s.guard(s.handleVPSScript))
-	mux.HandleFunc("/api/checkip", s.guard(s.handleCheckIP))
-	mux.HandleFunc("/api/speedtest", s.guard(s.handleSpeedTest))
-	mux.HandleFunc("/api/processes", s.guard(s.handleProcesses))
-	mux.HandleFunc("/api/appicon", s.guard(s.handleAppIcon))
-	mux.HandleFunc("/api/pickfile", s.guard(s.handlePickFile))
-	mux.HandleFunc("/api/openterminal", s.guard(s.handleOpenTerminal))
-	mux.HandleFunc("/api/genkey", s.guard(s.handleGenKey))
-	mux.HandleFunc("/api/bootstart", s.guard(s.handleBootStart))
-	mux.HandleFunc("/api/scannet", s.guard(s.handleScanNet))
-	mux.HandleFunc("/api/vpssetup/start", s.guard(s.handleVpsSetupStart))
-	mux.HandleFunc("/api/selfcheck", s.guard(s.handleSelfCheck))
-	mux.HandleFunc("/api/profile/latency", s.guard(s.handleProfileLatency))
-	mux.HandleFunc("/api/settings/export", s.guard(s.handleSettingsExport))
-	mux.HandleFunc("/api/settings/import", s.guard(s.handleSettingsImport))
-	mux.HandleFunc("/api/appprofiles", s.guard(s.handleAppProfiles))
-	mux.HandleFunc("/api/appprofiles/", s.guard(s.handleAppProfilesAction))
-	mux.HandleFunc("/api/update/check", s.guard(s.handleUpdateCheck))
-	mux.HandleFunc("/api/update/download", s.guard(s.handleUpdateDownload))
-	mux.HandleFunc("/api/mesh", s.guard(s.handleMesh))
-	mux.HandleFunc("/api/lanaddrs", s.guard(s.handleLANAddrs))
-	mux.HandleFunc("/api/serverusers", s.guard(s.handleServerUsers))
-	mux.HandleFunc("/api/adblock/update", s.guard(s.handleAdBlockUpdate))
+	for _, rt := range s.routes() {
+		mux.HandleFunc(rt.Path, s.guard(rt.h))
+	}
 
 	srv := &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	s.writeDiscovery()
 	return srv.Serve(s.ln)
 }
 
-func (s *Server) Close() { s.ln.Close() }
+func (s *Server) Close() {
+	s.removeDiscovery()
+	s.ln.Close()
+}
 
 // guard пропускает только свои запросы: с правильным токеном либо, в открытом
 // режиме, из локальной сети — и в любом случае без чужого Origin.
@@ -241,6 +213,11 @@ func (s *Server) allowed(r *http.Request) bool {
 		return false
 	}
 	tok := r.Header.Get("X-Token")
+	if tok == "" {
+		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+			tok = strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+		}
+	}
 	if tok == "" {
 		tok = r.URL.Query().Get("t")
 	}
@@ -333,6 +310,9 @@ type statusResp struct {
 	AdBlock bool `json:"adBlock"`
 	// AdBlocked — сколько имён заблокировано с подключения.
 	AdBlocked int `json:"adBlocked"`
+	// Core — состояние ядра: две кнопки, режим, связь, модули. Главный экран
+	// рисуется только по нему.
+	Core core.State `json:"core"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +331,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Modes:            s.app.Modes(),
 		AdBlock:          s.app.AdBlockAvailable(),
 		AdBlocked:        s.app.AdBlocked(),
+		Core:             s.app.CoreState(),
 	})
 }
 
@@ -385,13 +366,11 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, resp)
 		return
 	}
-	s.app.RememberRunning()
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	s.app.Stop()
-	s.app.RememberRunning()
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
@@ -423,7 +402,6 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request, set func(boo
 		writeJSON(w, resp)
 		return
 	}
-	s.app.RememberRunning()
 	writeJSON(w, map[string]any{"ok": true, "modes": s.app.Modes()})
 }
 
@@ -472,7 +450,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"error": "не разобрал настройки: " + err.Error()})
 		return
 	}
-	// Состояние туннеля ведёт сама программа (RememberRunning), а страница
+	// Состояние кнопок запоминает само ядро (core.Machine), а страница
 	// могла прислать устаревшую копию.
 	cfg.LastRunning, cfg.LastMesh = last, lastMesh
 	note, err := s.app.SetConfig(cfg)
@@ -810,11 +788,15 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Сначала отдаём историю — иначе окно, открытое позже старта, показывало
-	// бы пустой лог.
+	// бы пустой лог. Затем — состояние ядра: экран рисует главное только по
+	// нему.
 	for _, e := range s.app.Bus.History() {
 		if !send(e) {
 			return
 		}
+	}
+	if !send(events.Event{Kind: events.KindCore, Time: time.Now(), Core: s.app.CoreState()}) {
+		return
 	}
 
 	for {

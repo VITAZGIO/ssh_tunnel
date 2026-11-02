@@ -522,7 +522,12 @@ func (c *Client) startDirect(ctx context.Context, stunPort int, sendFn func(wire
 var serverNodes = netip.MustParsePrefix("198.19.255.0/24")
 
 // Match — ведёт ли цель (host:port) в сеть устройств.
-func (c *Client) Match(target string) bool {
+func (c *Client) Match(target string) bool { return IsTarget(target) }
+
+// IsTarget — цель (host:port, имя или адрес) из сети устройств: имя «.mesh»
+// или адрес 198.19.x.y. Не зависит от того, включена ли сеть, — это решает
+// core.Decide.
+func IsTarget(target string) bool {
 	host := hostOf(target)
 	if strings.HasSuffix(strings.ToLower(host), Suffix) {
 		return true

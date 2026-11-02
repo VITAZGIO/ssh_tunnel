@@ -7,9 +7,9 @@ import (
 	"syscall"
 	"time"
 
+	"sshtunnel/internal/core"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/procinfo"
-	"sshtunnel/internal/routing"
 )
 
 const syscallECONNRESET = syscall.ECONNRESET
@@ -70,7 +70,9 @@ func (t *Tunnel) serve(r request) {
 
 	proc, pid := lookupProcess(r.conn)
 
-	remote, direct, err := t.dialFor(proc, r.target)
+	route, c := t.decide(proc, r.target)
+	direct := route == core.RouteDirect
+	remote, err := t.dialRoute(route, r.target)
 	if err != nil {
 		t.bus.Publish(eventConn(proc, pid, r.target, r.proto, r.byIP, direct, err))
 		if r.writeErr != nil {
@@ -85,6 +87,8 @@ func (t *Tunnel) serve(r request) {
 			return
 		}
 	}
+	untrack := t.track(c, route, entryProxy, func() { r.conn.Close(); remote.Close() })
+	defer untrack()
 
 	t.bus.Publish(eventConn(proc, pid, r.target, r.proto, r.byIP, direct, nil))
 
@@ -145,41 +149,12 @@ func closeWrite(c net.Conn) {
 	_ = c.SetReadDeadline(time.Now().Add(30 * time.Second))
 }
 
-// dialFor открывает соединение до цели тем путём, который положен этой
-// программе по правилам: через сервер или напрямую с этого компьютера.
-//
-// Прямое соединение — не «отказ туннеля», а осознанный обход: так работает
-// режим, в котором выбранные приложения намеренно ходят мимо, и так же
-// обрабатывается локальная сеть.
+// dialFor открывает соединение до цели тем путём, который ядро выбрало для
+// этой программы (core.Decide). direct — соединение идёт мимо сервера.
 func (t *Tunnel) dialFor(process, target string) (net.Conn, bool, error) {
-	// Сеть устройств — раньше всех правил: её адреса только через сервер,
-	// напрямую до них не достать, какую программу ни возьми.
-	if m := t.meshTarget(target); m != nil {
-		c, err := m.DialPeer(target)
-		return c, false, err
-	}
-	// Слив: сервера уже нет, но слушатели живы ради уже открытых сокетов
-	// браузера — всё, что в них прилетает, ведём напрямую (см. Drain).
-	// «Всегда через сервер» сильнее правил по программам и «всегда
-	// напрямую».
-	if t.viaServer() && (t.ListedTunnel(target) ||
-		t.useTunnel(process) && !t.localDirect(target) && !t.listedDirect(target)) {
-		c, err := t.Dial("tcp", target)
-		return c, false, err
-	}
-	d := t.directDialer(15 * time.Second)
-	c, err := d.Dial("tcp", target)
-	return c, true, err
-}
-
-// localDirect — цель в локальной сети и её незачем вести через сервер.
-// Проверяется раньше правил по программам: даже в режиме «всё через туннель»
-// домашний NAS должен оставаться доступным.
-func (t *Tunnel) localDirect(target string) bool {
-	if t.localViaTunnel.Load() {
-		return false
-	}
-	return routing.IsLocalTarget(target)
+	route, _ := t.decide(process, target)
+	c, err := t.dialRoute(route, target)
+	return c, route == core.RouteDirect, err
 }
 
 // listedDirect — цель попала в пользовательский список «всегда напрямую».

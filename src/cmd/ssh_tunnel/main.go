@@ -100,17 +100,11 @@ func main() {
 		Height:   700,
 		DataPath: config.Dir(),
 		Running:  a.Running,
-		Toggle: func() {
-			defer a.RememberRunning()
-			if a.Running() {
-				a.Stop()
-				return
-			}
-			if err := a.Start(); err != nil {
-				a.Bus.Errorf("%v", err)
-			}
-		},
-		OnQuit: a.Stop,
+		// Значок в трее — только круглая кнопка: сеть устройств он не трогает.
+		Toggle: a.ToggleTunnel,
+		// Выход — не нажатие кнопки: выбор человека не запоминается, и «как
+		// при закрытии» вернёт то, что было включено до выхода.
+		OnQuit: a.StopNow,
 	})
 	if err != nil {
 		fatal(err.Error())

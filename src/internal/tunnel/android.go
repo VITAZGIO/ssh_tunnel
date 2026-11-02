@@ -14,6 +14,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"sshtunnel/internal/core"
 )
 
 // ServeConn обслуживает готовое соединение от приложения на телефоне:
@@ -33,35 +35,32 @@ func (t *Tunnel) ServeConn(conn net.Conn, target string, byIP bool) {
 		proc, pid = lookupProcess(conn)
 	}
 
-	// Адрес, выданный телефоном для имени из «всегда напрямую», в списке не
-	// значится — там имя. Узнаём его здесь (см. LearnDirect), а в журнал
-	// пишем имя: адрес человеку ничего не скажет, и это не утечка DNS — имя
-	// разрешали мы сами, по правилу.
-	//
-	// Имя сверяем с правилами каждый раз: убрали его из списка — адрес,
-	// выданный под него раньше, снова идёт через сервер, а не ждёт, пока
-	// запись в таблице устареет.
+	// Куда — решает ядро (core.Decide). Исключённая программа, пришедшая на
+	// подставной адрес (DNS в Windows спрашивает системная служба, а не
+	// она, и получает fake-IP), сюда приходит уже с именем: стек вернул его
+	// из таблицы. Решение «напрямую» — и прямое соединение само разрешит имя
+	// через DNS настоящей сети. Для программы всё как без нас.
+	route, c := t.decide(proc, target)
+	direct := route == core.RouteDirect
+
+	// Адрес, выданный нашим DNS под имя из «всегда напрямую», в журнал
+	// пишем именем: адрес человеку ничего не скажет, и это не утечка DNS —
+	// имя разрешали мы сами, по правилу.
 	shown := target
-	learned := false
-	if name, ok := t.learnedName(target); ok {
-		named := name
+	if direct && c.Name != "" {
 		if _, port, err := net.SplitHostPort(target); err == nil {
-			named = net.JoinHostPort(name, port)
-		}
-		if t.listedDirect(named) || t.localDirect(named) {
-			learned, shown, byIP = true, named, false
+			shown, byIP = net.JoinHostPort(c.Name, port), false
 		}
 	}
-	// Программа, которой по правилам положено мимо сервера, идёт напрямую
-	// так же, как выученный адрес.
-	forceDirect := learned || (proc != "" && !t.useTunnel(proc))
 
-	remote, direct, err := t.dialForTun(target, forceDirect)
+	remote, err := t.dialRoute(route, target)
 	if err != nil {
 		t.bus.Publish(eventConn(proc, pid, shown, "tun", byIP, direct, err))
 		return
 	}
 	defer remote.Close()
+	untrack := t.track(c, route, entryStack, func() { conn.Close(); remote.Close() })
+	defer untrack()
 
 	t.bus.Publish(eventConn(proc, pid, shown, "tun", byIP, direct, nil))
 
@@ -72,24 +71,15 @@ func (t *Tunnel) ServeConn(conn net.Conn, target string, byIP bool) {
 	t.pump(conn, conn, remote)
 }
 
-// dialForTun — решение «через сервер или напрямую» для трафика из стека.
-// forceDirect — напрямую в любом случае: адрес выучен под имя из «всегда
-// напрямую» или программе по правилам положено мимо сервера.
+// dialForTun — соединение из стека без программы (как на Android): путь
+// выбирает ядро. forceDirect — напрямую в любом случае (для проверок).
 func (t *Tunnel) dialForTun(target string, forceDirect bool) (net.Conn, bool, error) {
-	if m := t.meshTarget(target); m != nil {
-		c, err := m.DialPeer(target)
-		return c, false, err
+	route, _ := t.decide("", target)
+	if forceDirect && route != core.RouteMesh {
+		route = core.RouteDirect
 	}
-	// Слив (см. Drain): связи с сервером уже нет, но интерфейс VPN ещё
-	// поднят ради уже открытых сокетов приложений — ведём их напрямую.
-	if t.viaServer() && (t.ListedTunnel(target) ||
-		!forceDirect && !t.localDirect(target) && !t.listedDirect(target)) {
-		c, err := t.Dial("tcp", target)
-		return c, false, err
-	}
-	d := t.directDialer(15 * time.Second)
-	c, err := d.Dial("tcp", target)
-	return c, true, err
+	c, err := t.dialRoute(route, target)
+	return c, route == core.RouteDirect, err
 }
 
 // learnedTTL — сколько помнить адрес, выданный для имени из «всегда

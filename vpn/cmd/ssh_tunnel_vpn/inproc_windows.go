@@ -44,17 +44,9 @@ func runInProcess(tray, noWindow bool) {
 	runWindow(url, tray, a.Running, toggleApp(a), a.StopNow)
 }
 
-func toggleApp(a *app.App) func() {
-	return func() {
-		if a.Running() {
-			a.Stop()
-			return
-		}
-		if err := a.Start(); err != nil {
-			a.Bus.Errorf("%v", err)
-		}
-	}
-}
+// toggleApp — значок в трее: только круглая кнопка, сеть устройств он не
+// трогает.
+func toggleApp(a *app.App) func() { return a.ToggleTunnel }
 
 func runWindow(url string, tray bool, running func() bool, toggle, onQuit func()) {
 	if !nativeui.WebView2Installed() {
