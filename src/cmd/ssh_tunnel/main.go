@@ -100,16 +100,8 @@ func main() {
 		Height:   700,
 		DataPath: config.Dir(),
 		Running:  a.Running,
-		Toggle: func() {
-			defer a.RememberRunning()
-			if a.Running() {
-				a.Stop()
-				return
-			}
-			if err := a.Start(); err != nil {
-				a.Bus.Errorf("%v", err)
-			}
-		},
+		// Значок в трее — только круглая кнопка: сеть устройств он не трогает.
+		Toggle: a.ToggleTunnel,
 		OnQuit: a.Stop,
 	})
 	if err != nil {

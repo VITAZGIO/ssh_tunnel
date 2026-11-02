@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"strconv"
 	"sync"
@@ -101,6 +102,11 @@ type Config struct {
 	//
 	// nil означает «ничего помечать не надо» — так на Windows и Linux.
 	ProtectSocket func(network, address string, c syscall.RawConn) error
+
+	// PinDirect ставит маршрут к адресу через настоящую сеть на время
+	// прямого соединения и возвращает функцию, которая его снимает (см.
+	// dialDirect). nil — платформе это не нужно (прокси, Android).
+	PinDirect func(addr netip.Addr) (release func())
 
 	// Resolver разрешает имена для соединений, которые программа открывает
 	// сама: адрес сервера и цели «напрямую». nil — системный резолвер.
@@ -254,6 +260,10 @@ type Tunnel struct {
 	// нашим DNS и разрешённые заранее (см. directnames.go).
 	learned learnedDirect
 	dnames  directNames
+
+	// live — живые соединения и решения, по которым они открыты (см.
+	// ApplyHygiene).
+	live liveConns
 }
 
 type stats struct {

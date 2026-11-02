@@ -32,9 +32,17 @@ type procCache struct {
 
 var pc = procCache{inodePID: map[string]int{}, names: map[int]string{}}
 
-// Lookup возвращает имя программы, которой принадлежит локальный порт.
+// Lookup возвращает имя программы, которой принадлежит локальный TCP-порт.
 func Lookup(localPort uint16) (string, int) {
-	inode := inodeForPort(localPort)
+	return lookupInode(inodeForPort(localPort, "/proc/net/tcp", "/proc/net/tcp6"))
+}
+
+// LookupUDP — то же для UDP-сокета (поток датаграмм из адаптера режима VPN).
+func LookupUDP(localPort uint16) (string, int) {
+	return lookupInode(inodeForPort(localPort, "/proc/net/udp", "/proc/net/udp6"))
+}
+
+func lookupInode(inode string) (string, int) {
 	if inode == "" {
 		return "", 0
 	}
@@ -59,12 +67,12 @@ func Lookup(localPort uint16) (string, int) {
 }
 
 // inodeForPort ищет номер сокета по локальному порту в таблицах ядра.
-func inodeForPort(port uint16) string {
+func inodeForPort(port uint16, tables ...string) string {
 	target := strings.ToUpper(strconv.FormatUint(uint64(port), 16))
 	if len(target) < 4 {
 		target = strings.Repeat("0", 4-len(target)) + target
 	}
-	for _, f := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
+	for _, f := range tables {
 		data, err := os.ReadFile(f)
 		if err != nil {
 			continue

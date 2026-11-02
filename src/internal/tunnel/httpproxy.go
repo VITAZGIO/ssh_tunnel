@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+
+	"sshtunnel/internal/core"
 )
 
 // HTTP-прокси — вторая точка входа наряду с SOCKS, и именно она закрывает две
@@ -80,13 +82,17 @@ func (t *Tunnel) httpForward(conn net.Conn, br *bufio.Reader, req *http.Request)
 	}
 
 	proc, pid := lookupProcess(conn)
-	remote, direct, err := t.dialFor(proc, target)
+	route, c := t.decide(proc, target)
+	direct := route == core.RouteDirect
+	remote, err := t.dialRoute(route, target)
 	if err != nil {
 		t.bus.Publish(eventConn(proc, pid, target, "http", false, direct, err))
 		fmt.Fprintf(conn, "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\nssh_tunnel: %s\r\n", shortErr(err))
 		return
 	}
 	defer remote.Close()
+	untrack := t.track(c, route, entryProxy, func() { conn.Close(); remote.Close() })
+	defer untrack()
 
 	t.bus.Publish(eventConn(proc, pid, target, "http", isIPHost(target), direct, nil))
 	t.stats.active.Add(1)

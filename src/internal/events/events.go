@@ -18,6 +18,7 @@ const (
 	KindStats    Kind = "stats"    // периодическая статистика трафика
 	KindSpeed    Kind = "speed"    // ход и результат теста скорости
 	KindVpsSetup Kind = "vpssetup" // строка вывода мастера настройки сервера
+	KindCore     Kind = "core"     // состояние ядра: кнопки, режим, модули (core.State)
 )
 
 // Состояния туннеля.
@@ -92,6 +93,10 @@ type Event struct {
 	// (успешно или нет; при неудаче заполнен Error). Пароль root сюда никогда
 	// не попадает: он не покидает функцию, которая открывает SSH-соединение.
 	Stage string `json:"stage,omitempty"`
+
+	// KindCore — полное состояние ядра (core.State): экран рисует главное
+	// только по нему и сам ничего не хранит.
+	Core any `json:"core,omitempty"`
 }
 
 // Speed сообщает ход теста скорости: какое направление меряется сейчас и
@@ -150,7 +155,7 @@ func (b *Bus) Publish(e Event) {
 	// сервера идут часто и в истории не нужны: иначе они вытеснят из неё
 	// осмысленные сообщения. Окно, открытое посреди настройки сервера, всё
 	// равно должно оставаться открытым — поток событий и так не прервётся.
-	if e.Kind != KindStats && e.Kind != KindSpeed && e.Kind != KindVpsSetup {
+	if e.Kind != KindStats && e.Kind != KindSpeed && e.Kind != KindVpsSetup && e.Kind != KindCore {
 		b.history = append(b.history, e)
 		if len(b.history) > b.maxHist {
 			b.history = b.history[len(b.history)-b.maxHist:]

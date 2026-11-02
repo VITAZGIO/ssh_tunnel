@@ -30,7 +30,6 @@ type FakePool struct {
 	next   uint32 // смещение следующего
 	byName map[string]uint32
 	byAddr map[uint32]string
-	order  []string // имена в порядке выдачи, для переиспользования
 }
 
 // NewFakePool готовит пул по подсети вида 198.18.0.0/15.
@@ -79,8 +78,32 @@ func (p *FakePool) Get(name string) net.IP {
 
 	p.byName[name] = addr
 	p.byAddr[addr] = name
-	p.order = append(p.order, name)
 	return fromUint32(addr)
+}
+
+// Reset забывает все выданные адреса. Зовётся при смене режима (см.
+// core.Hygiene): адрес, выданный в «Обходе», не должен ни во что превращаться
+// после его выключения — приложение получит отказ и спросит имя заново.
+func (p *FakePool) Reset() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	clear(p.byName)
+	clear(p.byAddr)
+	p.next = 0
+}
+
+// Contains — адрес из подсети подставных (выдан или нет — неважно).
+func (p *FakePool) Contains(ip string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	ip4 := parsed.To4()
+	if ip4 == nil {
+		return false
+	}
+	v := toUint32(ip4)
+	return v >= p.base-2 && v < p.base-2+p.count+3
 }
 
 // Name возвращает имя, которому был выдан этот адрес.

@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
@@ -222,7 +223,7 @@ func TestConnectFromFailsOverToNextOnUnreachable(t *testing.T) {
 
 	var err error
 	logs := collectLogs(a.Bus, func() {
-		err = a.connectFrom(cfg, cfg.Profiles, 0, 0)
+		err = a.connectFrom(context.Background(), cfg, cfg.Profiles, 0, 0)
 	})
 	if err != nil {
 		t.Fatalf("connectFrom вернул ошибку: %v", err)
@@ -249,7 +250,7 @@ func TestConnectFromStopsOnAuthError(t *testing.T) {
 	a := New(cfg)
 	t.Cleanup(a.Stop)
 
-	err := a.connectFrom(cfg, cfg.Profiles, 0, 0)
+	err := a.connectFrom(context.Background(), cfg, cfg.Profiles, 0, 0)
 	if err == nil {
 		t.Fatal("ожидалась ошибка — ключ не принят")
 	}

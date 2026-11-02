@@ -179,7 +179,6 @@ func TestRememberRunningKeepsBothModes(t *testing.T) {
 	if err := a.SetMesh(true); err != nil {
 		t.Fatal(err)
 	}
-	a.RememberRunning()
 	cfg := a.Config()
 	if cfg.LastRunning || !cfg.LastMesh {
 		t.Fatalf("запомнено обход=%v сеть=%v, а было включено только сеть", cfg.LastRunning, cfg.LastMesh)
