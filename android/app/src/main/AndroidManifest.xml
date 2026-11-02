@@ -37,6 +37,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -46,6 +47,14 @@
                  страницу приложения в своих настройках, а не саму программу. -->
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
+            <!-- Ссылка импорта сервера из панели (её же несёт QR при создании
+                 клиента): камера или браузер открывают её в приложении. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="sshtunnel" android:host="import" />
             </intent-filter>
         </activity>
 

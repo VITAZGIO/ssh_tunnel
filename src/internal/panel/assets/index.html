@@ -571,7 +571,7 @@
         </div>
       </div>
 
-      <!-- настройки клиента: QR (только Android), буфер, файл -->
+      <!-- настройки клиента: QR и ссылка (только сразу после создания), буфер, файл -->
       <div class="card" id="clientConfigCard" hidden>
         <h1 id="clientConfigTitle" data-i18n="client_key_title">Ключ клиента готов</h1>
         <p class="note" id="clientConfigNote" data-i18n="client_key_note">Это единственный раз, когда
@@ -583,6 +583,8 @@
           <img id="qrThumb" alt="QR">
           <p class="note" style="margin:8px 0 0" data-i18n="qr_hint">Нажми на код, чтобы открыть
             во весь экран — так его проще отсканировать телефоном.</p>
+          <button class="btn" id="copyClientLinkBtn" style="margin-top:10px"
+            data-i18n="copy_link">Скопировать ссылку</button>
         </div>
 
         <div class="row-inline" style="margin-bottom:14px">
@@ -1078,6 +1080,7 @@ const I18N = {
       'сервера: с ним можно подключиться от имени этого устройства.',
     qr_hint:'Нажми на код, чтобы открыть во весь экран — так его проще отсканировать телефоном.',
     copy_config:'Скопировать', download_config:'Скачать файл',
+    copy_link:'Скопировать ссылку',
     manual_entry_title:'Или впиши руками',
     host_label:'Адрес сервера', port_label:'Порт', user_label:'Пользователь',
     copied:'Скопировано в буфер обмена', copy_failed:'Не удалось скопировать — используй файл',
@@ -1333,6 +1336,7 @@ const I18N = {
       'password: it lets someone connect as this device.',
     qr_hint:'Tap the code to open it full screen — easier to scan with a phone.',
     copy_config:'Copy', download_config:'Download file',
+    copy_link:'Copy link',
     manual_entry_title:'Or enter it by hand',
     host_label:'Server address', port_label:'Port', user_label:'User',
     copied:'Copied to clipboard', copy_failed:'Could not copy — use the file instead',
@@ -1806,7 +1810,7 @@ function deviceCard(c){
   const settings = document.createElement('button');
   settings.className = 'btn ghost small';
   settings.textContent = t('show_settings');
-  settings.addEventListener('click', () => showClientConfig(c.id, false));
+  settings.addEventListener('click', () => showClientConfig(c.id));
   const access = document.createElement('button');
   access.className = 'btn ghost small';
   access.textContent = t('acc_client_btn');
@@ -1997,25 +2001,34 @@ $('createClientBtn').addEventListener('click', async () => {
   if (!ok){ showMsg($('addClientMsg'), errText(data.error, data), 'err'); return; }
   $('addClientForm').hidden = true;
   await loadClients();
-  showClientConfig(data.client.id, true);
+  // QR и ссылка приходят только в ответе на создание — второй раз их не
+  // получить (п. 16), поэтому показываем то, что пришло, без запроса.
+  if (!data.config){ showMsg($('devicesMsg'), errText(data.configError, data), 'err'); return; }
+  renderClientConfig(data.config, true);
 });
 
 /* ---------- настройки клиента: QR / буфер / файл ---------- */
 let currentConfigFilename = 'ssh_tunnel.json';
 let currentConfigJSON = '';
+let currentConfigLink = '';
 
-async function showClientConfig(id, justCreated){
+// showClientConfig — «Показать настройки» у существующего клиента: без QR и
+// ссылки, их панель отдаёт только при создании.
+async function showClientConfig(id){
+  const {ok, data} = await api('/api/clients/config?id=' + encodeURIComponent(id));
+  if (!ok){ showMsg($('devicesMsg'), errText(data.error, data), 'err'); return; }
+  renderClientConfig(data.config, false);
+}
+
+function renderClientConfig(cfg, justCreated){
   showMsg($('clientConfigMsg'), '', '');
   $('clientConfigTitle').textContent = t(justCreated ? 'client_key_title' : 'client_settings_title');
   $('clientConfigNote').textContent = t(justCreated ? 'client_key_note' : 'client_settings_note');
-  const {ok, data} = await api('/api/clients/config?id=' + encodeURIComponent(id));
-  if (!ok){ showMsg($('clientConfigMsg'), errText(data.error, data), 'err'); return; }
-  const cfg = data.config;
-  // QR — только телефону: сканировать код на том же компьютере, для которого
-  // он показан, нечем и незачем — там нужен буфер обмена или файл.
-  const isPhone = cfg.deviceType === 'android';
-  $('clientConfigQRBox').hidden = !isPhone;
-  if (isPhone){
+  // QR со ссылкой — для любого типа устройства: телефон сканирует, на ПК
+  // ссылку копируют кнопкой под кодом и вставляют в программу.
+  currentConfigLink = cfg.link || '';
+  $('clientConfigQRBox').hidden = !(cfg.qrPngBase64 && currentConfigLink);
+  if (cfg.qrPngBase64){
     const src = 'data:image/png;base64,' + cfg.qrPngBase64;
     $('qrThumb').src = src;
     $('qrFullImg').src = src;
@@ -2073,6 +2086,14 @@ $('copyClientConfigBtn').addEventListener('click', async () => {
   }
 });
 
+$('copyClientLinkBtn').addEventListener('click', async () => {
+  if (await copyText(currentConfigLink)) {
+    showMsg($('clientConfigMsg'), t('copied'), 'ok');
+  } else {
+    showMsg($('clientConfigMsg'), t('copy_failed'), 'err');
+  }
+});
+
 $('downloadClientConfigBtn').addEventListener('click', () => {
   const blob = new Blob([currentConfigJSON], {type: 'application/json'});
   const url = URL.createObjectURL(blob);
@@ -2085,6 +2106,8 @@ $('downloadClientConfigBtn').addEventListener('click', () => {
 $('closeClientConfigBtn').addEventListener('click', () => {
   $('clientConfigKey').value = '';
   currentConfigJSON = '';
+  currentConfigLink = '';
+  $('qrThumb').removeAttribute('src'); $('qrFullImg').removeAttribute('src');
   $('clientConfigCard').hidden = true;
 });
 

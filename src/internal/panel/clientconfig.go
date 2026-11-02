@@ -59,13 +59,15 @@ func BuildClientDoc(c Client, sshHost string, sshPort int, panelURL string) (sha
 	}, nil
 }
 
-// ClientConfigPayload — то, что нужно панели, чтобы показать блок «Показать
-// настройки»: сам JSON для копирования/скачивания, PNG QR-кода в base64 (для
-// сканирования телефоном) и те же значения текстом — на случай, если их
-// проще вписать руками, чем сканировать или импортировать файлом.
+// ClientConfigPayload — то, что нужно панели, чтобы показать настройки
+// клиента: сам JSON для копирования/скачивания и те же значения текстом — на
+// случай, если их проще вписать руками. Ссылка импорта sshtunnel://… и её
+// QR-код (PNG в base64) есть только в ответе на создание клиента: показывать
+// их решено один раз, в мастере создания (ТЗ «QR в панели», п. 16).
 type ClientConfigPayload struct {
 	JSON        string     `json:"json"`
-	QRPngBase64 string     `json:"qrPngBase64"`
+	Link        string     `json:"link,omitempty"`
+	QRPngBase64 string     `json:"qrPngBase64,omitempty"`
 	Host        string     `json:"host"`
 	SSHPort     int        `json:"sshPort"`
 	User        string     `json:"user"`
@@ -73,10 +75,10 @@ type ClientConfigPayload struct {
 	DeviceType  DeviceType `json:"deviceType"`
 }
 
-// BuildClientConfigPayload собирает всё, что нужно /api/clients/config
-// (server.go) для ответа странице: JSON-файл обмена, QR-код того же
-// содержимого и отдельные текстовые поля для ручного ввода.
-func BuildClientConfigPayload(c Client, sshHost string, sshPort int, panelURL string) (ClientConfigPayload, error) {
+// BuildClientConfigPayload собирает ответ странице (server.go): JSON-файл
+// обмена и отдельные текстовые поля для ручного ввода; с withLink — ещё
+// ссылку импорта и её QR-код (только при создании клиента).
+func BuildClientConfigPayload(c Client, sshHost string, sshPort int, panelURL string, withLink bool) (ClientConfigPayload, error) {
 	doc, err := BuildClientDoc(c, sshHost, sshPort, panelURL)
 	if err != nil {
 		return ClientConfigPayload{}, err
@@ -85,17 +87,28 @@ func BuildClientConfigPayload(c Client, sshHost string, sshPort int, panelURL st
 	if err != nil {
 		return ClientConfigPayload{}, err
 	}
-	png, err := qrcode.Encode(string(payload), qrcode.Low, 320)
-	if err != nil {
-		return ClientConfigPayload{}, fmt.Errorf("не удалось собрать QR-код: %w", err)
-	}
-	return ClientConfigPayload{
+	out := ClientConfigPayload{
 		JSON:        string(payload),
-		QRPngBase64: base64.StdEncoding.EncodeToString(png),
 		Host:        doc.Host,
 		SSHPort:     doc.SSHPort,
 		User:        doc.User,
 		PrivateKey:  c.PrivateKey,
 		DeviceType:  c.DeviceType,
-	}, nil
+	}
+	if withLink {
+		link, err := share.BuildLink(doc)
+		if err != nil {
+			return ClientConfigPayload{}, err
+		}
+		// QR несёт ссылку, а не JSON: она короче (код реже, сканируется
+		// легче), и системная камера телефона сразу предлагает открыть её в
+		// приложении. 512 px — чтобы точки не сливались на экране ноутбука.
+		png, err := qrcode.Encode(link, qrcode.Low, 512)
+		if err != nil {
+			return ClientConfigPayload{}, fmt.Errorf("не удалось собрать QR-код: %w", err)
+		}
+		out.Link = link
+		out.QRPngBase64 = base64.StdEncoding.EncodeToString(png)
+	}
+	return out, nil
 }

@@ -71,10 +71,15 @@ func Build(doc Doc) ([]byte, error) {
 
 // Parse разбирает файл обмена (версии 1 или 2) в Doc. Отдельно проверяет,
 // что во входных данных вообще есть что разбирать и что результат похож на
-// настоящий экспорт ssh_tunnel, а не случайный JSON.
+// настоящий экспорт ssh_tunnel, а не случайный JSON. Ссылку импорта
+// sshtunnel://… (QR из панели) тоже понимает — так её читают все места,
+// где уже читается файл: сканер и буфер на Android, «Вставить» на ПК.
 func Parse(data []byte) (Doc, error) {
 	if strings.TrimSpace(string(data)) == "" {
 		return Doc{}, errors.New("пустой файл: нечего импортировать")
+	}
+	if IsLink(string(data)) {
+		return ParseLink(string(data))
 	}
 	var doc Doc
 	if err := json.Unmarshal(data, &doc); err != nil {

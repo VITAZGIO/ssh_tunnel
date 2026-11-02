@@ -439,6 +439,29 @@ class MainActivity : AppCompatActivity() {
             val y = savedInstanceState.getInt(KEY_SCROLL, 0)
             (flipper.currentView as? ScrollView)?.let { sv -> sv.post { sv.scrollTo(0, y) } }
         }
+        // Пересоздание экрана (поворот, тема) ссылку второй раз не импортирует.
+        if (savedInstanceState == null) handleImportLink(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleImportLink(intent)
+    }
+
+    /**
+     * Ссылка sshtunnel://import?… — её несёт QR, который панель сервера
+     * показывает при создании клиента: системная камера или браузер
+     * открывают её здесь. Разбирает её то же ядро, что QR и буфер, — сервер
+     * добавляется так же, как по кнопке «Сканировать QR».
+     */
+    private fun handleImportLink(intent: Intent?) {
+        if (intent == null) return
+        val uri = intent.data ?: return
+        if (!uri.scheme.equals("sshtunnel", ignoreCase = true)) return
+        intent.data = null
+        applyImportedText(uri.toString())
+        flipper.displayedChild = SERVERS
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

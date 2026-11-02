@@ -152,7 +152,7 @@ func (s *Server) SelfServiceHandler() http.Handler {
 			writeJSON(w, code, map[string]string{"error": strings.TrimPrefix(err.Error(), errSelfBadInput.Error()+": ")})
 			return
 		}
-		payload, err := BuildClientConfigPayload(c, s.sshHost, s.sshPort, s.panelURL)
+		payload, err := BuildClientConfigPayload(c, s.sshHost, s.sshPort, s.panelURL, false)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
