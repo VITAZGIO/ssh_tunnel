@@ -423,7 +423,9 @@ type pinnedRoute struct {
 // setServers запоминает адреса сервера; при включённом обходе маршруты к
 // ним сразу перекладываются (сменился сервер или роутер).
 func (s *sys) setServers(addrs []netip.Addr) {
+	s.mu.Lock()
 	s.servers = append([]netip.Addr(nil), addrs...)
+	s.mu.Unlock()
 	if s.full {
 		s.pinServers()
 	}
@@ -441,9 +443,9 @@ func (s *sys) setServers(addrs []netip.Addr) {
 func (s *sys) pinServers() {
 	s.unpinServers()
 	s.mu.RLock()
-	up4, up6 := s.up4, s.up6
+	up4, up6, servers := s.up4, s.up6, s.servers
 	s.mu.RUnlock()
-	for _, a := range s.servers {
+	for _, a := range servers {
 		up, bits, any := up4, 32, netip.IPv4Unspecified()
 		if a.Is6() {
 			up, bits, any = up6, 128, netip.IPv6Unspecified()
@@ -628,6 +630,8 @@ func (s *sys) releasePin(a netip.Addr, p *directPin) {
 }
 
 func (s *sys) isServer(a netip.Addr) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for _, srv := range s.servers {
 		if srv == a {
 			return true
