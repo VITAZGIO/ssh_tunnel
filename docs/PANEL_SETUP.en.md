@@ -177,15 +177,15 @@ is set.
 1. Open the panel, log in, change the one-time password.
 2. On the main screen — "+ Add client": a device name ("Laptop", "Phone")
    and type (Windows, Linux, Android).
-3. Once created, the panel shows a ready config right away: a QR code for a
-   phone, a "Copy" button for pasting into the panel on a computer, and
-   "Download file" — plus the address, port, user, and key as plain text if
-   you'd rather type them in by hand. This is the only moment the panel
-   shows the private key on its own — after that it's only revealed again
-   through that specific client's "Show settings" button.
-4. On the new device — import that config (scanning the QR code, pasting
-   from the clipboard, or opening the downloaded file with the "Import"
-   button, depending on the platform).
+3. Once created, the panel shows a ready config right away: a QR code with a
+   "Copy link" button under it (an `sshtunnel://` link, see
+   `docs/IMPORT_LINK.md`), "Copy" and "Download file" — plus the address,
+   port, user, and key as plain text. The QR code and link exist **only at
+   this moment**; later the client's "Show settings" button gives the file
+   and fields, but no QR.
+4. On the new device — import it: on a phone scan the QR code (in the app or
+   with the camera), on a computer paste the link with "Paste"; a file still
+   opens with "Import".
 
 From there, the client list shows traffic, the number of active sessions,
 and the time of the last connection; buttons let you freeze (temporarily

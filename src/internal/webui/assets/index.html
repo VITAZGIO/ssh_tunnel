@@ -815,7 +815,7 @@
       <button type="button" class="tb" id="pasteBtn" title="Вставить сервер из буфера обмена" data-i18n-title="paste_title"><svg viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="4"/><path d="M8 5H5v16h14V5h-3"/></svg><span data-i18n="paste_server">Вставить</span></button>
       <button type="button" class="tb" id="addServerBtn"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span data-i18n="new_server">Новый</span></button>
       <button type="button" class="tb" id="exportAllBtn"><svg viewBox="0 0 24 24"><path d="M12 15V4M7 9l5-5 5 5M5 20h14"/></svg><span data-i18n="export_all">Экспорт всех</span></button>
-      <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)">?<span class="tip" data-i18n="paste_note">«Вставить» добавляет сервер (или сразу несколько) из текста, который тебе прислали: скопируй его и нажми кнопку. «Экспорт всех» кладёт в буфер все серверы вместе с ключами.</span></span>
+      <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)">?<span class="tip" data-i18n="paste_note">«Вставить» добавляет сервер (или сразу несколько) из текста или ссылки sshtunnel://, которые тебе прислали (или из панели сервера): скопируй и нажми кнопку. «Экспорт всех» кладёт в буфер все серверы вместе с ключами.</span></span>
     </div>
     <div class="srvlist" id="profileTabs"></div>
 
@@ -1943,8 +1943,8 @@ const I18N = {
     custom_flag_name:'Свой (без флага)',
     export_server_clip:'Экспортировать сервер в буфер',
     export_no_key:'Приватный ключ прочитать не удалось — на другом устройстве его надо указать самому.',
-    paste_note:'«Вставить» добавляет сервер (или сразу несколько) из текста, который тебе прислали: '+
-      'скопируй его и нажми кнопку. «Экспорт всех» кладёт в буфер все серверы вместе с ключами.',
+    paste_note:'«Вставить» добавляет сервер (или сразу несколько) из текста или ссылки sshtunnel://, '+
+      'которые тебе прислали (или из панели сервера): скопируй и нажми кнопку. «Экспорт всех» кладёт в буфер все серверы вместе с ключами.',
     all_settings:'Все настройки целиком',
     all_settings_note:'Все серверы с ключами, выбор программ и галочки — одной строкой через буфер '+
       'обмена или файлом (переключатель справа). Скачанные списки рекламы не переносятся — только ссылки '+
@@ -2253,8 +2253,8 @@ const I18N = {
     custom_flag_name:'Custom (no flag)',
     export_server_clip:'Copy server settings',
     export_no_key:'The private key could not be read — set it by hand on the other device.',
-    paste_note:'“Paste” adds a server (or several) from text somebody sent you: copy it and press '+
-      'the button. “Export all” copies every server, keys included.',
+    paste_note:'“Paste” adds a server (or several) from text or an sshtunnel:// link somebody sent you '+
+      '(or the server panel gave you): copy it and press the button. “Export all” copies every server, keys included.',
     all_settings:'All settings at once',
     all_settings_note:'Every server with its key, the app selection and the checkboxes — one line '+
       'through the clipboard or as a file (switch on the right). Downloaded ad lists are left out, only '+
@@ -4324,8 +4324,10 @@ function isServerExportDoc(doc){
   return !!doc && typeof doc.host === 'string' && doc.host !== '';
 }
 
-async function importProfileDoc(doc){
-  const r = await api('/api/profile/import', doc);
+// raw — doc уже текст (ссылка sshtunnel://…): уходит как есть, разбирает её
+// сервер тем же share.Parse, что и файл.
+async function importProfileDoc(doc, raw){
+  const r = await api('/api/profile/import', doc, raw);
   if(r.error){ showError(r.error, 'setError'); return; }
   showError('', 'setError');
   editingProfileId = r.profile.id;
@@ -4337,6 +4339,8 @@ async function importProfileDoc(doc){
 $('pasteBtn').onclick = async () => {
   const text = await readClipboard();
   if(!text) return;
+  // Ссылка из панели сервера (QR при создании клиента → «Скопировать ссылку»).
+  if(/^sshtunnel:\/\//i.test(text.trim())){ await importProfileDoc(text.trim(), true); return; }
   let doc;
   try {
     doc = JSON.parse(text);

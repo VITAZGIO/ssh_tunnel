@@ -332,6 +332,10 @@ func (s *Server) handleClients(w http.ResponseWriter, r *http.Request) {
 // ключей, запись в authorized_keys — по одной кнопке в панели, без
 // консоли. Приватный ключ в ответе присутствует только здесь, сразу при
 // создании; дальше он виден лишь по отдельному запросу конкретного клиента.
+// Там же, и только там, — ссылка импорта и её QR-код (config): мастер
+// создания показывает их сразу, у существующих клиентов их нет. Если адрес
+// сервера для клиентов не задан, клиент всё равно создаётся, а причина, по
+// которой нет конфига, приходит в configError.
 func (s *Server) handleClientCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -350,7 +354,13 @@ func (s *Server) handleClientCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "client": c})
+	resp := map[string]any{"ok": true, "client": c}
+	if cfg, err := BuildClientConfigPayload(c, s.sshHost, s.sshPort, s.panelURL, true); err != nil {
+		resp["configError"] = err.Error()
+	} else {
+		resp["config"] = cfg
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleClientDelete убирает unix-пользователя вместе с домашним каталогом,
@@ -393,8 +403,8 @@ func (s *Server) handleClientDisconnect(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleClientConfig отдаёт готовый конфиг клиента для «Показать настройки»
-// (ТЗ-10): JSON для копирования/скачивания, QR того же содержимого и те же
-// значения текстом. Приватный ключ в ответе есть — эта ручка и существует
+// (ТЗ-10): JSON для копирования/скачивания и те же значения текстом. QR и
+// ссылки импорта здесь нет — они показываются только при создании. Приватный ключ в ответе есть — эта ручка и существует
 // ровно затем, чтобы показать его по явному действию, в отличие от
 // /api/clients, где его нет никогда.
 func (s *Server) handleClientConfig(w http.ResponseWriter, r *http.Request) {
@@ -404,7 +414,7 @@ func (s *Server) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "client_not_found"})
 		return
 	}
-	payload, err := BuildClientConfigPayload(c, s.sshHost, s.sshPort, s.panelURL)
+	payload, err := BuildClientConfigPayload(c, s.sshHost, s.sshPort, s.panelURL, false)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

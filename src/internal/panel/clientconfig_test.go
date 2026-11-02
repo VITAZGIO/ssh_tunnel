@@ -76,7 +76,7 @@ func TestBuildClientDocRequiresPrivateKey(t *testing.T) {
 
 func TestBuildClientConfigPayloadRoundTripsThroughShareParse(t *testing.T) {
 	c := testClientWithKey()
-	payload, err := BuildClientConfigPayload(c, "vps.example.com", 22, "https://panel.example.com/")
+	payload, err := BuildClientConfigPayload(c, "vps.example.com", 22, "https://panel.example.com/", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestBuildClientConfigPayloadRoundTripsThroughShareParse(t *testing.T) {
 		t.Fatal("payload.JSON не должен быть пустым")
 	}
 
-	// То, что попадает в QR и в кнопку «Скопировать», должно разбираться
+	// То, что попадает в кнопку «Скопировать», должно разбираться
 	// обратно тем же кодом, что разбирает файл импорта в локальной панели —
 	// это один и тот же формат (internal/share, ТЗ-01).
 	doc, err := share.Parse([]byte(payload.JSON))
@@ -104,6 +104,15 @@ func TestBuildClientConfigPayloadRoundTripsThroughShareParse(t *testing.T) {
 		t.Fatalf("после share.Parse потерялся приватный ключ: %+v", doc)
 	}
 
+	// Ссылка из QR и «Скопировать ссылку» читается тем же share.Parse.
+	ld, err := share.Parse([]byte(payload.Link))
+	if err != nil {
+		t.Fatalf("ссылка не прошла share.Parse: %v", err)
+	}
+	if ld.Host != doc.Host || ld.User != doc.User || ld.KeyContents != c.PrivateKey ||
+		ld.ClientID != c.ID || ld.Panel != doc.Panel {
+		t.Fatalf("ссылка разобралась не в то: %+v", ld)
+	}
 	if payload.QRPngBase64 == "" {
 		t.Fatal("QR-код не должен быть пустым")
 	}
@@ -116,9 +125,19 @@ func TestBuildClientConfigPayloadRoundTripsThroughShareParse(t *testing.T) {
 	}
 }
 
+func TestBuildClientConfigPayloadWithoutLinkHasNoQR(t *testing.T) {
+	payload, err := BuildClientConfigPayload(testClientWithKey(), "vps.example.com", 22, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.Link != "" || payload.QRPngBase64 != "" {
+		t.Fatal("без withLink в ответе не должно быть ни ссылки, ни QR")
+	}
+}
+
 func TestBuildClientConfigPayloadFailsWithoutHost(t *testing.T) {
 	c := testClientWithKey()
-	if _, err := BuildClientConfigPayload(c, "", 22, ""); err == nil {
+	if _, err := BuildClientConfigPayload(c, "", 22, "", true); err == nil {
 		t.Fatal("без адреса сервера сборка конфига должна отдавать ошибку")
 	}
 }
