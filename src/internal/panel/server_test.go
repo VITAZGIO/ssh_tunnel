@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -306,6 +307,14 @@ func TestClientConfigEndpoint(t *testing.T) {
 		t.Fatalf("не удалось создать клиента: %d %v", rec.Code, body)
 	}
 	id := body["client"].(map[string]any)["id"].(string)
+	// При создании — ссылка и QR сразу в ответе.
+	created, _ := body["config"].(map[string]any)
+	if created == nil || created["qrPngBase64"] == "" || created["qrPngBase64"] == nil {
+		t.Fatalf("ответ на создание должен содержать QR: %v", body)
+	}
+	if link, _ := created["link"].(string); !strings.HasPrefix(link, "sshtunnel://import?") {
+		t.Fatalf("ответ на создание должен содержать ссылку импорта: %v", created)
+	}
 
 	rec, body = doJSON(t, h, http.MethodGet, "/api/clients/config?id="+id, nil, cookies)
 	if rec.Code != http.StatusOK || body["ok"] != true {
@@ -321,8 +330,12 @@ func TestClientConfigEndpoint(t *testing.T) {
 	if cfg["privateKey"] == nil || cfg["privateKey"] == "" {
 		t.Fatal("конфиг должен содержать приватный ключ клиента")
 	}
-	if cfg["qrPngBase64"] == nil || cfg["qrPngBase64"] == "" {
-		t.Fatal("конфиг должен содержать QR-код")
+	// У существующего клиента QR и ссылки нет (п. 16: только при создании).
+	if _, has := cfg["qrPngBase64"]; has {
+		t.Fatal("«Показать настройки» не должен отдавать QR-код")
+	}
+	if _, has := cfg["link"]; has {
+		t.Fatal("«Показать настройки» не должен отдавать ссылку импорта")
 	}
 }
 
