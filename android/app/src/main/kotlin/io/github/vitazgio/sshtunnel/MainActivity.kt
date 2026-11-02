@@ -430,10 +430,9 @@ class MainActivity : AppCompatActivity() {
             flipper.outAnimation = outA
             val y = savedInstanceState.getInt(KEY_SCROLL, 0)
             (flipper.currentView as? ScrollView)?.let { sv -> sv.post { sv.scrollTo(0, y) } }
-        } else {
-            // Пересоздание экрана (поворот, тема) ссылку второй раз не импортирует.
-            handleImportLink(intent)
         }
+        // Пересоздание экрана (поворот, тема) ссылку второй раз не импортирует.
+        if (savedInstanceState == null) handleImportLink(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
