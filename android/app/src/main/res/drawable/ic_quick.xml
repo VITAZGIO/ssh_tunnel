@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Быстрый доступ к приложениям со звёздочкой: «keyboard_double_arrow_left»
+     из Material Symbols (Apache 2.0), тот же значок, что на ПК. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="26dp" android:height="26dp"
+    android:viewportWidth="960" android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="?attr/c_dim"
+            android:pathData="M453,-241 L213,-481l240,-240 42,42 -198,198 198,198 -42,42Zm253,0L466,-481l240,-240 42,42 -198,198 198,198 -42,42Z" />
+    </group>
+</vector>

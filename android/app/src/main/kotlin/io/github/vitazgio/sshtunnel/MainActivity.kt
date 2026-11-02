@@ -288,6 +288,14 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.usersRow).setOnClickListener {
             startActivity(Intent(this, UsersActivity::class.java))
         }
+        // Книга и дополнительные приложения — общие с ПК страницы.
+        findViewById<View>(R.id.addonsRow).setOnClickListener {
+            WebPageActivity.open(this, WebPageActivity.PAGE_APPS)
+        }
+        findViewById<View>(R.id.bookRow).setOnClickListener {
+            WebPageActivity.open(this, WebPageActivity.PAGE_BOOK)
+        }
+        findViewById<View>(R.id.quickBtn).setOnClickListener { showQuick(it) }
         udpRelayEnabledCheck = findViewById(R.id.udpRelayEnabled)
         showServerPickerCheck = findViewById(R.id.showServerPicker)
         appProfiles = AppProfiles(this, settings)
@@ -510,9 +518,38 @@ class MainActivity : AppCompatActivity() {
         renderAdBlockSummary()
         renderMeshSummary()
         renderDomainsSummary()
+        renderQuick()
         refresh()
         // Скачивание обновления шло, пока экран был закрыт, — следим дальше.
         if (settings.updateDownloadId >= 0) pollDownload()
+    }
+
+    // renderQuick — стрелка быстрого доступа под настройками: есть, если у
+    // приложений есть звёздочки (список хранит ядро, тот же API, что у ПК).
+    private fun renderQuick() {
+        val btn = findViewById<View>(R.id.quickBtn)
+        val lang = if (settings.language == "en") "en" else "ru"
+        Thread {
+            val items = WebPageActivity.starred(this, lang)
+            runOnUiThread {
+                quickItems = items
+                btn.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+            }
+        }.start()
+    }
+
+    private var quickItems: List<Pair<String, String>> = emptyList()
+
+    private fun showQuick(anchor: View) {
+        val menu = android.widget.PopupMenu(this, anchor)
+        quickItems.forEachIndexed { i, (_, name) -> menu.menu.add(0, i, i, name) }
+        menu.setOnMenuItemClickListener { item ->
+            quickItems.getOrNull(item.itemId)?.let { (id, _) ->
+                WebPageActivity.open(this, WebPageActivity.PAGE_APPS, id)
+            }
+            true
+        }
+        menu.show()
     }
 
     override fun onPause() {

@@ -709,6 +709,42 @@
                         android:src="@drawable/ic_chevron"
                         android:contentDescription="@string/users_title" />
                 </LinearLayout>
+                <!-- Книга и дополнительные приложения — общие с ПК страницы
+                     (WebPageActivity), не свои экраны. -->
+                <LinearLayout
+                    android:id="@+id/addonsRow"
+                    style="@style/NavRow">
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+                        <TextView style="@style/NavTitle" android:text="@string/addons_title" />
+                        <TextView style="@style/NavSub" android:text="@string/addons_summary" />
+                    </LinearLayout>
+                    <ImageView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:src="@drawable/ic_chevron"
+                        android:contentDescription="@string/addons_title" />
+                </LinearLayout>
+                <LinearLayout
+                    android:id="@+id/bookRow"
+                    style="@style/NavRow">
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+                        <TextView style="@style/NavTitle" android:text="@string/book_title" />
+                        <TextView style="@style/NavSub" android:text="@string/book_summary" />
+                    </LinearLayout>
+                    <ImageView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:src="@drawable/ic_chevron"
+                        android:contentDescription="@string/book_title" />
+                </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -1514,4 +1550,16 @@
         </ScrollView>
     </ViewFlipper>
   </LinearLayout>
+
+    <!-- Быстрый доступ: стрелка под настройками, если у приложений есть
+         звёздочки (см. MainActivity.renderQuick). -->
+    <ImageView
+        android:id="@+id/quickBtn"
+        style="@style/HeadIcon"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="50dp"
+        android:layout_marginEnd="8dp"
+        android:src="@drawable/ic_quick"
+        android:visibility="gone"
+        android:contentDescription="@string/quick_title" />
 </FrameLayout>

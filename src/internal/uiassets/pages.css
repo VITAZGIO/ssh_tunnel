@@ -1,0 +1,33 @@
+/* Общие детали страниц Книги и дополнительных приложений (apps.html,
+   book.html, addons/*.html). Цвета — из theme.css. */
+*{box-sizing:border-box}
+/* hidden сильнее любых display у кнопок и панелей. */
+[hidden]{display:none !important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);
+     font:14px/1.5 "Segoe UI",-apple-system,Roboto,sans-serif}
+button{font:inherit;color:inherit}
+a{color:var(--accent)}
+
+/* Значок из набора Material Symbols: файл — маска, цвет — цвет текста. */
+.mi{display:inline-block;width:20px;height:20px;flex:none;background:currentColor;
+    -webkit-mask:var(--i) center/contain no-repeat;mask:var(--i) center/contain no-repeat}
+
+.page{height:100%;display:flex;flex-direction:column}
+.head{display:flex;align-items:center;gap:8px;padding:12px 14px 10px;flex:none}
+.head .t{font-size:16px;font-weight:600;flex:1;min-width:0;display:flex;align-items:center;gap:8px;
+         white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ico{width:34px;height:34px;border-radius:8px;border:1px solid transparent;background:transparent;
+     display:grid;place-items:center;cursor:pointer;color:var(--dim);flex:none}
+.ico:hover{background:var(--card2);color:var(--text)}
+.ico.on{color:var(--warn)}
+.tb{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--card);
+    border-radius:8px;padding:6px 10px;cursor:pointer;color:var(--text);font-size:13px;flex:none}
+.tb:hover{border-color:var(--accent)}
+.body{flex:1;overflow-y:auto;padding:0 14px 16px}
+.btn{border:0;border-radius:9px;padding:8px 14px;cursor:pointer;background:var(--card2);color:var(--text)}
+.btn.primary{background:var(--accent-muted);color:#fff}
+.btn:disabled{opacity:.55;cursor:default}
+.hint{color:var(--dim);font-size:13px}
+.empty{color:var(--dim);text-align:center;padding:48px 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}

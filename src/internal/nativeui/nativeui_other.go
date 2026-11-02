@@ -30,3 +30,7 @@ func WaitSingleInstance(time.Duration) bool { return true }
 func Quit()                                 {}
 func WebView2Installed() bool               { return false }
 func SetStatus(text string)                 {}
+
+// Opener — отдельных нативных окон вне Windows нет: страница откроет окно
+// браузера сама.
+func Opener(base, dataPath string) func(key, title, url string) error { return nil }

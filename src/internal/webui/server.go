@@ -26,7 +26,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
-	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -40,6 +39,7 @@ import (
 	"sync"
 	"time"
 
+	"sshtunnel/internal/addons"
 	"sshtunnel/internal/app"
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/core"
@@ -49,11 +49,9 @@ import (
 	"sshtunnel/internal/serverusers"
 	"sshtunnel/internal/sysproxy"
 	"sshtunnel/internal/tunnel"
+	"sshtunnel/internal/uiassets"
 	"sshtunnel/internal/updater"
 )
-
-//go:embed assets/*
-var assets embed.FS
 
 type Server struct {
 	app   *App
@@ -66,6 +64,10 @@ type Server struct {
 	// системы», чтобы после перезагрузки панель работала в том же режиме, а
 	// не в угаданном.
 	bootFlags []string
+
+	// addons — дополнительные приложения этого устройства (каталог, что
+	// добавлено, модули ядра). Список хранится у ядра, а не в окне.
+	addons *addons.Service
 
 	// vpsSetup — идёт ли сейчас настройка VPS. Мастер занимает минуту-две и
 	// трогает sshd на сервере; запускать второй одновременно с первым — верный
@@ -97,7 +99,11 @@ func NewOn(a *App, addr string) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("не могу занять адрес %s: %w", addr, err)
 	}
-	s := &Server{app: a, token: hex.EncodeToString(tok), ln: ln, bootFlags: []string{"-web"}}
+	s := &Server{app: a, token: hex.EncodeToString(tok), ln: ln, bootFlags: []string{"-web"},
+		addons: addons.New(config.Dir())}
+	if a != nil && a.Bus != nil {
+		s.addons.SetLog(a.Bus.Warnf)
+	}
 	// Порт 0 означает «любой свободный» — такой адрес в файл службы писать
 	// нечего, он всё равно будет другим при следующем запуске.
 	if !strings.HasSuffix(addr, ":0") {
@@ -124,6 +130,10 @@ func NewOpenLocalOn(a *App, addr string) (*Server, error) {
 // от службы с ядром (VPN-версия на Windows), чтобы ходить к ней от имени
 // пользователя.
 func (s *Server) Token() string { return s.token }
+
+// Addons — дополнительные приложения: окну ПК нужно, чтобы научить их
+// открывать отдельные окна (SetOpener) и помнить их место (Store).
+func (s *Server) Addons() *addons.Service { return s.addons }
 
 // Addr — адрес, на котором слушает интерфейс.
 func (s *Server) Addr() string { return s.ln.Addr().String() }
@@ -177,6 +187,7 @@ func localIP() string {
 func (s *Server) Serve() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/addons/", s.guard(s.addons.Page))
 	for _, rt := range s.routes() {
 		mux.HandleFunc(rt.Path, s.guard(rt.h))
 	}
@@ -190,6 +201,7 @@ func (s *Server) Serve() error {
 }
 
 func (s *Server) Close() {
+	s.addons.Close()
 	s.removeDiscovery()
 	s.ln.Close()
 }
@@ -265,19 +277,11 @@ func isLocalClient(remoteAddr string) bool {
 	return false
 }
 
+// handleIndex отдаёт страницы интерфейса (internal/uiassets): главное окно,
+// Книгу, каталог приложений, значки. Это код, а не данные, — ключ не нужен;
+// всё, что страницы узнают, они берут из API под ключом.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	data, err := assets.ReadFile("assets/index.html")
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Write(data)
+	uiassets.Static()(w, r)
 }
 
 type statusResp struct {
@@ -358,7 +362,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		// errorKind — стабильный код причины (см. tunnel.ConnErrorKind),
 		// разобранный один раз в общем коде: страница переводит по нему текст
 		// через свой словарь I18N, а не разбирает "error" сама (см. addMsg/
-		// showError и ERROR_KIND_TEXT в assets/index.html).
+		// showError и ERROR_KIND_TEXT в uiassets/index.html).
 		var ce *tunnel.ConnError
 		if errors.As(err, &ce) {
 			resp["errorKind"] = string(ce.Kind)

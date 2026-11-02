@@ -568,15 +568,6 @@ type directPin struct {
 	timer *time.Timer
 }
 
-const (
-	// maxDirectPins — потолок числа маршрутов: дальше прямые соединения идут
-	// только с привязкой сокета к карте.
-	maxDirectPins = 2048
-	// pinLinger — сколько маршрут живёт после закрытия последнего соединения:
-	// приложения часто тут же открывают новое к тому же адресу.
-	pinLinger = 2 * time.Minute
-)
-
 func (s *sys) pinner() func(netip.Addr) func() { return s.pinDirect }
 
 // pinDirect ставит маршрут к адресу через настоящую сеть на время прямого

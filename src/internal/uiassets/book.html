@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ssh_tunnel</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="pages.css">
+<style>
+  .head input{flex:1;min-width:80px;max-width:280px;background:var(--card);border:1px solid var(--line);
+              border-radius:8px;padding:6px 10px;color:var(--text);font:inherit}
+  .head input:focus{outline:none;border-color:var(--accent)}
+
+  /* Текст главы. */
+  .ch h1{font-size:21px;margin:0 0 12px;line-height:1.3}
+  .ch h2{font-size:16px;margin:18px 0 6px}
+  .ch h3{font-size:14.5px;margin:14px 0 4px}
+  .ch p{margin:0 0 10px}
+  .ch ul,.ch ol{margin:0 0 10px;padding-left:22px}
+  .ch li{margin:0 0 4px}
+  .ch code{font-family:var(--mono);font-size:12.5px;background:var(--card2);border-radius:4px;padding:1px 4px}
+  .ch mark{background:var(--warn);color:#000;border-radius:3px}
+  .ch h1,.ch h2,.ch h3{break-after:avoid}
+  .ch li,.ch p{break-inside:avoid}
+
+  /* Оглавление и результаты поиска — поверх текста. */
+  .panel{position:absolute;inset:0;background:var(--bg);overflow-y:auto;padding:4px 14px 16px;z-index:3}
+  .panel button{display:block;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);
+                border-radius:10px;padding:10px 12px;margin:0 0 8px;cursor:pointer}
+  .panel button:hover{border-color:var(--accent)}
+  .panel .sn{display:block;color:var(--dim);font-size:12.5px;margin-top:3px}
+  .reader{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+
+  /* Телефон: обычная прокрутка по главам. */
+  .scroll{flex:1;overflow-y:auto;padding:0 16px 16px}
+  .scroll .ch{padding-bottom:18px;border-bottom:1px solid var(--line);margin-bottom:18px}
+
+  /* ПК: страницы, как в книге. Текст раскладывается колонками высотой в
+     страницу, листание — сдвиг на страницу (или разворот из двух). */
+  .book{flex:1;min-height:0;padding:6px 28px 0}
+  .flow{height:100%;overflow:hidden;column-fill:auto;column-gap:56px}
+  .flow .ch + .ch{break-before:column}
+  .pager{display:flex;align-items:center;justify-content:center;gap:14px;padding:8px 14px;flex:none;color:var(--dim)}
+  .foot{flex:none;text-align:center;padding:6px 14px 12px;font-size:12.5px}
+  .foot a{cursor:pointer}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <button class="ico" id="back"></button>
+    <span class="t" id="title"></span>
+    <input type="search" id="q" autocomplete="off" spellcheck="false">
+    <button class="ico" id="tocBtn"></button>
+  </div>
+  <div class="reader" id="reader">
+    <div class="panel" id="toc" hidden></div>
+    <div class="panel" id="found" hidden></div>
+  </div>
+  <div class="foot"><a id="gh">GitHub</a></div>
+</div>
+<script src="pages.js"></script>
+<script>
+/* Книга: главы приходят от ядра (/api/book) — тот же Markdown, что в
+   docs/book. На ПК листается страницами, на телефоне — обычной прокруткой. */
+const PAGED = !ANDROID && window.innerWidth >= 520;
+let BOOK = {chapters: [], github: ''};
+let page = 0, pages = 1, spread = 1;
+
+/* ---------- Markdown ---------- */
+// Простой разбор: заголовки, абзацы, списки, жирный, код, ссылки. Сначала
+// всё экранируется — из текста не может получиться разметка.
+function inline(s, q){
+  let h = esc(s);
+  h = h.replace(/`([^`]+)`/g, (_, c) => '<code>' + c + '</code>');
+  h = h.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  h = h.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) =>
+    /^https?:/.test(u) ? `<a href="#" data-ext="${u}">${t}</a>` : t);
+  if(q) h = markText(h, q);
+  return h;
+}
+// markText подсвечивает найденное только в тексте, не внутри тегов.
+function markText(html, q){
+  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+  return html.split(/(<[^>]+>)/).map(p => p.startsWith('<') ? p : p.replace(re, m => '<mark>' + m + '</mark>')).join('');
+}
+function md(text, q){
+  const out = [];
+  let para = [], list = null;
+  const flushPara = () => { if(para.length){ out.push('<p>' + inline(para.join(' '), q) + '</p>'); para = []; } };
+  const flushList = () => { if(list){ out.push(`<${list.tag}>` + list.items.map(i => '<li>' + inline(i, q) + '</li>').join('') + `</${list.tag}>`); list = null; } };
+  for(const raw of text.split('\n')){
+    const line = raw.replace(/\s+$/, '');
+    let m;
+    if(!line.trim()){ flushPara(); flushList(); continue; }
+    if((m = line.match(/^(#{1,3})\s+(.*)$/))){
+      flushPara(); flushList();
+      out.push(`<h${m[1].length}>` + inline(m[2], q) + `</h${m[1].length}>`);
+      continue;
+    }
+    if((m = line.match(/^\s*([-*]|\d+\.)\s+(.*)$/))){
+      flushPara();
+      const tag = /\d/.test(m[1]) ? 'ol' : 'ul';
+      if(!list || list.tag !== tag){ flushList(); list = {tag, items: []}; }
+      list.items.push(m[2]);
+      continue;
+    }
+    if(list && /^\s+/.test(line)){ list.items[list.items.length - 1] += ' ' + line.trim(); continue; }
+    flushList();
+    para.push(line.trim());
+  }
+  flushPara(); flushList();
+  return out.join('');
+}
+
+/* ---------- раскладка ---------- */
+function render(q){
+  const r = $('reader');
+  r.querySelectorAll('.scroll,.book,.pager').forEach(x => x.remove());
+  const html = BOOK.chapters.map(c =>
+    `<section class="ch" id="ch-${esc(c.id)}">${md(c.md, q)}</section>`).join('');
+  if(!PAGED){
+    const s = document.createElement('div');
+    s.className = 'scroll';
+    s.innerHTML = html;
+    r.appendChild(s);
+  } else {
+    const b = document.createElement('div');
+    b.className = 'book';
+    b.innerHTML = `<div class="flow" id="flow">${html}</div>`;
+    r.appendChild(b);
+    const p = document.createElement('div');
+    p.className = 'pager';
+    p.innerHTML = `<button class="ico" id="prev">${icon('chevron_left')}</button>
+      <span id="pno"></span><button class="ico" id="next">${icon('chevron_right')}</button>`;
+    r.appendChild(p);
+    $('prev').onclick = () => go(page - spread);
+    $('next').onclick = () => go(page + spread);
+    layout();
+  }
+  r.querySelectorAll('a[data-ext]').forEach(a => a.onclick = ev => { ev.preventDefault(); openExternal(a.dataset.ext); });
+}
+
+// layout делит текст на страницы под размер окна: широкое — разворот из
+// двух страниц, узкое — одна.
+function layout(){
+  const f = $('flow');
+  if(!f) return;
+  spread = f.clientWidth >= 860 ? 2 : 1;
+  const gap = 56;
+  const w = Math.floor((f.clientWidth - gap * (spread - 1)) / spread);
+  f.style.columnWidth = w + 'px';
+  f.dataset.step = w + gap;
+  pages = Math.max(1, Math.round((f.scrollWidth + gap) / (w + gap)));
+  go(Math.min(page, pages - 1));
+}
+
+function go(n){
+  const f = $('flow');
+  if(!f) return;
+  page = Math.max(0, Math.min(n, pages - 1));
+  page -= page % spread;
+  f.scrollLeft = page * Number(f.dataset.step);
+  $('pno').textContent = L('стр. ', 'p. ') + (page + 1) + (spread > 1 && page + 2 <= pages ? '–' + (page + 2) : '') + L(' из ', ' of ') + pages;
+  $('prev').disabled = page === 0;
+  $('next').disabled = page + spread >= pages;
+}
+
+// pageOf — на какой странице элемент.
+function pageOf(el){
+  const f = $('flow');
+  const x = el.getBoundingClientRect().left - f.getBoundingClientRect().left + f.scrollLeft;
+  return Math.floor(x / Number(f.dataset.step));
+}
+
+function toChapter(id, q){
+  hidePanels();
+  if(q !== undefined) render(q);
+  const el = document.getElementById('ch-' + id);
+  if(!el) return;
+  const target = (q && el.querySelector('mark')) || el;
+  if(PAGED) go(pageOf(target)); else target.scrollIntoView({block: q ? 'center' : 'start'});
+}
+
+/* ---------- оглавление и поиск ---------- */
+function hidePanels(){ $('toc').hidden = true; $('found').hidden = true; }
+
+function showToc(){
+  const t = $('toc');
+  if(!t.hidden){ t.hidden = true; return; }
+  $('found').hidden = true;
+  t.innerHTML = '';
+  for(const c of BOOK.chapters){
+    const b = document.createElement('button');
+    b.textContent = c.title;
+    b.onclick = () => toChapter(c.id, $('q').value.trim() || '');
+    t.appendChild(b);
+  }
+  t.hidden = false;
+}
+
+function search(){
+  const q = $('q').value.trim();
+  const f = $('found');
+  if(q.length < 2){ f.hidden = true; render(''); return; }
+  $('toc').hidden = true;
+  const ql = q.toLowerCase();
+  f.innerHTML = '';
+  let n = 0;
+  for(const c of BOOK.chapters){
+    const plain = c.md.replace(/[#*`]/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+    const i = plain.toLowerCase().indexOf(ql);
+    if(i < 0) continue;
+    n++;
+    const s = plain.slice(Math.max(0, i - 50), i + q.length + 70).replace(/\s+/g, ' ');
+    const b = document.createElement('button');
+    b.innerHTML = esc(c.title) + '<span class="sn">…' + markText(esc(s), q) + '…</span>';
+    b.onclick = () => toChapter(c.id, q);
+    f.appendChild(b);
+  }
+  if(!n) f.innerHTML = `<div class="empty">${esc(L('Ничего не нашлось.', 'Nothing found.'))}</div>`;
+  f.hidden = false;
+}
+
+/* ---------- запуск ---------- */
+$('back').innerHTML = icon('arrow_back');
+$('back').title = L('Назад', 'Back');
+$('back').hidden = SOLO;
+$('back').onclick = () => closePage();
+$('tocBtn').innerHTML = icon('menu_book');
+$('tocBtn').title = L('Оглавление', 'Contents');
+$('tocBtn').onclick = showToc;
+$('title').textContent = L('Книга', 'Book');
+$('q').placeholder = L('Поиск', 'Search');
+let qTimer = null;
+$('q').oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(search, 200); };
+$('q').onkeydown = ev => { if(ev.key === 'Escape'){ $('q').value = ''; search(); } };
+document.title = L('Книга', 'Book') + ' — ssh_tunnel';
+document.addEventListener('keydown', ev => {
+  if(!PAGED || ev.target === $('q')) return;
+  if(['ArrowRight', 'PageDown', ' '].includes(ev.key)){ ev.preventDefault(); go(page + spread); }
+  if(['ArrowLeft', 'PageUp'].includes(ev.key)){ ev.preventDefault(); go(page - spread); }
+  if(ev.key === 'Home') go(0);
+  if(ev.key === 'End') go(pages - 1);
+});
+// Колесо листает по странице; тачпад шлёт пачку событий — одна страница на
+// пачку.
+let wheelAt = 0;
+document.addEventListener('wheel', ev => {
+  if(!PAGED || !$('toc').hidden || !$('found').hidden) return;
+  if(Math.abs(ev.deltaY) < 8 || Date.now() - wheelAt < 350) return;
+  wheelAt = Date.now();
+  go(page + (ev.deltaY > 0 ? spread : -spread));
+}, {passive: true});
+let rt = null;
+window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(layout, 120); });
+
+api('/api/book').then(b => {
+  BOOK = b;
+  $('gh').textContent = L('Исходники и вопросы — GitHub', 'Source code and issues — GitHub');
+  $('gh').onclick = () => openExternal(BOOK.github);
+  render('');
+  if(Q.get('ch')) toChapter(Q.get('ch'));
+}).catch(() => {
+  $('reader').innerHTML = `<div class="empty">${esc(L('Нет связи с программой.', 'No connection to the app.'))}</div>`;
+});
+</script>
+</body>
+</html>

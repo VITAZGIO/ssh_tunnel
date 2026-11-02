@@ -4,23 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ssh_tunnel</title>
+<!-- Цвета и темы — общие со страницами Книги и приложений. -->
+<link rel="stylesheet" href="theme.css">
 <style>
-  :root{
-    --bg:#0d1017; --card:#161a23; --card2:#1d222d; --line:#272d3a;
-    --text:#e8ebf2; --dim:#828b9e; --accent:#4c8dff;
-    /* Приглушённый синий для крупных заливок (кнопки-кнопки, а не мелкие
-       акценты текста/рамок) — тот же оттенок, что и accent, но темнее и
-       менее насыщенный, как на телефоне: там весь яркий синий пришлось
-       притушить, чтобы не резал глаз на тёмной теме. Сам --accent остаётся
-       ярким — для рамок при наведении, текста и мелких точек-переключателей. */
-    --accent-muted:#3d5f8a; --accent-muted-dark:#2c4665;
-    --ok:#2fbf71; --warn:#e8b339; --err:#e5484d;
-    --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
-  }
-  @media (prefers-color-scheme: light){
-    :root{ --bg:#eef1f6; --card:#fff; --card2:#f3f5f9; --line:#dde2ec;
-           --text:#141821; --dim:#616b7f; }
-  }
   *{box-sizing:border-box;-webkit-user-select:none;user-select:none}
   input,textarea{-webkit-user-select:text;user-select:text}
   html,body{height:100%}
@@ -497,6 +483,27 @@
   .langMenu svg{width:18px;height:auto;display:block}
   .langBtn svg{width:16px;height:auto;display:block}
   .navlist{border-top:1px solid var(--line);margin-bottom:24px}
+
+  /* ---------- дополнительные приложения ---------- */
+  .mi{display:inline-block;width:20px;height:20px;flex:none;background:currentColor;
+      -webkit-mask:var(--i) center/contain no-repeat;mask:var(--i) center/contain no-repeat}
+  #viewAddons{padding:0;overflow:hidden}
+  #viewAddons.on{display:flex}
+  #addonsFrame{flex:1;border:0;width:100%;height:100%;background:transparent}
+  /* Стрелка — справа сверху, прямо под кнопкой настроек. */
+  #quickBtn{position:absolute;top:46px;right:14px;z-index:4}
+  #quickBtn .mi{width:18px;height:18px}
+  #quickPanel{position:absolute;top:84px;right:10px;z-index:6;background:var(--card2);
+              border:1px solid var(--line);border-radius:12px;padding:6px;min-width:170px;
+              box-shadow:0 8px 24px rgba(0,0,0,.35);animation:quickIn .16s ease-out}
+  @keyframes quickIn{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}
+  #quickPanel button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;
+                     border:0;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--text);font:inherit}
+  #quickPanel button:hover{background:var(--card)}
+  #quickPanel .mi{color:var(--accent)}
+  /* Быстрый доступ — только на главном экране. */
+  body[data-view]:not([data-view="viewMain"]) #quickBtn,
+  body[data-view]:not([data-view="viewMain"]) #quickPanel{display:none}
   .nav{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;border:0;
        border-bottom:1px solid var(--line);padding:13px 4px;color:var(--text);font:inherit;cursor:pointer}
   .nav:hover{background:var(--card)}
@@ -627,20 +634,6 @@
   .author a svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;
                 stroke-linecap:round;stroke-linejoin:round}
 
-  /* ---------- темы ---------- */
-  /* «Оригинал» — как было: тёмная, а при светлой теме системы светлая. */
-  :root[data-theme="dark"]{--bg:#000;--card:#0e0e0e;--card2:#171717;--line:#2a2a2a;--text:#ededed;
-    --dim:#8f8f8f;--accent:#cfcfcf;--accent-muted:#3a3a3a;--accent-muted-dark:#262626}
-  :root[data-theme="light"]{--bg:#eef1f6;--card:#fff;--card2:#e8ecf2;--line:#d3d9e3;--text:#141821;
-    --dim:#566074;--accent:#2f6fde;--accent-muted:#3d5f8a;--accent-muted-dark:#2c4665;--ok:#17904f}
-  :root[data-theme="console"]{--bg:#020702;--card:#04110a;--card2:#071a0d;--line:#0f4a20;--text:#46ff85;
-    --dim:#2aa957;--accent:#46ff85;--accent-muted:#0d3b1b;--accent-muted-dark:#082a12;--ok:#46ff85;
-    --warn:#d7ff46;--mono:ui-monospace,"Cascadia Mono",Consolas,monospace}
-  :root[data-theme="console"] body{font-family:var(--mono)}
-  :root[data-theme="console"] *:not(#power):not(.rad){border-radius:0 !important}
-  :root[data-theme="console"] #power{border-style:dashed}
-  :root[data-theme="console"] .hexbtn.on{background:#0d3b1b;color:#46ff85}
-
   /* ---------- фон ---------- */
   #backdrop{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
   #backdrop canvas{width:100%;height:100%;display:block;opacity:.18}
@@ -672,6 +665,13 @@
       </svg>
     </button>
   </div>
+
+  <!-- Быстрый доступ: стрелка под настройками, если у приложений есть
+       звёздочки; выезжает панель с отмеченными. -->
+  <button class="ico" id="quickBtn" hidden title="Быстрый доступ" data-i18n-title="quick_title">
+    <span class="mi" style="--i:url(icons/keyboard_double_arrow_left.svg)"></span>
+  </button>
+  <div id="quickPanel" hidden></div>
 
   <!-- ГЛАВНЫЙ ЭКРАН -->
   <div class="view on" id="viewMain">
@@ -783,6 +783,10 @@
         <span class="v" data-i18n="app_sub">Программы, сеть устройств, запуск, оформление</span></span><span class="arr">›</span></button>
       <button class="nav" id="toWizard"><span class="t"><span data-i18n="wizard_title">Мастер настройки</span>
         <span class="v" data-i18n="wizard_sub">Подключить телефон или новый сервер</span></span><span class="arr">›</span></button>
+      <button class="nav" id="toAddons"><span class="t"><span data-i18n="addons_title">Дополнительные приложения</span>
+        <span class="v" data-i18n="addons_sub">Добавляешь сам, что нужно</span></span><span class="arr">›</span></button>
+      <button class="nav" id="toBook"><span class="t"><span data-i18n="book_title">Книга</span>
+        <span class="v" data-i18n="book_sub">Справка: с чего начать, режимы, частые проблемы</span></span><span class="arr">›</span></button>
     </div>
 
     <div class="xfer">
@@ -802,6 +806,12 @@
       <button class="btn primary" id="save" data-i18n="save">Сохранить</button>
       <span class="hint savedNote" id="savedNote"></span>
     </div>
+  </div>
+
+  <!-- ДОПОЛНИТЕЛЬНЫЕ ПРИЛОЖЕНИЯ: общая страница apps.html (та же, что на
+       Android) внутри окна. «Назад» на ней возвращает сюда (postMessage). -->
+  <div class="view" id="viewAddons">
+    <iframe id="addonsFrame" title="" src="about:blank"></iframe>
   </div>
 
   <!-- ВЫБОР СЕРВЕРА: список; карандаш раскрывает настройки сервера прямо
@@ -2021,6 +2031,9 @@ const I18N = {
     export_apps:'Экспортировать список', import_apps:'Импортировать список',
     apps_imported:'список программ импортирован',
     wizard_title:'Мастер настройки', wizard_sub:'Подключить телефон или новый сервер',
+    addons_title:'Дополнительные приложения', addons_sub:'Добавляешь сам, что нужно',
+    book_title:'Книга', book_sub:'Справка: с чего начать, режимы, частые проблемы',
+    quick_title:'Быстрый доступ',
     wizard_android:'Android', wizard_vps:'VPS', wizard_user:'Пользователь',
     wizard_user_intro:'Новый пользователь на сервере, к которому ты подключён.',
     wizard_user_note:'Работает, если в панели сервера твоему устройству включено «Может создавать пользователей». '+
@@ -2330,6 +2343,9 @@ const I18N = {
     export_apps:'Export list', import_apps:'Import list',
     apps_imported:'app list imported',
     wizard_title:'Setup wizard', wizard_sub:'Connect a phone or a new server',
+    addons_title:'More apps', addons_sub:'Add what you need yourself',
+    book_title:'Book', book_sub:'Help: getting started, modes, common problems',
+    quick_title:'Quick access',
     wizard_android:'Android', wizard_vps:'VPS', wizard_user:'User',
     wizard_user_intro:'A new user on the server you are connected to.',
     wizard_user_note:'Works if the server panel allows your device to create users. The password is the one set there. '+
@@ -2764,7 +2780,7 @@ function shareTraffic(doc, p){
 /* ---------- переключение экранов ---------- */
 const VIEWS = ['viewMain','viewSettings','viewServers','viewApp','viewFilter','viewWizard',
                'viewVpsSetup','viewSelfCheck','viewLog','viewMesh','viewAdvanced',
-               'viewAdBlock','viewDomains'];
+               'viewAdBlock','viewDomains','viewAddons'];
 // Экраны, на которых правят общий документ настроек: внизу у каждого —
 // одна и та же кнопка «Сохранить» (её переносит show()).
 const SETTINGS_VIEWS = ['viewSettings','viewServers','viewApp','viewAdBlock','viewDomains'];
@@ -2778,6 +2794,7 @@ function show(name){
     v.appendChild($('saveBox'));
   }
   current = name;
+  document.body.dataset.view = name;
   VIEWS.forEach(v => $(v).classList.toggle('on', v === name));
   closeMenu();
   if(name === 'viewLog') $('log').scrollTop = $('log').scrollHeight;
@@ -4887,6 +4904,77 @@ $('updateOpenBtn').onclick = () => {
 };
 
 /* ---------- мастер настройки: Android + VPS ---------- */
+/* ---------- дополнительные приложения и Книга ---------- */
+/* Страницы общие с Android (apps.html, book.html); здесь — только как их
+   показать в окне ПК. Список и звёздочки хранит ядро (/api/addons). */
+let addonsState = {catalog: [], added: [], windows: false};
+function pageURL(file, extra){
+  const p = new URLSearchParams({t: T, lang: LANG});
+  if(uiTheme) p.set('theme', uiTheme);
+  for(const [k, v] of Object.entries(extra || {})) p.set(k, v);
+  return '/' + file + '?' + p.toString();
+}
+// openWindow — отдельное окно: нативное (ядро помнит место), иначе окно
+// браузера. false — не открылось.
+async function openWindow(key, title, url){
+  const r = await api('/api/window', {key, title, url}).catch(() => ({}));
+  if(r && r.ok) return true;
+  return !!window.open(url, 'sshtunnel_' + key, 'popup=yes,width=820,height=640');
+}
+function showAddons(open){
+  $('addonsFrame').src = pageURL('apps.html', open ? {open} : {});
+  show('viewAddons');
+}
+const addonName = m => (m.name && (m.name[LANG] || m.name.ru)) || m.id;
+async function openQuick(id){
+  $('quickPanel').hidden = true;
+  const m = addonsState.catalog.find(x => x.id === id);
+  if(m && m.window &&
+     await openWindow(id, addonName(m) + ' — ssh_tunnel', pageURL('apps.html', {open: id, solo: '1', key: id}))) return;
+  showAddons(id);
+}
+async function loadAddons(){
+  const r = await api('/api/addons?lang=' + LANG).catch(() => null);
+  if(!r || !r.added) return;
+  addonsState = r;
+  const starred = r.added.filter(e => e.star && e.active);
+  $('quickBtn').hidden = !starred.length;
+  if(!starred.length) $('quickPanel').hidden = true;
+  const p = $('quickPanel');
+  p.innerHTML = '';
+  for(const e of starred){
+    const m = r.catalog.find(x => x.id === e.id);
+    if(!m) continue;
+    const b = document.createElement('button');
+    const ic = document.createElement('span');
+    ic.className = 'mi';
+    ic.style.setProperty('--i', 'url(icons/' + m.icon + '.svg)');
+    const nm = document.createElement('span');
+    nm.textContent = addonName(m);
+    b.append(ic, nm);
+    b.onclick = () => openQuick(m.id);
+    p.appendChild(b);
+  }
+}
+$('quickBtn').onclick = ev => { ev.stopPropagation(); $('quickPanel').hidden = !$('quickPanel').hidden; };
+document.addEventListener('click', ev => {
+  if(!$('quickPanel').hidden && !$('quickPanel').contains(ev.target)) $('quickPanel').hidden = true;
+});
+$('toAddons').onclick = () => showAddons();
+// Книга на ПК — отдельным окном, листается страницами.
+$('toBook').onclick = () => openWindow('book', tr('book_title') + ' — ssh_tunnel',
+  pageURL('book.html', {solo: '1', key: 'book'}));
+window.addEventListener('message', ev => {
+  if(ev.source !== $('addonsFrame').contentWindow || !ev.data) return;
+  if(ev.data.sshtunnel === 'close'){
+    $('addonsFrame').src = 'about:blank';
+    show('viewMain');
+    loadAddons();
+  }
+  if(ev.data.sshtunnel === 'changed') loadAddons();
+});
+loadAddons();
+
 $('toWizard').onclick = () => {
   // Открытый ключ туннеля для этого сервера уже мог быть создан на экране
   // настроек — если да, подставляем его в поле VPS-скрипта, чтобы не
