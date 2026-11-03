@@ -90,8 +90,7 @@ func TestPlatformAPI(t *testing.T) {
 	}
 	defer r.Body.Close()
 	rd := bufio.NewReader(r.Body)
-	if line, _ := rd.ReadString('
-'); !strings.HasPrefix(line, ":") {
+	if line, _ := rd.ReadString('\n'); !strings.HasPrefix(line, ":") {
 		t.Fatalf("начало потока: %q", line)
 	}
 	go func() {
@@ -101,8 +100,7 @@ func TestPlatformAPI(t *testing.T) {
 		}
 	}()
 	for {
-		line, err := rd.ReadString('
-')
+		line, err := rd.ReadString('\n')
 		if err != nil {
 			t.Fatal(err)
 		}
