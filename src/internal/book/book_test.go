@@ -51,7 +51,7 @@ func TestChapters(t *testing.T) {
 	}
 	ru := Chapters("ru", []string{"app-sample", "app-missing"})
 	en := Chapters("en", []string{"app-sample"})
-	if got, want := ids(ru), "start,main,mesh,app-sample,problems"; got != want {
+	if got, want := ids(ru), "start,main,mesh,commands,own-apps,app-sample,problems"; got != want {
 		t.Fatalf("главы ru: %s, нужно %s", got, want)
 	}
 	if ids(en) != ids(ru) {
