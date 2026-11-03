@@ -89,6 +89,7 @@ func (s *Server) coreRoutes() []route {
 		{"/api/bootstart", "GET, POST", "Запуск при старте системы: состояние; POST {\"on\":bool}.", s.handleBootStart},
 		{"/api/update/check", "GET", "Есть ли новая версия на GitHub.", s.handleUpdateCheck},
 		{"/api/update/download", "POST", "Скачать новую версию в «Загрузки».", s.handleUpdateDownload},
+		{"/api/update/install", "POST", "Обновиться: скачать, сверить сумму, поставить и перезапуститься (если canInstall).", s.handleUpdateInstall},
 		{"/api/adblock/update", "POST", "Скачать и применить списки блокировки рекламы {\"sources\"}.", s.handleAdBlockUpdate},
 	}
 }
@@ -109,6 +110,7 @@ var confirm = map[string]string{
 	"/api/serverusers":             "создаёт пользователя на сервере",
 	"/api/vpssetup/start":          "меняет настройки сервера (sshd)",
 	"/api/update/download":         "скачивает новую версию",
+	"/api/update/install":          "ставит новую версию и перезапускает программу",
 	"/api/addons":                  "remove убирает приложение (у своего — вместе с данными)",
 	"/api/addons/file":             "ставит своё приложение с разрешениями",
 	"/api/diag/meddlers/try":       "останавливает чужую программу",

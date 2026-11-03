@@ -22,6 +22,7 @@ import (
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/nativeui"
 	"sshtunnel/internal/shutdown"
+	"sshtunnel/internal/updater"
 	"sshtunnel/internal/webui"
 )
 
@@ -53,6 +54,8 @@ func main() {
 		return
 	}
 
+	// Файл прошлой версии после обновления одной кнопкой (updater.Install).
+	updater.CleanOld()
 	cfg := config.Load()
 	// В окне этих переключателей нет: без них туннелем никто не пользуется сам
 	// собой, и человек видел бы «подключено» при неработающем интернете.

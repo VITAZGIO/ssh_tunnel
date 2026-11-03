@@ -1151,6 +1151,8 @@
           <button class="btn" id="updateCheckBtn" data-i18n="update_check">Проверить обновления</button>
         </div>
         <span class="hint" id="updateNote" style="display:block;margin-top:7px"></span>
+        <button class="btn primary" id="updateInstallBtn" hidden style="width:100%;margin-top:8px"
+          data-i18n="update_install">Обновить</button>
         <button class="btn" id="updateDownloadBtn" hidden style="width:100%;margin-top:8px"
           data-i18n="update_download">Скачать в «Загрузки»</button>
         <button class="btn" id="updateOpenBtn" hidden style="width:100%;margin-top:8px"
@@ -2084,6 +2086,8 @@ const I18N = {
     update_failed:'не получилось связаться с GitHub — проверь интернет',
     update_rate_limited:'GitHub временно ограничил число запросов, попробуй позже',
     update_download:'Скачать в «Загрузки»', update_downloading:'скачиваю…',
+    update_install:'Обновить', update_installing_self:'скачиваю и проверяю…',
+    update_restarting:'ставлю новую версию и перезапускаюсь…',
     update_downloaded:'скачано: {path} — закрой программу и замени ею старый файл',
     update_download_failed:'скачать не вышло — открой страницу релиза и скачай вручную',
     update_open_release:'Открыть страницу релиза',
@@ -2406,6 +2410,8 @@ const I18N = {
     update_failed:'could not reach GitHub — check your connection',
     update_rate_limited:'GitHub is rate-limiting requests, try again later',
     update_download:'Download to Downloads', update_downloading:'downloading…',
+    update_install:'Update', update_installing_self:'downloading and checking…',
+    update_restarting:'installing the new version and restarting…',
     update_downloaded:'saved to {path} — close the program and replace the old file with it',
     update_download_failed:'download failed — open the release page and grab it by hand',
     update_open_release:'Open the release page',
@@ -4964,6 +4970,7 @@ $('updateCheckBtn').onclick = async () => {
   $('updateCheckBtn').disabled = true;
   $('updateNote').textContent = tr('update_checking');
   $('updateDownloadBtn').hidden = true;
+  $('updateInstallBtn').hidden = true;
   $('updateOpenBtn').hidden = true;
   const r = await api('/api/update/check', {});
   $('updateCheckBtn').disabled = false;
@@ -4975,6 +4982,8 @@ $('updateCheckBtn').onclick = async () => {
   updateResult = r.result;
   if(r.result.newer){
     $('updateNote').textContent = tr('update_available').replace('{v}', r.result.latest);
+    // Сама ставит (ПК, Linux) — главная кнопка «Обновить», «Загрузки» — запасная.
+    $('updateInstallBtn').hidden = !(r.canInstall && r.result.assetUrl);
     $('updateDownloadBtn').hidden = !r.result.assetUrl;
     $('updateOpenBtn').hidden = false;
   } else if(r.result.ahead){
@@ -5000,6 +5009,28 @@ $('updateDownloadBtn').onclick = async () => {
   }
   $('updateNote').textContent = ANDROID ? tr('update_installing')
     : tr('update_downloaded').replace('{path}', r.path);
+};
+
+$('updateInstallBtn').onclick = async () => {
+  $('updateInstallBtn').disabled = true;
+  $('updateNote').textContent = tr('update_installing_self');
+  const r = await api('/api/update/install', {}).catch(e => ({error: String(e)}));
+  if(r.error){
+    $('updateInstallBtn').disabled = false;
+    $('updateNote').textContent = r.error;
+    return;
+  }
+  // Программа перезапускается. Окно ПК закроется само и откроется новое; в
+  // браузере (Linux) ждём, пока старая копия пропадёт и ответит новая, и
+  // открываем панель заново (у новой копии свой ключ адреса).
+  $('updateNote').textContent = tr('update_restarting');
+  const t0 = Date.now();
+  let down = false;
+  const wait = async () => {
+    try { await fetch('/', {cache: 'no-store'}); if(down){ location.href = '/'; return; } } catch(e) { down = true; }
+    if(Date.now() - t0 < 120000) setTimeout(wait, 1500);
+  };
+  setTimeout(wait, 1500);
 };
 
 $('updateOpenBtn').onclick = () => {
