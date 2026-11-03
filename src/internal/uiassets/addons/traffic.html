@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Расход трафика</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../pages.css">
+<style>
+  body{background:transparent}
+  .wrap{display:flex;flex-direction:column;gap:12px;padding:0 14px 16px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-top:12px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{border:0;background:transparent;color:var(--dim);padding:6px 12px;cursor:pointer;font:inherit}
+  .seg button.on{background:var(--accent-muted);color:#fff}
+  .tot{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+  .tot .card{display:flex;flex-direction:column;gap:2px;padding:10px 12px}
+  .tot .k{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:6px}
+  .tot .v{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:3px;flex:none}
+  .c-server{background:var(--accent)} .c-direct{background:var(--ok)} .c-mesh{background:var(--warn)}
+  svg.chart{display:block;width:100%;height:190px}
+  svg.chart text{font-size:10px;fill:var(--dim);font-variant-numeric:tabular-nums}
+  svg.chart .grid{stroke:var(--line);stroke-width:1}
+  .r-server{fill:var(--accent)} .r-direct{fill:var(--ok)} .r-mesh{fill:var(--warn)}
+  .prog{display:grid;grid-template-columns:26px 1fr auto;gap:4px 10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
+  .prog:last-child{border-bottom:0}
+  .prog .ic{width:26px;height:26px;border-radius:7px;background:var(--card2);display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .prog .ic img{width:100%;height:100%;object-fit:contain}
+  .prog .ic .mi{width:16px;height:16px;color:var(--dim)}
+  .prog .n{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prog .s{font-variant-numeric:tabular-nums;color:var(--dim);font-size:13px;text-align:right}
+  .prog .line{grid-column:2/4;display:flex;height:5px;border-radius:3px;overflow:hidden;background:var(--card2)}
+  .prog .line i{display:block;height:100%}
+  .lim{display:flex;flex-direction:column;gap:10px}
+  .lim .f{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  select,input{font:inherit;color:var(--text);background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 9px}
+  input[type=number]{width:90px}
+  .meter{height:8px;border-radius:4px;background:var(--card2);overflow:hidden}
+  .meter i{display:block;height:100%;background:var(--accent)}
+  .meter.w i{background:var(--warn)} .meter.e i{background:var(--err)}
+  h3{margin:4px 0 0;font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar">
+    <div class="seg" id="per"></div>
+    <div class="seg" id="net" hidden></div>
+  </div>
+  <div class="tot" id="tot"></div>
+  <div class="card"><svg class="chart" id="chart"></svg></div>
+  <h3 id="topT"></h3>
+  <div class="card" id="top"></div>
+  <div class="card lim" id="lim"></div>
+  <div class="hint" id="note"></div>
+</div>
+<script src="../pages.js"></script>
+<script>
+let PER = 'week', NET = 'all', DATA = null, LABELS = {};
+const COLORS = ['server', 'direct', 'mesh'];
+const NAMES = {server: L('Через VPN', 'Via VPN'), direct: L('Напрямую', 'Direct'), mesh: L('Сеть устройств', 'Device network')};
+
+function human(b){
+  if(b >= 1e9) return (b / 1e9).toFixed(b >= 1e10 ? 1 : 2) + L(' ГБ', ' GB');
+  if(b >= 1e6) return (b / 1e6).toFixed(b >= 1e8 ? 0 : 1) + L(' МБ', ' MB');
+  if(b >= 1e3) return Math.round(b / 1e3) + L(' КБ', ' KB');
+  return b + L(' Б', ' B');
+}
+
+function seg(id, items, cur, set){
+  $(id).innerHTML = items.map(([v, t]) => `<button data-v="${v}" class="${v === cur ? 'on' : ''}">${esc(t)}</button>`).join('');
+  $(id).querySelectorAll('button').forEach(b => b.onclick = () => { set(b.dataset.v); load(); });
+}
+
+function progName(n){
+  if(!n) return L('Без программы (система)', 'No app (system)');
+  if(n === 'ssh_tunnel') return L('ssh_tunnel (календарь, SSH, файлы)', 'ssh_tunnel (calendar, SSH, files)');
+  return LABELS[n] || n;
+}
+
+function drawChart(days){
+  // Ширина — настоящая, чтобы подписи не растягивались.
+  const W = Math.max(240, $('chart').clientWidth || 600), H = 190, top = 14, bot = 22, left = 4;
+  $('chart').setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const max = Math.max(1, ...days.map(d => d.server + d.direct + d.mesh));
+  const n = days.length, gap = n > 14 ? 2 : 6, bw = (W - left) / n - gap;
+  let s = '';
+  for(let i = 1; i <= 3; i++){
+    const y = top + (H - top - bot) * (1 - i / 3);
+    s += `<line class="grid" x1="0" x2="${W}" y1="${y}" y2="${y}"/><text x="${W - 2}" y="${y - 3}" text-anchor="end">${esc(human(max * i / 3))}</text>`;
+  }
+  days.forEach((d, i) => {
+    const x = left + i * (bw + gap);
+    let y = H - bot;
+    for(const k of COLORS){
+      const h = (H - top - bot) * d[k] / max;
+      if(h > 0){ y -= h; s += `<rect class="r-${k}" x="${x}" y="${y}" width="${bw}" height="${h}" rx="2"><title>${esc(d.date)} — ${esc(NAMES[k])}: ${esc(human(d[k]))}</title></rect>`; }
+    }
+    const step = n > 14 ? 5 : 1;
+    if(i % step === 0 || i === n - 1)
+      s += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">${esc(d.date.slice(8))}.${esc(d.date.slice(5, 7))}</text>`;
+  });
+  $('chart').innerHTML = s;
+}
+
+function render(){
+  const r = DATA;
+  if(!r) return;
+  if(r.error){ $('note').textContent = r.error; return; }
+  seg('per', [['day', L('День', 'Day')], ['week', L('Неделя', 'Week')], ['month', L('Месяц', 'Month')]], PER, v => PER = v);
+  if(r.hasNet){
+    $('net').hidden = false;
+    seg('net', [['all', L('Все сети', 'All')], ['wifi', 'Wi-Fi'], ['mobile', L('Мобильная', 'Mobile')]], NET, v => NET = v);
+  }
+  const t = r.total, sum = t.server + t.direct + t.mesh;
+  $('tot').innerHTML = [[L('Всего', 'Total'), sum, '']].concat(COLORS.map(k => [NAMES[k], t[k], k]))
+    .map(([n, v, k]) => `<div class="card"><span class="k">${k ? `<i class="dot c-${k}"></i>` : ''}${esc(n)}</span><span class="v">${esc(human(v))}</span></div>`).join('');
+  drawChart(r.days);
+  $('topT').textContent = L('Программы', 'Apps');
+  $('top').innerHTML = r.top.length ? r.top.map(p => {
+    const w = k => (p.total ? p[k] * 100 / p.total : 0).toFixed(1);
+    const ic = ANDROID && p.name && p.name !== 'ssh_tunnel' && !p.name.startsWith('uid:')
+      ? `<img src="/api/appicon?pkg=${encodeURIComponent(p.name)}&t=${encodeURIComponent(T)}" alt="" onerror="this.remove()">` : icon('apps');
+    return `<div class="prog"><span class="ic">${ic}</span><span class="n" title="${esc(p.name)}">${esc(progName(p.name))}</span>
+      <span class="s">${esc(human(p.total))}</span>
+      <span class="line">${COLORS.map(k => `<i class="c-${k}" style="width:${w(k)}%" title="${esc(NAMES[k])}: ${esc(human(p[k]))}"></i>`).join('')}</span></div>`;
+  }).join('') : `<div class="hint">${L('Пока ничего не прошло.', 'Nothing yet.')}</div>`;
+  drawLimit(r.limit, r.hasNet);
+  $('note').textContent = L('Считается то, что проходит через ssh_tunnel; хранятся 3 месяца. Исключённые приложения на телефоне идут мимо и не считаются.',
+    'Counts what goes through ssh_tunnel; kept for 3 months. Apps excluded on the phone bypass it and are not counted.');
+}
+
+function drawLimit(l, hasNet){
+  const pct = Math.min(100, l.pct || 0);
+  const cls = l.pct >= 100 ? 'e' : l.pct >= 80 ? 'w' : '';
+  $('lim').innerHTML = `
+    <label class="f"><input type="checkbox" id="lOn" ${l.on ? 'checked' : ''}> ${L('Предупреждать о расходе', 'Warn about usage')}</label>
+    <div class="f" id="lF" ${l.on ? '' : 'hidden'}>
+      <input type="number" id="lGB" min="0.1" step="0.1" value="${l.gb}"> ${L('ГБ', 'GB')}
+      <select id="lPer"><option value="month">${L('в месяц', 'per month')}</option><option value="day">${L('в день', 'per day')}</option></select>
+      <select id="lSc"><option value="all">${L('весь трафик', 'all traffic')}</option><option value="server">${L('только через VPN', 'VPN only')}</option>
+        ${hasNet ? `<option value="mobile">${L('только мобильная сеть', 'mobile data only')}</option>` : ''}</select>
+    </div>
+    <div ${l.on ? '' : 'hidden'}><div class="meter ${cls}"><i style="width:${pct}%"></i></div>
+      <div class="hint" style="margin-top:6px">${esc(human(l.used))} ${L('из', 'of')} ${esc(human(l.gb * 1e9))} (${l.pct || 0}%). ${L('На 80% и 100% придёт предупреждение; VPN не выключится.', 'You get a warning at 80% and 100%; VPN keeps working.')}</div></div>`;
+  $('lPer').value = l.period; $('lSc').value = l.scope;
+  const save = () => api('/api/traffic/limit?period=' + PER + '&net=' + NET,
+    {on: $('lOn').checked, gb: parseFloat($('lGB').value) || 0, period: $('lPer').value, scope: $('lSc').value}).then(r => { DATA = r; render(); });
+  $('lOn').onchange = save; $('lGB').onchange = save; $('lPer').onchange = save; $('lSc').onchange = save;
+}
+
+async function load(){
+  try { DATA = await api('/api/traffic?period=' + PER + '&net=' + NET); } catch(e) { DATA = {error: String(e)}; }
+  // Не перерисовывать, пока человек правит лимит.
+  if(document.activeElement && $('lim').contains(document.activeElement)) return;
+  render();
+}
+
+if(ANDROID) api('/api/processes').then(list => { for(const p of list || []) LABELS[p.name] = p.label; render(); }).catch(() => {});
+load();
+setInterval(load, 10000);
+window.addEventListener('resize', () => DATA && !DATA.error && drawChart(DATA.days));
+</script>
+</body>
+</html>

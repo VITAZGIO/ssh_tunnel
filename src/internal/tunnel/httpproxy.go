@@ -90,6 +90,7 @@ func (t *Tunnel) httpForward(conn net.Conn, br *bufio.Reader, req *http.Request)
 		fmt.Fprintf(conn, "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\nssh_tunnel: %s\r\n", shortErr(err))
 		return
 	}
+	remote = metered(remote, proc, route)
 	defer remote.Close()
 	untrack := t.track(c, route, entryProxy, func() { conn.Close(); remote.Close() })
 	defer untrack()

@@ -291,6 +291,7 @@ func (t *Tunnel) StartCore() error {
 		return fmt.Errorf("туннель уже запущен")
 	}
 	cfg, cb, gen := t.cfg, t.cb, t.gen
+	cfg.OwnerOf = ownerOf // учёт трафика по приложениям (tools5.go)
 	t.mu.Unlock()
 
 	if cfg.Host == "" {

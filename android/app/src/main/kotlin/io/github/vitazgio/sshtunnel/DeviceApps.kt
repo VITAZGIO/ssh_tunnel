@@ -37,6 +37,7 @@ object DeviceApps {
             val app = ctx.applicationContext
             mobile.Mobile.setKeySealer(KeystoreSealer)
             mobile.Mobile.setTransferListener(TransferNotifier(app))
+            Tools5.init(app) // ТЗ 5: трафик, сканер, буфер
             try {
                 mobile.Mobile.startUI(app.filesDir.absolutePath)
             } catch (_: Exception) {

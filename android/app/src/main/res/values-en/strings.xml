@@ -49,4 +49,11 @@
     <string name="files_transfer_channel">File transfers</string>
     <string name="files_transfer_title">Device files</string>
     <string name="files_transfer_many">Transfers: %1$d</string>
+    <!-- ТЗ 5: трафик, сканер, буфер -->
+    <string name="tools_channel">App warnings</string>
+    <string name="clip_share">ssh_tunnel shared clipboard</string>
+    <string name="clip_tile">Shared clipboard</string>
+    <string name="clip_sent">Sent to devices: %1$d</string>
+    <string name="clip_too_big">Over 50 MB — use Device files</string>
+    <string name="clip_empty">Nothing to send in the clipboard</string>
 </resources>
