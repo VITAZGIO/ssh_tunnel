@@ -24,6 +24,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"sshtunnel/internal/apicli"
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/nativeui"
 	"sshtunnel/internal/updater"
@@ -33,6 +34,13 @@ import (
 const windowTitle = "ssh_tunnel VPN"
 
 func main() {
+	// Команда работающей программе (`ssh_tunnel_vpn.exe tunnel off`, `… mcp`).
+	if apicli.IsCommand(os.Args[1:]) {
+		if os.Args[1] != "mcp" {
+			apicli.AttachConsole()
+		}
+		os.Exit(apicli.Main("ssh_tunnel_vpn.exe", os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	noWindow := flag.Bool("nowindow", false, "не открывать окно, только напечатать адрес")
 	tray := flag.Bool("tray", false, "запуститься свёрнутым в трей (так окно стартует при входе в систему)")
 	service := flag.Bool("service", false, "работать службой Windows (так программу запускает сама Windows)")

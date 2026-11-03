@@ -1,0 +1,12 @@
+{
+  "id": "hello",
+  "name": { "ru": "Привет", "en": "Hello" },
+  "hint": {
+    "ru": "Образец своего приложения: показывает состояние туннеля и пробует список устройств, на который у него нет разрешения.",
+    "en": "A sample own app: shows the tunnel state and tries the device list it has no permission for."
+  },
+  "icon": "icon.svg",
+  "page": "index.html",
+  "version": "1.0",
+  "permissions": ["state"]
+}

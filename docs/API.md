@@ -136,6 +136,63 @@
 Настройки (`/api/config`), серверы (`/api/profile/*`), профили приложения,
 сеть устройств, самопроверка, тест скорости, обновления, мастер настройки VPS
 и прочее — см. `GET /api`: там у каждого адреса методы и короткое описание.
+У опасных адресов (выключить сеть устройств, удалить, остановить чужую
+программу, заменить настройки) в самоописании ещё поле `confirm` — что
+именно опасно; MCP пишет это нейросети «спроси человека».
+
+## Правила (ТЗ 8)
+
+`GET /api/rules` — правила активного сервера без остальных настроек и
+ключей: `{"profile","filterMode","filterApps","directHosts","tunnelHosts"}`.
+`POST` `{"op":"add"|"remove","list":"direct"|"tunnel"|"apps","value":"youtube.com"}`
+или `{"filterMode":"all"|"only"|"except"}` — применяется сразу, ответ
+`{"ok":true,"rules",…}`. Те же поля, что в `/api/config` (профиль сервера).
+
+## Свои приложения (ТЗ 8)
+
+Формат архива и разрешения — `docs/CUSTOM_APPS.md`.
+
+- `POST /api/addons/file[?dry=1]` — тело zip: `dry` — проверить и показать
+  разрешения, без него — поставить. Только ключом программы.
+- В `GET /api/addons` у своих приложений `custom: true`, `page` и `iconUrl` —
+  адреса `/custom/<id>/<ключ приложения>/…`, `permissions` — что разрешено.
+  `{"op":"remove"}` удаляет своё приложение вместе с данными.
+- Своё приложение ходит к API своим ключом (`app_…`) и только по своим
+  разрешениям, иначе `403 {"error"}`. `GET|POST /api/app/data` — его данные.
+
+## Команды (ТЗ 8)
+
+`ssh_tunnel.exe <команда>` (Linux — `ssh_tunnel_linux`, VPN —
+`ssh_tunnel_vpn.exe`) — обёртка над этим API, адрес и ключ — из `api.json`
+(код — `src/internal/apicli`). `--json` — ответ как есть.
+
+```powershell
+ssh_tunnel.exe state                         # что сейчас
+ssh_tunnel.exe tunnel off                    # выключить туннель (сеть устройств не трогается)
+ssh_tunnel.exe mesh on
+ssh_tunnel.exe rules add direct youtube.com  # всегда напрямую
+ssh_tunnel.exe apps add calendar
+ssh_tunnel.exe check site youtube.com
+ssh_tunnel.exe diag site site=youtube.com    # любой адрес: слова пути + ключ=значение
+ssh_tunnel.exe api POST /api/state '{"mesh":false}'
+$s = ssh_tunnel.exe state --json | ConvertFrom-Json
+```
+
+Любой адрес из `GET /api` — команда: слова пути после `/api/`, дальше
+`ключ=значение` или один JSON (есть поля и адрес умеет POST — POST, иначе
+GET с полями в адресе). `help` печатает все адреса работающей версии. Коды
+выхода: 0, 1 — ошибка, 2 — не так вызвано, 3 — программа не запущена.
+
+## MCP (ТЗ 8)
+
+`ssh_tunnel.exe mcp` — MCP-сервер по stdio (JSON-RPC построчно), наружу не
+слушает. Работает, только пока в настройках включена галочка «Управление
+нейросетью (MCP)» (`config.mcpEnabled`, по умолчанию выкл., проверяется на
+каждом вызове). Инструменты: `get_state`, `set_tunnel`, `set_mesh`,
+`get_rules`, `add_rule`, `remove_rule`, `list_apps`, `app_action` и
+`api_<путь>` на каждый адрес `GET /api` (`method`, `body`, `query`,
+`suffix`). Опасные — с «ОПАСНО — спроси человека» в описании и
+`destructiveHint`. Подключение к Claude — глава Книги «Команды и нейросеть».
 
 ## PowerShell
 

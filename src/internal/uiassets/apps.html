@@ -44,6 +44,13 @@
   .item .tx{flex:1;min-width:0}
   .item .nm{font-weight:600}
   .item.na{opacity:.55}
+  .tile img.ic,.item img.ic{object-fit:contain}
+  #appTitle img{width:22px;height:22px;object-fit:contain;flex:none}
+  .tile .mark{font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:6px;
+              padding:1px 6px;align-self:flex-start}
+  .fromFile{display:flex;gap:10px;align-items:center;margin-bottom:4px}
+  .perms{margin:8px 0 14px;padding-left:20px}
+  .perms li{margin:4px 0}
 
   /* Приложение внутри страницы. */
   #appFrame{flex:1;border:0;width:100%;background:transparent}
@@ -74,7 +81,27 @@
       <button class="ico" id="backCat"></button>
       <span class="t" id="catTitle"></span>
     </div>
-    <div class="body"><div class="cat" id="cat"></div></div>
+    <div class="body">
+      <div class="card fromFile"><span class="tx" style="flex:1" id="fileHint"></span>
+        <button class="btn" id="fileBtn"></button>
+        <input type="file" id="fileInput" accept=".zip,application/zip" hidden></div>
+      <div class="cat" id="cat"></div></div>
+  </div>
+
+  <!-- Своё приложение из файла: что оно просит. -->
+  <div class="view" id="vPerm">
+    <div class="head">
+      <button class="ico" id="backPerm"></button>
+      <span class="t" id="permTitle"></span>
+    </div>
+    <div class="body"><div class="card">
+      <p id="permText"></p>
+      <ul class="perms" id="permList"></ul>
+      <p class="hint" id="permNote"></p>
+      <div class="row" style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn" id="permNo"></button>
+        <button class="btn primary" id="permYes"></button></div>
+    </div></div>
   </div>
 
   <!-- Открытое приложение. -->
@@ -105,11 +132,17 @@ let current = null; // id открытого приложения
 const manifest = id => ST.catalog.find(m => m.id === id);
 const entry = id => ST.added.find(e => e.id === id);
 
-function show(v){ ['vList','vCat','vApp'].forEach(x => $(x).classList.toggle('on', x === v)); }
+function show(v){ ['vList','vCat','vApp','vPerm'].forEach(x => $(x).classList.toggle('on', x === v)); }
 
 function setIcons(){
-  $('backList').innerHTML = $('backCat').innerHTML = $('backApp').innerHTML = icon('arrow_back');
-  $('backList').title = $('backCat').title = $('backApp').title = L('Назад', 'Back');
+  $('backList').innerHTML = $('backCat').innerHTML = $('backApp').innerHTML = $('backPerm').innerHTML = icon('arrow_back');
+  $('backList').title = $('backCat').title = $('backApp').title = $('backPerm').title = L('Назад', 'Back');
+  $('fileHint').textContent = L('Своё приложение — архив .zip (страница и значок, без программ).',
+                                'Your own app — a .zip archive (a page and an icon, no programs).');
+  $('fileBtn').textContent = L('Из файла', 'From file');
+  $('permTitle').textContent = L('Своё приложение', 'Your own app');
+  $('permNo').textContent = L('Отмена', 'Cancel');
+  $('permYes').textContent = L('Установить', 'Install');
   $('addBtn').innerHTML = icon('add');
   $('addBtn').title = L('Добавить приложение', 'Add an app');
   $('helpBtn').innerHTML = icon('help');
@@ -157,8 +190,9 @@ function renderList(){
          <button class="ico star${e.star ? ' on' : ''}" title="${esc(L('В быстрый доступ', 'Quick access'))}">${icon(e.star ? 'star_fill' : 'star')}</button>
          <button class="ico more" title="${esc(L('Ещё', 'More'))}">${icon('more_horiz')}</button>
        </span>
-       ${icon(m.icon, 'ic')}
+       ${appIcon(m, 'ic')}
        <span class="nm">${esc(appName(m))}</span>
+       ${m.custom ? `<span class="mark">${esc(L('не из каталога', 'not from catalog'))}</span>` : ''}
        ${m.unavailable ? `<span class="why">${esc(m.unavailable)}</span>` : ''}
        ${m.background && !m.unavailable ? `<span class="foot"><button class="sw${e.on ? ' on' : ''}" title="${esc(e.on ? L('Выключить', 'Turn off') : L('Включить', 'Turn on'))}"></button><span class="bg">${esc(L('в фоне', 'background'))}</span></span>` : ''}`;
     t.querySelector('.star').onclick = ev => { ev.stopPropagation(); op('star', e.id, !e.star); };
@@ -190,6 +224,7 @@ function renderCatalog(){
     return;
   }
   for(const m of ST.catalog){
+    if(m.custom) continue; // своё приложение — сразу на плитке
     const has = !!entry(m.id);
     const it = document.createElement('div');
     it.className = 'card item' + (m.unavailable ? ' na' : '');
@@ -214,11 +249,23 @@ async function openApp(id, here){
   }
   if(m.window && !here && !SOLO && !ANDROID && await popOut(id)) return;
   current = id;
-  $('appTitle').innerHTML = icon(m.icon) + '<span>' + esc(appName(m)) + '</span>';
+  $('appTitle').innerHTML = appIcon(m) + '<span>' + esc(appName(m)) + '</span>';
   $('helpBtn').hidden = !m.book;
   $('winBtn').hidden = SOLO || ANDROID;
   $('backApp').hidden = SOLO && !Q.get('back');
-  $('appFrame').src = pageURL(m.page, {});
+  // Своё приложение — в песочнице: свой origin, без ключа программы в адресе.
+  // Ключ приложения уже в пути страницы, им оно и ходит к API.
+  const fr = $('appFrame');
+  if(m.custom){
+    fr.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals allow-downloads');
+    const p = new URLSearchParams({lang: LANG});
+    const th = document.documentElement.dataset.theme;
+    if(th) p.set('theme', th);
+    fr.src = '/' + m.page + '?' + p.toString();
+  } else {
+    fr.removeAttribute('sandbox');
+    fr.src = pageURL(m.page, {});
+  }
   $('first').hidden = e.seen;
   $('firstText').textContent = appHint(m);
   $('firstMore').hidden = !m.book;
@@ -245,6 +292,44 @@ $('backApp').onclick = () => {
 };
 $('backList').onclick = () => closePage();
 $('addBtn').onclick = () => show('vCat');
+
+// Своё приложение из файла: сначала ядро проверяет архив и говорит, что
+// приложение просит (?dry=1), человек соглашается — тот же архив ставится.
+let pending = null;
+$('fileBtn').onclick = () => $('fileInput').click();
+$('fileInput').onchange = async () => {
+  const f = $('fileInput').files[0];
+  $('fileInput').value = '';
+  if(!f) return;
+  const body = await f.arrayBuffer();
+  const r = await upload(body, true);
+  if(r.error){ alert(r.error); return; }
+  pending = body;
+  const nm = appName(r);
+  $('permText').textContent = (r.update ? L('Обновить «%s»? ', 'Update "%s"? ') : L('Установить «%s»? ', 'Install "%s"? ')).replace('%s', nm) +
+    (r.permissions.length ? L('Приложение просит:', 'The app asks to:') : L('Приложение ничего не просит — только свою страницу.', 'The app asks for nothing — just its own page.'));
+  $('permList').innerHTML = r.permissions.map(p => `<li>${esc(p.text)}</li>`).join('');
+  $('permNote').textContent = L('Оно не из каталога: его сделал не автор программы. Работает в отдельной песочнице и видит только то, что тут перечислено. Убрать — «…» на плитке, вместе с его данными.',
+    'It is not from the catalog: not made by the app author. It runs in its own sandbox and sees only what is listed here. Remove it with "…" on its tile, its data goes too.');
+  show('vPerm');
+};
+function upload(body, dry){
+  return fetch('/api/addons/file?lang=' + LANG + (dry ? '&dry=1' : ''), {
+    method: 'POST', headers: {'X-Token': T, 'Content-Type': 'application/zip'}, body,
+  }).then(r => r.json());
+}
+$('permYes').onclick = async () => {
+  if(!pending) return;
+  const r = await upload(pending, false);
+  pending = null;
+  if(r.error){ alert(r.error); return; }
+  ST = r;
+  renderList();
+  renderCatalog();
+  changed();
+  show('vList');
+};
+$('permNo').onclick = $('backPerm').onclick = () => { pending = null; show('vCat'); };
 $('backCat').onclick = () => show('vList');
 $('backList').hidden = SOLO;
 

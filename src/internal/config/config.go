@@ -215,6 +215,11 @@ type Config struct {
 	// должен быть неожиданно проигнорирован. Имеет смысл только при
 	// нескольких серверах.
 	AutoPickFastest bool `json:"autoPickFastest"`
+
+	// MCPEnabled — галочка «Управление нейросетью (MCP)»: пока выключена,
+	// `ssh_tunnel mcp` ничего не делает (internal/apicli). По умолчанию
+	// выключена: нейросеть получает кнопки только по явному согласию.
+	MCPEnabled bool `json:"mcpEnabled,omitempty"`
 }
 
 // AutoConnectEnabled — эффективное значение AutoConnect с учётом отсутствия

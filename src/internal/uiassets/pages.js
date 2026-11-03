@@ -23,6 +23,9 @@ const appName = m => (m.name && (m.name[LANG] || m.name.ru)) || m.id;
 const appHint = m => (m.hint && (m.hint[LANG] || m.hint.ru)) || '';
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const icon = (n, cls) => `<span class="mi ${cls || ''}" style="--i:url(/icons/${esc(n)}.svg)"></span>`;
+// appIcon — значок приложения: у своего — файл из его архива.
+const appIcon = (m, cls) => m.iconUrl ? `<img class="${cls || ''}" src="${esc(m.iconUrl)}" alt="">`
+  : icon(m.custom ? 'extension' : m.icon, cls);
 
 const api = (path, body) => fetch(path + (path.includes('?') ? '&' : '?') + 'lang=' + LANG, {
   method: body ? 'POST' : 'GET',

@@ -28,14 +28,18 @@ type Manifest struct {
 	Background bool `json:"background"`
 	// Window — на ПК и Linux сразу открывать в отдельном окне.
 	Window bool `json:"window"`
-	// Permissions — что приложению можно (для своих приложений, ТЗ 8). Пока
-	// пусто у всех.
+	// Permissions — что приложению можно (своим приложениям, custom.go).
+	// У приложений каталога пусто: они часть программы.
 	Permissions []string `json:"permissions"`
 	// Page — страница приложения внутри uiassets.
 	Page string `json:"page"`
 	// Platforms — где работает (runtime.GOOS: windows, linux, android).
 	// Пусто — везде.
 	Platforms []string `json:"platforms,omitempty"`
+	// Custom — своё приложение из файла (custom.go): на плитке пометка «не
+	// из каталога», значок — IconURL (файл из архива), а не Icon.
+	Custom  bool   `json:"custom,omitempty"`
+	IconURL string `json:"iconUrl,omitempty"`
 	// Dev — образец для проверки каркаса: в каталоге только в сборке для
 	// разработки (версия «dev»), в релизе не показывается.
 	Dev bool `json:"-"`
@@ -145,7 +149,7 @@ func Catalog() []Manifest {
 		}
 		out = append(out, m)
 	}
-	return out
+	return append(out, customCatalog()...)
 }
 
 // Find — описание приложения из каталога этой сборки.
