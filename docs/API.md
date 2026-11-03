@@ -203,6 +203,27 @@ Invoke-RestMethod "$($a.url)/api/calendar/events?from=2026-11-01&to=2026-11-08" 
   — файлы другого устройства (Range передаётся); `POST /api/files/save`
   `{"peer","s","p"}` — скачать в «Загрузки» с докачкой.
 
+## Зеркальные папки (ТЗ 6)
+
+Отвечают, только пока приложение добавлено и включено. Раздаваемая папка
+этого устройства — `id` вида `hub:<id>`, подключённая — её `id`.
+
+- `GET /api/mirror` — `{"serve":[{id,name,path,ignore,files,conflicts}],
+  "subs":[{id,peer,host,folder,name,path,mode,status:{state,pending,conflicts,files,error,lastOk}}],
+  "found":[{peer,host,folders:[{id,name}],joined}],"self","suggest","platform","devnet"}`.
+  `state`: `ok` | `pending` | `conflict` | `offline` | `error`.
+- `POST /api/mirror`: `{"op":"serve","path","name"}`, `{"op":"unserve","id"}`,
+  `{"op":"ignore","id","list":[шаблоны]}`, `{"op":"join","peer","host","folder","name","path","mode":"both|recv|send"}`,
+  `{"op":"leave","id"}` (файлы остаются), `{"op":"mode","id","mode"}`,
+  `{"op":"sync","id"}`, `{"op":"resolve","id","path":<копия конфликта>,"keep":"orig|copy|both"}`,
+  `{"op":"restore","id","blob"}`.
+- `GET /api/mirror/versions?id=[&p=]` — версии и корзина (30 дней), новые сверху.
+- `GET /api/mirror/file?id=&p=` или `?id=&blob=` — текст файла или версии
+  для просмотра (до 2 МБ).
+
+Между устройствами — свой протокол на порту 47836 сети устройств
+(`internal/mirror/proto.go`).
+
 ## Трафик, сканер, буфер (ТЗ 5)
 
 Отвечают, только пока приложение добавлено (и, если фоновое, включено).
@@ -229,7 +250,7 @@ Invoke-RestMethod "$($a.url)/api/calendar/events?from=2026-11-01&to=2026-11-08" 
   Ответ `{"ok":true,"item"}` или `{"error","tooBig"}`.
 - `POST /api/clipboard/delete` `{"id"}` или `{"all":true}`.
 
-Между устройствами буфер ходит по сети устройств на порт 47836
+Между устройствами буфер ходит по сети устройств на порт 47837
 (`POST /clip?id=&kind=&name=&mime=`); нет службы на порту — устройство не
 участвует.
 
