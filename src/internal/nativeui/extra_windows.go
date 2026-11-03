@@ -100,6 +100,9 @@ func OpenWindow(o WindowOptions) error {
 			makeWidget(hwnd, view)
 		} else {
 			(&ui{hwnd: hwnd}).themeTitleBar()
+			// Новое окно — поверх главного: человек нажал и хочет его видеть.
+			pShowWindow.Call(hwnd, swShow)
+			pSetForegroundWin.Call(hwnd)
 		}
 
 		// Перед закрытием запоминаем, где окно было; дальше закрытие идёт как
