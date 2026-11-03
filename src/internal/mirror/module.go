@@ -381,7 +381,7 @@ func (m *module) join(s Sub) error {
 	if s.Peer == "" || s.Folder == "" || strings.TrimSpace(s.Path) == "" {
 		return errors.New("нужны peer, folder и path")
 	}
-	abs, err := filepath.Abs(strings.TrimSpace(s.Path))
+	abs, err := filepath.Abs(localPath(s.Path))
 	if err != nil {
 		return err
 	}
@@ -456,6 +456,23 @@ func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// localPath — путь, как его написал человек, — на телефоне во внутренней
+// памяти: «/TRASH/Obsidian/Server» или «TRASH/Obsidian» — это
+// /storage/emulated/0/TRASH/…, как у Syncthing (корень Android только для
+// чтения, и такой путь иначе падал с «read-only file system»).
+func localPath(p string) string {
+	p = strings.TrimSpace(p)
+	if runtime.GOOS != "android" || p == "" {
+		return p
+	}
+	for _, root := range []string{"/storage/", "/sdcard", "/mnt/", "/data/"} {
+		if strings.HasPrefix(p, root) {
+			return p
+		}
+	}
+	return "/storage/emulated/0/" + strings.TrimLeft(p, "/")
 }
 
 func suggestBase() string {
@@ -552,7 +569,7 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		switch req.Op {
 		case "serve":
 			if err = m.overlaps(req.Path); err == nil {
-				_, err = m.hub.AddFolder(req.Path, req.Name)
+				_, err = m.hub.AddFolder(localPath(req.Path), req.Name)
 			}
 		case "unserve":
 			err = m.hub.RemoveFolder(hubID)
