@@ -361,6 +361,30 @@ func TestПовторноеПрименение(t *testing.T) {
 	}
 }
 
+// Сменили галочку «Подставные адреса» — тот же режим заново, с гигиеной как
+// при переключении: таблица, DNS-кэш, соединения из адаптера.
+func TestПовторноеПрименениеDNS(t *testing.T) {
+	d := &fakeDriver{}
+	m := newTestMachine(t, d, Options{})
+	m.Set(ptr(true), nil)
+	idle(t, m)
+	m.ReapplyDNS()
+	idle(t, m)
+	m.Reapply()
+	idle(t, m)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.applies) != 3 {
+		t.Fatalf("Apply вызван %d раз, ожидалось 3", len(d.applies))
+	}
+	if h := d.hygiene[1]; !h.ResetFakeIP || !h.FlushDNS || !h.CloseStackInternet || !h.Reevaluate {
+		t.Errorf("гигиена смены DNS %+v", h)
+	}
+	if h := d.hygiene[2]; h.ResetFakeIP || h.FlushDNS {
+		t.Errorf("следующее обычное применение не должно сбрасывать DNS: %+v", h)
+	}
+}
+
 // Не встало то, что включали, — гаснет только эта кнопка, остальное
 // применяется заново целиком.
 func TestОшибкаПримененияГаситТолькоСвоюКнопку(t *testing.T) {

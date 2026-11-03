@@ -49,6 +49,10 @@ type Bundle struct {
 	AdBlockAllowlist string `json:"adBlockAllowlist,omitempty"`
 	// HotspotDirect — не раздавать VPN на мобильную точку доступа Windows.
 	HotspotDirect bool `json:"hotspotDirect,omitempty"`
+	// FakeIP, RealIPHosts — подставные адреса в DNS режима VPN и «всегда
+	// настоящий адрес» (см. config.Config).
+	FakeIP      bool     `json:"fakeIP,omitempty"`
+	RealIPHosts []string `json:"realIPHosts,omitempty"`
 
 	// Mobile — раздел телефона (DNS, режим блокировки рекламы, белый список,
 	// выбранные приложения). Компьютер его не понимает, но и не теряет:

@@ -38,6 +38,8 @@ func (t *Tunnel) rules() core.Rules {
 		Policy:         policy,
 		Direct:         direct,
 		Tunneled:       tunneled,
+		FakeIP:         t.fakeIP.Load(),
+		RealIP:         t.realIP.Load(),
 	}
 }
 
@@ -48,9 +50,17 @@ func (t *Tunnel) Rules() core.Rules { return t.rules() }
 // Адрес, выданный нашим DNS «настоящим» под имя из «всегда напрямую»,
 // сверяется со списками по этому имени (см. LearnDirect).
 func (t *Tunnel) decide(process, target string) (core.Route, core.Conn) {
-	c := core.Conn{Process: process, Target: target}
-	if name, ok := t.learnedName(target); ok {
-		c.Name = name
+	return t.decideNamed(process, target, "")
+}
+
+// decideNamed — то же, но имя соединения уже известно (из его первых байтов,
+// см. sniff.go): оно точнее таблицы, где на один адрес CDN бывает много имён.
+func (t *Tunnel) decideNamed(process, target, name string) (core.Route, core.Conn) {
+	c := core.Conn{Process: process, Target: target, Name: name}
+	if c.Name == "" {
+		if learned, ok := t.learnedName(target); ok {
+			c.Name = learned
+		}
 	}
 	return core.Decide(t.rules(), c), c
 }
@@ -144,6 +154,9 @@ func (t *Tunnel) ApplyHygiene(h core.Hygiene) int {
 		}
 	}
 	t.live.mu.Unlock()
+	if h.ResetFakeIP {
+		t.resetServerDNS()
+	}
 	for _, v := range victims {
 		v.close()
 	}
@@ -266,20 +279,25 @@ func (c *pinnedConn) CloseWrite() error {
 
 // RouteUDP решает, что делать с UDP-потоком приложения из стека: src —
 // откуда (по нему находится программа), target — куда (имя, если адрес был
-// подставным). nil — не брать: стек ответит «порт недоступен», и браузер
-// сразу перейдёт с QUIC на TCP.
+// подставным), first — первая датаграмма (из пакета Initial QUIC берётся
+// имя, см. core.SniffQUIC). nil — не брать: стек ответит «порт недоступен»,
+// и браузер сразу перейдёт с QUIC на TCP.
 //
 // Напрямую — для исключённых программ и целей «всегда напрямую»: им UDP
 // нужен как без программы (NetBird и WireGuard, звонки, игры). Через сервер
 // — только через ретранслятор UDP, если он есть. В сеть устройств UDP не
 // ходит.
-func (t *Tunnel) RouteUDP(src netip.AddrPort, target string, byIP bool) func(app net.Conn) {
+func (t *Tunnel) RouteUDP(src netip.AddrPort, target string, byIP bool, first []byte) func(app net.Conn) {
 	var proc string
 	var pid int
 	if t.cfg.TunProcessRules {
 		proc, pid = procinfo.LookupUDP(src.Port())
 	}
-	route, c := t.decide(proc, target)
+	var name string
+	if byIP && t.sniffWanted(target) {
+		name = core.SniffQUIC(first)
+	}
+	route, c := t.decideNamed(proc, target, name)
 	switch route {
 	case core.RouteDirect:
 		return func(app net.Conn) { t.serveUDPDirect(app, c, proc, pid, byIP, t.udpOwner(proc, src)) }

@@ -32,8 +32,13 @@ type Layer struct {
 	// current — туннель, куда сейчас идут соединения из адаптера.
 	current atomic.Pointer[tunnel.Tunnel]
 
-	mu      sync.Mutex
-	direct  *routing.DirectList
+	mu     sync.Mutex
+	direct *routing.DirectList
+	// fakeIP, realIP — чем отвечает наш DNS (галочка «Подставные адреса» и
+	// «всегда настоящий адрес», см. ApplyConfig). realIP — один объект на всё
+	// время жизни, настройки меняют содержимое.
+	fakeIP  bool
+	realIP  *routing.DirectList
 	engine  *core.Engine
 	up      bool
 	unwatch func()
@@ -60,11 +65,18 @@ type Layer struct {
 }
 
 // ApplyConfig принимает общие настройки программы (реализует app.ConfigLayer):
-// раздавать ли VPN на мобильную точку доступа Windows.
+// раздавать ли VPN на мобильную точку доступа Windows, чем отвечать нашему
+// DNS. Гигиену после смены DNS делает ядро (Machine.ReapplyDNS, см.
+// app.SetConfig).
 func (l *Layer) ApplyConfig(cfg config.Config) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.sys.setShare(!cfg.HotspotDirect)
+	l.fakeIP = cfg.FakeIP
+	l.realIP.Set(routing.CleanEntries(cfg.RealIPHosts))
+	if t := l.current.Load(); t != nil {
+		t.SetDNSMode(l.fakeIP, l.realIP)
+	}
 }
 
 // PrepareSelfCheck пускает проверочное соединение самопроверки мимо адаптера
@@ -84,7 +96,7 @@ func (l *Layer) SetNetworkHook(f func()) {
 
 // New готовит слой. Адаптер появится только при подключении.
 func New(bus *events.Bus) *Layer {
-	return &Layer{bus: bus, sys: newSys(bus), block: core.NewBlockList(nil, nil)}
+	return &Layer{bus: bus, sys: newSys(bus), block: core.NewBlockList(nil, nil), realIP: routing.NewDirectList(nil)}
 }
 
 // Prepare вызывается перед созданием каждого туннеля.
@@ -100,6 +112,7 @@ func (l *Layer) Prepare(cfg *tunnel.Config) {
 
 	l.mu.Lock()
 	l.direct = cfg.Direct
+	cfg.FakeIP, cfg.RealIP = l.fakeIP, l.realIP
 	l.mu.Unlock()
 }
 
@@ -118,6 +131,7 @@ func (l *Layer) Apply(tun *tunnel.Tunnel, p config.Profile, m core2.Modes, h cor
 	defer l.mu.Unlock()
 
 	l.current.Store(tun)
+	tun.SetDNSMode(l.fakeIP, l.realIP)
 	l.servers, l.sshPort = servers, p.SSHPort
 	wasUp, prev := l.up, l.modes
 	l.modes = m
@@ -285,6 +299,23 @@ func (l *Layer) startStack(dev core.Device) error {
 			}
 			return core2.DecideDNS(t.Rules(), name) == core2.DNSReal
 		},
+		// Имена «через сервер» — настоящим адресом, разрешённым через
+		// сервер (по умолчанию), или подставным (галочка «Подставные
+		// адреса»): тоже решает ядро.
+		Remote: func(name string) bool {
+			t := l.current.Load()
+			if t == nil {
+				return false
+			}
+			return core2.DecideDNS(t.Rules(), name) == core2.DNSServer
+		},
+		RemoteResolve: func(name string) ([]net.IP, error) {
+			t := l.current.Load()
+			if t == nil {
+				return nil, errors.New("нет связи с сервером")
+			}
+			return t.LookupViaServer(name)
+		},
 		Local: func(name string) ([]net.IP, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -387,12 +418,12 @@ type coreSwitch Layer
 
 // RouteUDP — UDP-поток из адаптера: куда его вести, решает ядро через
 // текущий туннель (см. tunnel.RouteUDP).
-func (c *coreSwitch) RouteUDP(src netip.AddrPort, target string, byIP bool) func(net.Conn) {
+func (c *coreSwitch) RouteUDP(src netip.AddrPort, target string, byIP bool, first []byte) func(net.Conn) {
 	t := (*Layer)(c).current.Load()
 	if t == nil {
 		return nil
 	}
-	return t.RouteUDP(src, target, byIP)
+	return t.RouteUDP(src, target, byIP, first)
 }
 
 func (c *coreSwitch) ServeConn(conn net.Conn, target string, byIP bool) {

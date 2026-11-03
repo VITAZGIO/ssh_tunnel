@@ -272,20 +272,20 @@ func friendlyTools() []Tool {
 			InputSchema: schema(map[string]any{"on": prop("boolean", "true — включить, false — выключить")}, "on"),
 			Annotations: map[string]any{"destructiveHint": true},
 			call:        button("mesh")},
-		{Name: "get_rules", Description: "Правила активного сервера: filterMode (all — все программы через туннель, only — только filterApps, except — все кроме filterApps), directHosts — всегда напрямую, tunnelHosts — всегда через сервер.",
+		{Name: "get_rules", Description: "Правила активного сервера: filterMode (all — все программы через туннель, only — только filterApps, except — все кроме filterApps), directHosts — всегда напрямую, tunnelHosts — всегда через сервер, fakeIP — подставные адреса в DNS режима VPN, realIPHosts — имена, которым подставной адрес не выдаётся никогда.",
 			InputSchema: schema(map[string]any{}), Annotations: map[string]any{"readOnlyHint": true},
 			call: func(c *Client, _ map[string]any) (string, error) { return doJSON(c, "GET", "/api/rules", nil) }},
-		{Name: "add_rule", Description: "Добавить правило: list=direct — адрес всегда напрямую, tunnel — всегда через сервер, apps — программа в список фильтра. Применяется сразу.",
+		{Name: "add_rule", Description: "Добавить правило: list=direct — адрес всегда напрямую, tunnel — всегда через сервер, apps — программа в список фильтра, realip — имя всегда с настоящим адресом в DNS (для программ, которые проверяют адрес). Применяется сразу.",
 			InputSchema: schema(map[string]any{
-				"list":  prop("string", "какой список", "direct", "tunnel", "apps"),
+				"list":  prop("string", "какой список", "direct", "tunnel", "apps", "realip"),
 				"value": prop("string", "домен (youtube.com), адрес, сеть (10.0.0.0/8) или программа (steam.exe)"),
 			}, "list", "value"),
 			call: func(c *Client, a map[string]any) (string, error) {
 				return doJSON(c, "POST", "/api/rules", map[string]string{"op": "add", "list": str(a, "list"), "value": str(a, "value")})
 			}},
-		{Name: "remove_rule", Description: "Убрать правило из списка direct, tunnel или apps.",
+		{Name: "remove_rule", Description: "Убрать правило из списка direct, tunnel, apps или realip.",
 			InputSchema: schema(map[string]any{
-				"list":  prop("string", "какой список", "direct", "tunnel", "apps"),
+				"list":  prop("string", "какой список", "direct", "tunnel", "apps", "realip"),
 				"value": prop("string", "что убрать"),
 			}, "list", "value"),
 			call: func(c *Client, a map[string]any) (string, error) {

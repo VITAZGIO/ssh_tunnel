@@ -27,6 +27,14 @@ If the icon is not visible, press the "^" arrow next to the clock. To quit —
 right-click the icon → "Quit". Separate windows (the Book, apps) live on their
 own and close with their own close button.
 
+## A program says "non-public IP address"
+
+Programs that check a site's address before connecting answer like this when
+**"Fake addresses (fake-IP)"** is checked: a `198.18.x.x` address looks
+internal to them. Uncheck it or add the site name to **"Always real address"**
+(for example `.deepseek.com`). Excluding the program from the VPN does not
+help: on Windows DNS is asked by the system, not by the program.
+
 ## The router, printer or NAS does not open
 
 The local network goes directly by default. If "local network through the

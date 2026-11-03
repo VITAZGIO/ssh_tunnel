@@ -59,7 +59,7 @@ func (s *Server) coreRoutes() []route {
 		{"/api/bypass", "POST", "Круглая кнопка: {\"on\":bool}. Ждёт результата.", s.handleBypass},
 		{"/api/meshmode", "POST", "Кнопка «Сеть устройств»: {\"on\":bool}. Ждёт результата.", s.handleMeshMode},
 		{"/api/config", "GET, POST", "Настройки целиком (config.Config). POST сохраняет; правила применяются сразу.", s.handleConfig},
-		{"/api/rules", "GET, POST", "Правила активного сервера: filterMode, filterApps, directHosts (всегда напрямую), tunnelHosts (всегда через сервер). POST {\"op\":\"add|remove\",\"list\":\"direct|tunnel|apps\",\"value\"} или {\"filterMode\":\"all|only|except\"}.", s.handleRules},
+		{"/api/rules", "GET, POST", "Правила активного сервера: filterMode, filterApps, directHosts (всегда напрямую), tunnelHosts (всегда через сервер), fakeIP (подставные адреса в DNS режима VPN), realIPHosts (всегда настоящий адрес). POST {\"op\":\"add|remove\",\"list\":\"direct|tunnel|apps|realip\",\"value\"}, {\"filterMode\":\"all|only|except\"} или {\"fakeIP\":true|false}.", s.handleRules},
 		{"/api/profile/add", "POST", "Новый сервер {\"name\",\"flag\"}; активным не становится.", s.handleProfileAdd},
 		{"/api/profile/remove", "POST", "Удалить сервер {\"id\"}.", s.handleProfileRemove},
 		{"/api/profile/select", "POST", "Сделать сервер активным {\"id\"}; включённое переподключается к нему.", s.handleProfileSelect},

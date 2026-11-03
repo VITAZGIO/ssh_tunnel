@@ -11,6 +11,11 @@ package core
 // рабочая сеть. Их надо разрешать по-настоящему и локально, для чего нужен
 // резолвер самой системы (на Android его предоставляет Kotlin-часть, потому
 // что файла /etc/resolv.conf там нет).
+//
+// На компьютере с ТЗ 9 подставной адрес — только по галочке: по умолчанию
+// имя «через сервер» разрешается через сам сервер (Remote) и программа
+// получает настоящий адрес — подставной 198.18.x.x ломал программы, которые
+// проверяют адрес перед соединением.
 
 import (
 	"errors"
@@ -37,6 +42,12 @@ type DNS struct {
 	// ушло бы в туннель вместо домашней сети.
 	Local LocalResolve
 
+	// Remote говорит, что имя получает настоящий адрес, разрешённый через
+	// сервер (core.DNSServer), а не подставной. RemoteResolve так его и
+	// разрешает; не задан — отказ. nil — таких имён нет (всё подставными).
+	Remote        func(name string) bool
+	RemoteResolve LocalResolve
+
 	// Static отвечает за «свои» имена — устройства сети устройств
 	// («ноутбук.mesh»): ours=true значит «это имя моё», и тогда ответом будут
 	// ips (пусто — такого имени нет). Такие имена не получают подставной
@@ -56,9 +67,16 @@ type DNS struct {
 	// TTL ответа в секундах. Держим маленьким: подставные адреса
 	// переиспользуются, и залежавшийся ответ в кеше приложения будет мешать.
 	TTL uint32
+	// RealTTL — TTL настоящих адресов (Local, RemoteResolve); 0 — 60 с:
+	// переиспользования у них нет, а каждый запрос через сервер стоит
+	// времени.
+	RealTTL uint32
 }
 
-const defaultTTL = 10
+const (
+	defaultTTL     = 10
+	defaultRealTTL = 60
+)
 
 // Answer разбирает запрос и готовит ответ. Возвращает пакет для отправки
 // обратно приложению.
@@ -130,9 +148,16 @@ func (d *DNS) Answer(query []byte) ([]byte, error) {
 	addrs := static
 	if !isStatic {
 		var err error
-		addrs, err = d.resolve(name)
+		var fake bool
+		addrs, fake, err = d.resolve(name)
 		if err != nil {
 			return refuse(h, q, dnsmessage.RCodeServerFailure)
+		}
+		if !fake {
+			ttl = d.RealTTL
+			if ttl == 0 {
+				ttl = defaultRealTTL
+			}
 		}
 	}
 	for _, ip := range addrs {
@@ -155,18 +180,27 @@ func (d *DNS) Answer(query []byte) ([]byte, error) {
 	return reply.Finish()
 }
 
-// resolve решает, каким адресом ответить: подставным или настоящим.
-func (d *DNS) resolve(name string) ([]net.IP, error) {
+// resolve решает, каким адресом ответить: настоящим из настоящей сети,
+// настоящим через сервер или подставным (fake).
+func (d *DNS) resolve(name string) (ips []net.IP, fake bool, err error) {
 	if d.Direct != nil && d.Direct(name) {
 		if d.Local == nil {
-			return nil, errors.New("нет резолвера для имён, идущих мимо туннеля")
+			return nil, false, errors.New("нет резолвера для имён, идущих мимо туннеля")
 		}
-		return d.Local(name)
+		ips, err = d.Local(name)
+		return ips, false, err
+	}
+	if d.Remote != nil && d.Remote(name) {
+		if d.RemoteResolve == nil {
+			return nil, false, errors.New("нет резолвера через сервер")
+		}
+		ips, err = d.RemoteResolve(name)
+		return ips, false, err
 	}
 	if d.Pool == nil {
-		return nil, errors.New("не задан пул подставных адресов")
+		return nil, false, errors.New("не задан пул подставных адресов")
 	}
-	return []net.IP{d.Pool.Get(name)}, nil
+	return []net.IP{d.Pool.Get(name)}, true, nil
 }
 
 func refuse(h dnsmessage.Header, q dnsmessage.Question, code dnsmessage.RCode) ([]byte, error) {

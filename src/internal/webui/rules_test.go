@@ -54,6 +54,17 @@ func TestRules(t *testing.T) {
 	if !s.app.Config().SysProxy {
 		t.Fatal("правила задели другие настройки")
 	}
+
+	// DNS режима VPN (ТЗ 9): общий для всех серверов.
+	if r = do(`{"op":"add","list":"realip","value":".deepseek.com"}`); len(r.RealIPHosts) != 1 || r.FakeIP {
+		t.Fatalf("realip: %+v", r)
+	}
+	if r = do(`{"fakeIP":true}`); !r.FakeIP || !s.app.Config().FakeIP || len(r.RealIPHosts) != 1 {
+		t.Fatalf("fakeIP: %+v", r)
+	}
+	if r = do(`{"fakeIP":false}`); r.FakeIP {
+		t.Fatal("fakeIP не выключился")
+	}
 }
 
 // TestAppKeyGuard — ключ программы с Origin: null (страница в песочнице) не

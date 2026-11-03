@@ -134,6 +134,12 @@ type Config struct {
 	// САМОГО сервера, а не своя.
 	LocalViaTunnel bool
 
+	// FakeIP — наш DNS в режиме VPN отвечает подставными адресами (галочка
+	// «Подставные адреса», core.Rules.FakeIP); RealIP — «всегда настоящий
+	// адрес». Меняются на ходу (SetDNSMode).
+	FakeIP bool
+	RealIP *routing.DirectList
+
 	// UDPRelayEnabled — пробрасывать ли UDP (звонки, игры, QUIC) через
 	// ретранслятор на сервере (см. sshtunnel/internal/udprelay,
 	// sshtunnel/cmd/udprelay) вместо молчаливого отказа. По умолчанию
@@ -215,6 +221,12 @@ type Tunnel struct {
 	// в cfg: перезапускать туннель ради галочки не надо.
 	localViaTunnel atomic.Bool
 
+	// fakeIP, realIP — чем отвечает наш DNS (см. SetDNSMode).
+	fakeIP atomic.Bool
+	realIP atomic.Pointer[routing.DirectList]
+	// sdns — ответы, полученные через сервер (см. LookupViaServer).
+	sdns serverDNS
+
 	// kickMu и kick — сигнал «пересобрать пул немедленно», см. Kick.
 	kickMu sync.Mutex
 	kick   chan struct{}
@@ -262,8 +274,9 @@ type Tunnel struct {
 	// сети устройств, а всё остальное идёт напрямую (см. SetBypass).
 	bypassOff atomic.Bool
 
-	// learned — адреса имён из «всегда напрямую» (см. LearnDirect): выданные
-	// нашим DNS и разрешённые заранее (см. directnames.go).
+	// learned — адреса, выданные нашим DNS, и их имена (см. LearnName): имена
+	// «всегда напрямую», разрешённые заранее (directnames.go), и ответы через
+	// сервер (serverdns.go).
 	learned learnedDirect
 	dnames  directNames
 
@@ -285,8 +298,17 @@ type stats struct {
 func New(cfg Config, bus *events.Bus) *Tunnel {
 	t := &Tunnel{cfg: cfg, bus: bus}
 	t.localViaTunnel.Store(cfg.LocalViaTunnel)
+	t.SetDNSMode(cfg.FakeIP, cfg.RealIP)
 	t.state.Store(events.StateStopped)
 	return t
+}
+
+// SetDNSMode — чем отвечает наш DNS режима VPN: подставными адресами (fake)
+// или настоящими через сервер; real — имена, которым подставной не выдаётся
+// никогда. Гигиену (сброс таблиц и соединений) делает ядро: Machine.ReapplyDNS.
+func (t *Tunnel) SetDNSMode(fake bool, real *routing.DirectList) {
+	t.fakeIP.Store(fake)
+	t.realIP.Store(real)
 }
 
 // SetLocalViaTunnel переключает обработку локальной сети без перезапуска.

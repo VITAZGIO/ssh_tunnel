@@ -20,7 +20,8 @@ In PowerShell (on Linux — `ssh_tunnel_linux` instead of `ssh_tunnel.exe`):
   always direct, `rules add tunnel site.com` — always via the server,
   `rules add app steam.exe` — a program into the filter list,
   `rules remove …` — remove, `rules mode only` — only listed programs go
-  through the tunnel.
+  through the tunnel. `rules fakeip on|off` — fake addresses in VPN-mode DNS,
+  `rules add realip .deepseek.com` — the name always gets its real address.
 - `ssh_tunnel.exe apps` — more apps: `apps add calendar`, `apps remove …`,
   `apps star …`, `apps on …`, `apps off …`.
 - `ssh_tunnel.exe check` — self-check, `check site youtube.com` — check a

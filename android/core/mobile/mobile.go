@@ -186,6 +186,10 @@ func (t *Tunnel) Configure(
 		LocalViaTunnel:  localViaTunnel,
 		ProtectSocket:   t.protect,
 		UDPRelayEnabled: udpRelayEnabled,
+		// Телефон пока на подставных адресах, как до ТЗ 9: настоящие адреса
+		// через сервер сделаны и проверены на компьютере, на телефоне — после
+		// проверки на живом устройстве (docs/decisions.md, 2026-11-03).
+		FakeIP: true,
 
 		// Локальных прокси на телефоне нет: соединения приходят из пакетов,
 		// а не с портов 1080 и 1081.

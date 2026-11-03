@@ -42,12 +42,13 @@ type Core interface {
 }
 
 // UDPCore — необязательное расширение Core: решение «куда» для UDP. RouteUDP
-// получает, откуда поток (по этому адресу находится программа) и куда он
-// идёт (имя, если адрес был подставным), и отдаёт обработчик потока — или nil,
+// получает, откуда поток (по этому адресу находится программа), куда он
+// идёт (имя, если адрес был подставным) и первую датаграмму (в ней у QUIC
+// имя сайта), и отдаёт обработчик потока — или nil,
 // если поток не брать (стек ответит «порт недоступен»). Без него UDP, кроме
 // DNS, идёт как раньше: через UDPRelay или отказом.
 type UDPCore interface {
-	RouteUDP(src netip.AddrPort, target string, byIP bool) func(conn net.Conn)
+	RouteUDP(src netip.AddrPort, target string, byIP bool, first []byte) func(conn net.Conn)
 }
 
 // Resolver превращает адрес назначения обратно в имя хоста.
@@ -283,7 +284,9 @@ func StartDevice(dev device.Device, h *Handler) (*Engine, error) {
 	// Остальной UDP — через ретранслятор на сервере, если включено (см.
 	// UDPRelay). Отдельный forwarder, а не общий с DNS: тому всегда нужен
 	// serveDNS, а этому — только когда клиент ретранслятора вообще поднят.
-	udpRelayFwd := udp.NewForwarder(s, func(r *udp.ForwarderRequest) bool {
+	// first — первая датаграмма потока: forwarder её не показывает, а QUIC
+	// называет в ней сайт (см. RouteUDP).
+	relayUDP := func(r *udp.ForwarderRequest, first []byte) bool {
 		id := r.ID()
 		if uc, ok := h.Core.(UDPCore); ok {
 			target, byIP, stale := h.target(id.LocalAddress, id.LocalPort)
@@ -291,7 +294,7 @@ func StartDevice(dev device.Device, h *Handler) (*Engine, error) {
 				return false
 			}
 			src := netip.AddrPortFrom(addrOf(id.RemoteAddress), id.RemotePort)
-			serve := uc.RouteUDP(src, target, byIP)
+			serve := uc.RouteUDP(src, target, byIP, first)
 			if serve == nil {
 				return false
 			}
@@ -317,14 +320,23 @@ func StartDevice(dev device.Device, h *Handler) (*Engine, error) {
 		}
 		go h.serveUDPRelay(gonet.NewUDPConn(&wq, ep), r.ID(), relay)
 		return true
-	})
+	}
 
 	s.SetTransportProtocolHandler(udp.ProtocolNumber,
 		func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
 			if id.LocalPort == 53 && h.DNS != nil {
 				return udpFwd.HandlePacket(id, pkt)
 			}
-			if udpRelayFwd.HandlePacket(id, pkt) {
+			// Сюда приходят только новые потоки (у живых уже есть точка),
+			// поэтому forwarder на каждый — недорого, а первая датаграмма
+			// не делится между пакетами разных потоков. Копия — только для
+			// 443 (QUIC): больше она нигде не нужна.
+			var first []byte
+			if id.LocalPort == 443 {
+				first = pkt.Data().AsRange().Capped(2048).ToSlice()
+			}
+			fwd := udp.NewForwarder(s, func(r *udp.ForwarderRequest) bool { return relayUDP(r, first) })
+			if fwd.HandlePacket(id, pkt) {
 				return true
 			}
 			h.Stats.udp()

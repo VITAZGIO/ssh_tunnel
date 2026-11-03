@@ -20,6 +20,8 @@
   всегда напрямую, `rules add tunnel site.ru` — всегда через сервер,
   `rules add app steam.exe` — программа в список фильтра, `rules remove …` —
   убрать, `rules mode only` — через туннель только программы из списка.
+  `rules fakeip on|off` — подставные адреса в DNS режима VPN, `rules add realip
+  .deepseek.com` — имени всегда настоящий адрес.
 - `ssh_tunnel.exe apps` — дополнительные приложения: `apps add calendar`,
   `apps remove …`, `apps star …`, `apps on …`, `apps off …`.
 - `ssh_tunnel.exe check` — самопроверка, `check site youtube.com` —
