@@ -48,6 +48,15 @@ type Rules struct {
 	// всех правил, кроме сети устройств). nil — список пуст.
 	Direct   *routing.DirectList
 	Tunneled *routing.DirectList
+	// FakeIP — галочка «Подставные адреса (fake-IP)»: наш DNS отвечает на
+	// имена «через сервер» выдуманными адресами 198.18.x.x, как до ТЗ 9.
+	// Выключена (по умолчанию) — настоящими адресами, разрешёнными через
+	// сервер; имя для решения ядро узнаёт из соединения (SniffHost) или из
+	// таблицы недавних ответов.
+	FakeIP bool
+	// RealIP — «всегда настоящий адрес»: имена, которым подставной адрес не
+	// выдаётся и с галочкой (программы, которые проверяют адрес). nil — пусто.
+	RealIP *routing.DirectList
 }
 
 // Conn — что известно о соединении в момент решения.
@@ -148,6 +157,31 @@ type Hygiene struct {
 	// FlushDNS — сбросить DNS-кэш системы: ответы старого режима (подставные
 	// адреса или, наоборот, настоящие) не должны пережить переключение.
 	FlushDNS bool
+}
+
+// DNSModeChanged — гигиена смены ответов нашего DNS (галочка «Подставные
+// адреса», список «всегда настоящий адрес») в режиме m: как при смене круглой
+// кнопки — таблица подставных адресов забывается, DNS-кэш системы
+// сбрасывается, соединения из адаптера закрываются, и приложения спрашивают
+// имена заново уже у нового DNS.
+func DNSModeChanged(m Modes) Hygiene {
+	return Hygiene{
+		ResetFakeIP:        true,
+		FlushDNS:           true,
+		CloseStackInternet: m.Bypass,
+		Reevaluate:         true,
+	}
+}
+
+// Merge — обе гигиены сразу.
+func (h Hygiene) Merge(o Hygiene) Hygiene {
+	return Hygiene{
+		ResetFakeIP:        h.ResetFakeIP || o.ResetFakeIP,
+		CloseStackInternet: h.CloseStackInternet || o.CloseStackInternet,
+		CloseMesh:          h.CloseMesh || o.CloseMesh,
+		Reevaluate:         h.Reevaluate || o.Reevaluate,
+		FlushDNS:           h.FlushDNS || o.FlushDNS,
+	}
 }
 
 // Any — есть что делать.

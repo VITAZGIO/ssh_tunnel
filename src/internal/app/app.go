@@ -251,13 +251,22 @@ func (a *App) SetConfig(cfg config.Config) (string, error) {
 	// Правила поменялись — ядро применяет режим заново: соединения, которые
 	// по новым правилам пошли бы другим путём, закрываются и открываются
 	// заново уже по ним.
-	if running && rulesChanged(old.Active(), active) {
+	if running && dnsModeChanged(old, cfg) {
+		// Поменялось, чем отвечает наш DNS, — гигиена как при смене режима:
+		// таблица подставных адресов, DNS-кэш системы, соединения из адаптера.
+		a.machine.ReapplyDNS()
+	} else if running && rulesChanged(old.Active(), active) {
 		a.machine.Reapply()
 	}
 	if running && connectionSettingsChanged(old, cfg) {
 		return "часть настроек вступит в силу после переподключения", nil
 	}
 	return "", nil
+}
+
+// dnsModeChanged — поменялось, чем отвечает наш DNS режима VPN.
+func dnsModeChanged(a, b config.Config) bool {
+	return a.FakeIP != b.FakeIP || strings.Join(a.RealIPHosts, "\n") != strings.Join(b.RealIPHosts, "\n")
 }
 
 // rulesChanged — поменялись правила «куда» у активного сервера.

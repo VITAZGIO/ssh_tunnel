@@ -48,10 +48,10 @@ func TestDecide(t *testing.T) {
 func TestDecideDNS(t *testing.T) {
 	r := Rules{Bypass: true, Direct: routing.NewDirectList([]string{".netbird.io"}), Tunneled: routing.NewDirectList([]string{"x.netbird.io"})}
 	cases := map[string]DNSAnswer{
-		"youtube.com":          DNSFake,
+		"youtube.com":          DNSServer, // по умолчанию — настоящий адрес через сервер
 		"api.netbird.io":       DNSReal,
-		"x.netbird.io":         DNSFake, // «всегда через сервер» сильнее
-		"nas":                  DNSReal, // имя без точки — локальное
+		"x.netbird.io":         DNSServer, // «всегда через сервер» сильнее
+		"nas":                  DNSReal,   // имя без точки — локальное
 		"printer.local":        DNSReal,
 		"ноутбук.mesh.":        DNSMesh,
 		"Server.MESH":          DNSMesh,
@@ -64,6 +64,35 @@ func TestDecideDNS(t *testing.T) {
 	}
 	if got := DecideDNS(Rules{Mesh: true}, "youtube.com"); got != DNSReal {
 		t.Errorf("без обхода имена должны разрешаться по-настоящему, получено %d", got)
+	}
+
+	// Галочка «Подставные адреса» — старое поведение, кроме «всегда
+	// настоящий адрес».
+	r.FakeIP = true
+	r.RealIP = routing.NewDirectList([]string{".deepseek.com"})
+	for name, want := range map[string]DNSAnswer{
+		"youtube.com":           DNSFake,
+		"x.netbird.io":          DNSFake,
+		"api-docs.deepseek.com": DNSServer,
+		"api.netbird.io":        DNSReal,
+		"nas":                   DNSReal,
+	} {
+		if got := DecideDNS(r, name); got != want {
+			t.Errorf("с fake-IP %s: %d, ожидалось %d", name, got, want)
+		}
+	}
+}
+
+func TestDNSModeChanged(t *testing.T) {
+	h := DNSModeChanged(Modes{Bypass: true})
+	if !h.ResetFakeIP || !h.FlushDNS || !h.CloseStackInternet || !h.Reevaluate {
+		t.Errorf("в «Обходе»: %+v", h)
+	}
+	if h := DNSModeChanged(Modes{Mesh: true}); h.CloseStackInternet || !h.FlushDNS {
+		t.Errorf("без обхода интернет в адаптере не ходит, закрывать нечего: %+v", h)
+	}
+	if m := (Hygiene{CloseMesh: true}).Merge(Hygiene{FlushDNS: true}); !m.CloseMesh || !m.FlushDNS || m.ResetFakeIP {
+		t.Errorf("Merge: %+v", m)
 	}
 }
 

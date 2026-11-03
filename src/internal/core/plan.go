@@ -103,9 +103,10 @@ func PlanVPN(m Modes, o PlanOptions) VPNPlan {
 type DNSAnswer int
 
 const (
-	DNSFake DNSAnswer = iota // подставным адресом: соединение пойдёт через сервер, имя разрешит он
-	DNSReal                  // настоящим адресом из DNS настоящей сети: соединение пойдёт напрямую
-	DNSMesh                  // адресом устройства из сети устройств
+	DNSFake   DNSAnswer = iota // подставным адресом: соединение пойдёт через сервер, имя разрешит он
+	DNSReal                    // настоящим адресом из DNS настоящей сети: соединение пойдёт напрямую
+	DNSMesh                    // адресом устройства из сети устройств
+	DNSServer                  // настоящим адресом, разрешённым через сервер: провайдер DNS не видит и не подменит
 )
 
 // DecideDNS — чем отвечать на DNS-запрос имени. Та же логика, что Decide,
@@ -113,6 +114,12 @@ const (
 // служба, а не программа, поэтому по DNS программу не узнать — правила по
 // программам действуют уже на соединении (см. Decide и подставные адреса у
 // исключённых программ в tunnel).
+//
+// Имена «через сервер» по умолчанию получают настоящий адрес, разрешённый
+// через сервер (DNSServer): программы, которые проверяют адрес перед
+// соединением (защита от SSRF, списки по IP), подставной 198.18.x.x считают
+// внутренним и отказываются. Подставной — только с галочкой FakeIP и не для
+// имён из «всегда настоящий адрес».
 func DecideDNS(r Rules, name string) DNSAnswer {
 	n := strings.TrimSuffix(strings.ToLower(name), ".")
 	if strings.HasSuffix(n, mesh.Suffix) {
@@ -122,7 +129,7 @@ func DecideDNS(r Rules, name string) DNSAnswer {
 		return DNSReal
 	}
 	if r.Tunneled != nil && r.Tunneled.Match(n) {
-		return DNSFake
+		return viaServer(r, n)
 	}
 	if !r.LocalViaTunnel && routing.IsLocalHost(n) {
 		return DNSReal
@@ -130,5 +137,13 @@ func DecideDNS(r Rules, name string) DNSAnswer {
 	if r.Direct != nil && r.Direct.Match(n) {
 		return DNSReal
 	}
-	return DNSFake
+	return viaServer(r, n)
+}
+
+// viaServer — ответ для имени, которое пойдёт через сервер.
+func viaServer(r Rules, n string) DNSAnswer {
+	if r.FakeIP && (r.RealIP == nil || !r.RealIP.Match(n)) {
+		return DNSFake
+	}
+	return DNSServer
 }

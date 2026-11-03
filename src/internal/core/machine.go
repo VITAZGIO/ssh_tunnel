@@ -81,6 +81,7 @@ type Machine struct {
 	applied    Modes // что применено к системе
 	hasApplied bool
 	reapply    bool // применить заново, даже если режим тот же
+	reapplyDNS bool // и с гигиеной смены ответов DNS (DNSModeChanged)
 	restart    bool // переподключиться (сменился сервер)
 
 	pending  bool   // reconcile запрошен и ещё не прошёл
@@ -168,6 +169,16 @@ func (m *Machine) Restart() {
 func (m *Machine) Reapply() {
 	m.mu.Lock()
 	m.reapply = true
+	m.mu.Unlock()
+	m.poke()
+}
+
+// ReapplyDNS — то же, что Reapply, но поменялось, чем отвечает наш DNS
+// (галочка «Подставные адреса», список «всегда настоящий адрес»): гигиена как
+// при смене режима (DNSModeChanged), без перезагрузки и переподключения.
+func (m *Machine) ReapplyDNS() {
+	m.mu.Lock()
+	m.reapply, m.reapplyDNS = true, true
 	m.mu.Unlock()
 	m.poke()
 }
@@ -462,7 +473,8 @@ func (m *Machine) step() {
 		return
 	}
 	prev, had := m.applied, m.hasApplied
-	m.reapply = false
+	dnsChanged := m.reapplyDNS
+	m.reapply, m.reapplyDNS = false, false
 	m.mu.Unlock()
 
 	h := Transition(prev, modes)
@@ -470,6 +482,8 @@ func (m *Machine) step() {
 		// Первое применение на свежей связи: система сейчас как без нас —
 		// снимать и пересчитывать нечего, но DNS-кэш сбросить надо.
 		h = Hygiene{FlushDNS: true}
+	} else if dnsChanged {
+		h = h.Merge(DNSModeChanged(modes))
 	}
 	err := m.drv.Apply(modes, h)
 

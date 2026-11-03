@@ -239,11 +239,11 @@ func (r *runner) rules(a []string) (int, error) {
 	if len(a) == 0 {
 		return r.call("GET", "/api/rules", nil)
 	}
-	lists := map[string]string{"direct": "direct", "tunnel": "tunnel", "app": "apps", "apps": "apps"}
+	lists := map[string]string{"direct": "direct", "tunnel": "tunnel", "app": "apps", "apps": "apps", "realip": "realip"}
 	switch a[0] {
 	case "add", "remove":
 		if len(a) < 3 || lists[a[1]] == "" {
-			return exitUsage, fmt.Errorf("rules %s direct|tunnel|app <значение>", a[0])
+			return exitUsage, fmt.Errorf("rules %s direct|tunnel|app|realip <значение>", a[0])
 		}
 		return r.call("POST", "/api/rules", map[string]string{"op": a[0], "list": lists[a[1]], "value": strings.Join(a[2:], " ")})
 	case "mode":
@@ -251,8 +251,13 @@ func (r *runner) rules(a []string) (int, error) {
 			return exitUsage, errors.New("rules mode all|only|except")
 		}
 		return r.call("POST", "/api/rules", map[string]string{"filterMode": a[1]})
+	case "fakeip":
+		if len(a) < 2 || (a[1] != "on" && a[1] != "off") {
+			return exitUsage, errors.New("rules fakeip on|off")
+		}
+		return r.call("POST", "/api/rules", map[string]bool{"fakeIP": a[1] == "on"})
 	}
-	return exitUsage, errors.New("rules | rules add|remove direct|tunnel|app <значение> | rules mode all|only|except")
+	return exitUsage, errors.New("rules | rules add|remove direct|tunnel|app|realip <значение> | rules mode all|only|except | rules fakeip on|off")
 }
 
 func (r *runner) apps(a []string) (int, error) {
@@ -575,6 +580,8 @@ func help(name string, w io.Writer) int {
                                    app — программа в списке фильтра)
   %[1]s rules remove direct youtube.com
   %[1]s rules mode all|only|except какие программы через туннель
+  %[1]s rules add realip .deepseek.com  всегда настоящий адрес в DNS режима VPN
+  %[1]s rules fakeip on|off        подставные адреса (fake-IP) в DNS режима VPN
   %[1]s apps                       дополнительные приложения
   %[1]s apps add|remove|star|unstar|on|off <id>
   %[1]s apps install app.zip [--yes]   своё приложение из файла

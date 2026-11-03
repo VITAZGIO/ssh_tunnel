@@ -14,6 +14,10 @@ import (
 // в /api/config, — но без ключей и остальных настроек: адрес нужен командам,
 // MCP и своим приложениям с разрешением «менять правила» (им незачем видеть
 // всё). Решает «куда» по-прежнему только ядро (core.Decide).
+//
+// Сюда же — DNS режима VPN (ТЗ 9): галочка «Подставные адреса» (fakeIP) и
+// список «всегда настоящий адрес» (realIPHosts). Они общие для всех серверов
+// (config.Config), а не у профиля.
 
 type rulesResp struct {
 	Profile     string   `json:"profile"`
@@ -21,12 +25,16 @@ type rulesResp struct {
 	FilterApps  []string `json:"filterApps"`
 	DirectHosts []string `json:"directHosts"`
 	TunnelHosts []string `json:"tunnelHosts"`
+	FakeIP      bool     `json:"fakeIP"`
+	RealIPHosts []string `json:"realIPHosts"`
 }
 
-func rulesOf(p config.Profile) rulesResp {
+func rulesOf(cfg config.Config) rulesResp {
+	p := cfg.Active()
 	r := rulesResp{Profile: p.ID, FilterMode: p.FilterMode, FilterApps: p.FilterApps,
-		DirectHosts: p.DirectHosts, TunnelHosts: p.TunnelHosts}
-	for _, l := range []*[]string{&r.FilterApps, &r.DirectHosts, &r.TunnelHosts} {
+		DirectHosts: p.DirectHosts, TunnelHosts: p.TunnelHosts,
+		FakeIP: cfg.FakeIP, RealIPHosts: cfg.RealIPHosts}
+	for _, l := range []*[]string{&r.FilterApps, &r.DirectHosts, &r.TunnelHosts, &r.RealIPHosts} {
 		if *l == nil {
 			*l = []string{}
 		}
@@ -36,15 +44,16 @@ func rulesOf(p config.Profile) rulesResp {
 
 // handleRules — GET: правила активного сервера. POST:
 //
-//	{"op":"add"|"remove","list":"direct"|"tunnel"|"apps","value":"youtube.com"}
+//	{"op":"add"|"remove","list":"direct"|"tunnel"|"apps"|"realip","value":"youtube.com"}
 //	{"filterMode":"all"|"only"|"except"}
+//	{"fakeIP":true|false}
 //
 // Правила применяются сразу, как при сохранении настроек.
 func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
 	cfg := s.app.Config()
 	p := cfg.Active()
 	if r.Method != http.MethodPost {
-		writeJSON(w, rulesOf(p))
+		writeJSON(w, rulesOf(cfg))
 		return
 	}
 	var req struct {
@@ -52,10 +61,14 @@ func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
 		List       string `json:"list"`
 		Value      string `json:"value"`
 		FilterMode string `json:"filterMode"`
+		FakeIP     *bool  `json:"fakeIP"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, map[string]string{"error": "нужен JSON {\"op\":\"add|remove\",\"list\":\"direct|tunnel|apps\",\"value\"} или {\"filterMode\"}"})
+		writeJSON(w, map[string]string{"error": "нужен JSON {\"op\":\"add|remove\",\"list\":\"direct|tunnel|apps|realip\",\"value\"}, {\"filterMode\"} или {\"fakeIP\"}"})
 		return
+	}
+	if req.FakeIP != nil {
+		cfg.FakeIP = *req.FakeIP
 	}
 	if req.FilterMode != "" {
 		switch req.FilterMode {
@@ -75,8 +88,10 @@ func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
 			l = &p.TunnelHosts
 		case "apps":
 			l = &p.FilterApps
+		case "realip":
+			l = &cfg.RealIPHosts
 		default:
-			writeJSON(w, map[string]string{"error": "list: direct, tunnel или apps"})
+			writeJSON(w, map[string]string{"error": "list: direct, tunnel, apps или realip"})
 			return
 		}
 		vals := routing.SplitEntries(req.Value)
@@ -117,7 +132,7 @@ func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true, "rules": rulesOf(s.app.Config().Active()), "note": note})
+	writeJSON(w, map[string]any{"ok": true, "rules": rulesOf(s.app.Config()), "note": note})
 }
 
 func containsFold(l []string, v string) bool {

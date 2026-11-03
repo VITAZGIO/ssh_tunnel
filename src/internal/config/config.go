@@ -197,6 +197,15 @@ type Config struct {
 	// (vpnlayer/hotspot_windows.go). По умолчанию раздаётся.
 	HotspotDirect bool `json:"hotspotDirect,omitempty"`
 
+	// FakeIP — галочка «Подставные адреса (fake-IP)» режима VPN: наш DNS
+	// отвечает на имена «через сервер» выдуманными адресами 198.18.x.x, как
+	// до ТЗ 9. По умолчанию выключена — программы получают настоящие адреса,
+	// разрешённые через сервер (core.DecideDNS). RealIPHosts — «всегда
+	// настоящий адрес»: имена, которым подставной не выдаётся и с галочкой
+	// (программы, которые проверяют адрес перед соединением).
+	FakeIP      bool     `json:"fakeIP,omitempty"`
+	RealIPHosts []string `json:"realIPHosts,omitempty"`
+
 	AdBlockEnabled   bool   `json:"adBlockEnabled,omitempty"`
 	AdBlockSources   string `json:"adBlockSources,omitempty"`
 	AdBlockAllowlist string `json:"adBlockAllowlist,omitempty"`

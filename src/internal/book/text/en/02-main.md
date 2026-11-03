@@ -39,3 +39,20 @@ A mode is just a combination of the two buttons.
 In settings you can send some sites or programs **directly** (bypassing the
 server) or, on the contrary, **always through the server**. The local network
 (router, printer, NAS) goes directly by default.
+
+## Site addresses (DNS)
+
+In VPN mode the **server** resolves site names: your provider does not see
+which sites you open and cannot slip in a block page. Programs get **real**
+site addresses, so programs that check the address before connecting (AI
+tools with `web_fetch`, NetBird, clients with address lists) work too.
+
+Where a connection goes — through the server or directly — is decided by the
+site name inside the connection itself, or, if it is not there, by recent DNS
+answers.
+
+The **"Fake addresses (fake-IP)"** checkbox (App settings) brings back the old
+behaviour: every name gets a made-up `198.18.x.x` address. Names in the
+**"Always real address"** list get the real address even then. Switching needs
+no reboot: the app resets its tables, connections and the system DNS cache
+itself.

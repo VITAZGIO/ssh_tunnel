@@ -11,6 +11,8 @@ package tunnel
 // напрямую» действуют всегда: они про адрес назначения, а не про программу.
 
 import (
+	"bytes"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -40,16 +42,29 @@ func (t *Tunnel) ServeConn(conn net.Conn, target string, byIP bool) {
 	// она, и получает fake-IP), сюда приходит уже с именем: стек вернул его
 	// из таблицы. Решение «напрямую» — и прямое соединение само разрешит имя
 	// через DNS настоящей сети. Для программы всё как без нас.
-	route, c := t.decide(proc, target)
+	//
+	// Без подставных адресов приложение приходит с настоящим адресом: имя
+	// для правил — из первых байтов соединения (SNI, Host), а нет их — из
+	// таблицы недавних ответов нашего DNS (decideNamed).
+	var src io.Reader = conn
+	var sniffed string
+	if byIP && t.sniffWanted(target) {
+		var head []byte
+		sniffed, head = sniffConn(conn)
+		src = io.MultiReader(bytes.NewReader(head), conn)
+	}
+	route, c := t.decideNamed(proc, target, sniffed)
 	direct := route == core.RouteDirect
 
-	// Адрес, выданный нашим DNS под имя из «всегда напрямую», в журнал
-	// пишем именем: адрес человеку ничего не скажет, и это не утечка DNS —
-	// имя разрешали мы сами, по правилу.
+	// Адрес с известным именем в журнал пишем именем: адрес человеку ничего
+	// не скажет. Утечкой DNS это не считается, если имя разрешали мы сами
+	// (по правилу или через сервер); имя только из SNI — разрешал кто-то
+	// другой (например, «безопасный DNS» браузера), отметка остаётся.
 	shown := target
-	if direct && c.Name != "" {
-		if _, port, err := net.SplitHostPort(target); err == nil {
-			shown, byIP = net.JoinHostPort(c.Name, port), false
+	if c.Name != "" {
+		shown = namedTarget(target, c.Name)
+		if _, ours := t.learnedName(target); ours {
+			byIP = false
 		}
 	}
 
@@ -69,7 +84,7 @@ func (t *Tunnel) ServeConn(conn net.Conn, target string, byIP bool) {
 	t.stats.total.Add(1)
 	defer t.stats.active.Add(-1)
 
-	t.pump(conn, conn, remote)
+	t.pump(conn, src, remote)
 }
 
 // dialForTun — соединение из стека без программы (как на Android): путь
@@ -92,7 +107,7 @@ const learnedTTL = 30 * time.Minute
 // learnedMax — потолок таблицы: на случай приложения, которое перебирает
 // тысячи имён из списка. Переполнение чистит просроченное, а если и этого
 // мало — таблицу целиком: худшее последствие — пара соединений через сервер.
-const learnedMax = 4096
+const learnedMax = 16384
 
 type learnedEntry struct {
 	name  string
@@ -119,7 +134,14 @@ type learnedDirect struct {
 
 // LearnDirect запоминает адреса, выданные телефоном для имени из списка
 // «всегда напрямую»: соединения на них пойдут мимо сервера.
-func (t *Tunnel) LearnDirect(name string, ips []net.IP) {
+func (t *Tunnel) LearnDirect(name string, ips []net.IP) { t.LearnName(name, ips) }
+
+// LearnName запоминает, под какое имя наш DNS выдал эти адреса: соединение
+// придёт с адресом, а правила («всегда напрямую», «всегда через сервер»)
+// записаны именами. Без подставных адресов так запоминается каждый ответ
+// (см. LookupViaServer); последний ответ на общий адрес CDN побеждает, но
+// имя из самого соединения (SNI) всё равно точнее (см. decideNamed).
+func (t *Tunnel) LearnName(name string, ips []net.IP) {
 	l := &t.learned
 	now := time.Now()
 	l.mu.Lock()
