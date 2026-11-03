@@ -47,3 +47,9 @@ default.
   (the small button on the main screen).
 - Phone: Settings → Accounts → "ssh_tunnel calendar" → sync must be on.
   Battery saving for ssh_tunnel — "unrestricted".
+
+## Which service
+
+Calendar settings have a «Service» choice: Nextcloud, Home Assistant, Yandex, iCloud, Fastmail or «Manual (CalDAV)». Home Assistant connects with a long-lived token (HA → Profile → Security) and works both ways.
+
+The desktop widget shows a month; arrows flip it.
