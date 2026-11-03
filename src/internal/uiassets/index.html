@@ -493,10 +493,6 @@
   /* Стрелка — справа сверху, прямо под кнопкой настроек. */
   #quickBtn{position:absolute;top:46px;right:14px;z-index:4}
   #quickBtn .mi{width:18px;height:18px}
-  /* Телефон: стрелка — в строке шапки, рядом с журналом (поверх она
-     наезжала на шапку и сдвигала её под строку состояния). */
-  #quickBtn.inbar{position:static}
-  body.android #quickPanel{top:52px}
   #quickPanel{position:absolute;top:84px;right:10px;z-index:6;background:var(--card2);
               border:1px solid var(--line);border-radius:12px;padding:6px;min-width:170px;
               box-shadow:0 8px 24px rgba(0,0,0,.35);animation:quickIn .16s ease-out}
@@ -2179,7 +2175,7 @@ const I18N = {
     wizard_title:'Мастер настройки', wizard_sub:'Подключить телефон или новый сервер',
     addons_title:'Плагины', addons_sub:'Добавляешь сам, что нужно',
     book_title:'Книга', book_sub:'Справка: с чего начать, режимы, частые проблемы',
-    quick_title:'Быстрый доступ', quick_empty:'Пусто. Отметь звёздочкой нужные в «Плагинах»', meddle_offer:'Проверить, кто мешает',
+    quick_title:'Быстрый доступ', meddle_offer:'Проверить, кто мешает',
     wizard_android:'Android', wizard_vps:'VPS', wizard_user:'Пользователь',
     wizard_user_intro:'Новый пользователь на сервере, к которому ты подключён.',
     wizard_user_note:'Работает, если в панели сервера твоему устройству включено «Может создавать пользователей». '+
@@ -2508,7 +2504,7 @@ const I18N = {
     wizard_title:'Setup wizard', wizard_sub:'Connect a phone or a new server',
     addons_title:'Plugins', addons_sub:'Add what you need yourself',
     book_title:'Book', book_sub:'Help: getting started, modes, common problems',
-    quick_title:'Quick access', quick_empty:'Empty. Star the ones you need in Plugins', meddle_offer:'Check who interferes',
+    quick_title:'Quick access', meddle_offer:'Check who interferes',
     wizard_android:'Android', wizard_vps:'VPS', wizard_user:'User',
     wizard_user_intro:'A new user on the server you are connected to.',
     wizard_user_note:'Works if the server panel allows your device to create users. The password is the one set there. '+
@@ -5162,21 +5158,10 @@ async function loadAddons(){
   if(!r || !r.added) return;
   addonsState = r;
   const starred = r.added.filter(e => e.star && e.active);
-  // Кнопка видна всегда: пустой список — подсказка, где ставить звёздочки.
-  $('quickBtn').hidden = false;
+  $('quickBtn').hidden = !starred.length;
+  if(!starred.length) $('quickPanel').hidden = true;
   const p = $('quickPanel');
   p.innerHTML = '';
-  if(!starred.length){
-    const b = document.createElement('button');
-    const ic = document.createElement('span');
-    ic.className = 'mi';
-    ic.style.setProperty('--i', 'url(icons/star.svg)');
-    const nm = document.createElement('span');
-    nm.textContent = tr('quick_empty');
-    b.append(ic, nm);
-    b.onclick = () => { p.hidden = true; showAddons(); };
-    p.appendChild(b);
-  }
   for(const e of starred){
     const m = r.catalog.find(x => x.id === e.id);
     if(!m) continue;
@@ -5191,7 +5176,6 @@ async function loadAddons(){
     p.appendChild(b);
   }
 }
-if(ANDROID){ $('quickBtn').classList.add('inbar'); $('btnLog').before($('quickBtn')); }
 $('quickBtn').onclick = ev => { ev.stopPropagation(); $('quickPanel').hidden = !$('quickPanel').hidden; };
 document.addEventListener('click', ev => {
   if(!$('quickPanel').hidden && !$('quickPanel').contains(ev.target)) $('quickPanel').hidden = true;
