@@ -66,6 +66,7 @@ func handleAccount(w http.ResponseWriter, r *http.Request) {
 		User     string `json:"user"`
 		Password string `json:"password"`
 		Contacts bool   `json:"contacts"`
+		Kind     string `json:"kind"`
 		Forget   bool   `json:"forget"`
 	}
 	if !post(w, r, &req) {
@@ -75,7 +76,7 @@ func handleAccount(w http.ResponseWriter, r *http.Request) {
 	if req.Forget {
 		err = eng.Forget()
 	} else {
-		err = eng.SetAccount(Account{URL: req.URL, User: req.User, Contacts: req.Contacts}, req.Password)
+		err = eng.SetAccount(Account{URL: req.URL, User: req.User, Contacts: req.Contacts, Kind: req.Kind}, req.Password)
 	}
 	if err != nil {
 		fail(w, err)

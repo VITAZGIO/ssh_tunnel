@@ -67,6 +67,9 @@
   html.widget .body{padding:0 10px 10px}
   html.widget .item{padding:5px 8px}
   html.widget .item .tm{min-width:70px}
+  html.widget .month{gap:2px}
+  html.widget .month .day{min-height:42px;padding:2px 3px}
+  html.widget .month .wd{font-size:10.5px}
 </style>
 </head>
 <body>
@@ -113,7 +116,6 @@ async function load(){
 }
 
 function range(){
-  if(WIDGET) return [startOfDay(new Date()), addDays(startOfDay(new Date()), 8)];
   if(view === 'week'){
     const off = (cursor.getDay() + 6) % 7;
     const a = addDays(cursor, -off);
@@ -255,18 +257,47 @@ function dayList(a, n, skipEmpty){
 function renderWeek(){ const [a] = range(); $('body').innerHTML = dayList(a, 7, false); bindEvents($('body')); }
 function renderList(){ $('body').innerHTML = dayList(cursor, 60, true); bindEvents($('body')); }
 
+// Сервисы календаря: CalDAV с готовым адресом или Home Assistant по токену.
+const SERVICES = {
+  nextcloud: {name: 'Nextcloud', url: '', ph: 'http://ubuntu.mesh:8080', pass: L('Пароль приложения','App password'),
+    hint: L('Адрес Nextcloud лучше брать в сети устройств (например http://ubuntu.mesh:8080): так он доступен и дома, и вне дома. Пароль — «пароль приложения» из настроек безопасности Nextcloud.',
+            'Use the Nextcloud address on the device network (e.g. http://ubuntu.mesh:8080) so it works at home and away. The password is a Nextcloud app password.')},
+  ha: {name: 'Home Assistant', url: '', ph: 'http://homeassistant.local:8123', kind: 'ha', pass: L('Долгоживущий токен','Long-lived token'), noUser: true,
+    hint: L('Календари Home Assistant — читать и писать. Токен: в HA Профиль → Безопасность → «Долгоживущие токены доступа» → Создать. Адрес лучше в сети устройств.',
+            'Home Assistant calendars — read and write. Token: in HA Profile → Security → Long-lived access tokens → Create.')},
+  yandex: {name: L('Яндекс Календарь','Yandex Calendar'), url: 'https://caldav.yandex.ru', pass: L('Пароль приложения','App password'),
+    hint: L('Логин — почта Яндекса. Пароль — «пароль приложения» для календаря (id.yandex.ru → Безопасность).', 'Login — Yandex e-mail. Password — an app password for calendars (id.yandex.ru → Security).')},
+  icloud: {name: 'iCloud', url: 'https://caldav.icloud.com', pass: L('Пароль приложения','App-specific password'),
+    hint: L('Логин — Apple ID. Пароль — пароль приложения (account.apple.com → Вход и безопасность).', 'Login — Apple ID. Password — an app-specific password (account.apple.com).')},
+  fastmail: {name: 'Fastmail', url: 'https://caldav.fastmail.com', pass: L('Пароль приложения','App password'),
+    hint: L('Пароль — пароль приложения Fastmail с доступом к календарям.', 'Password — a Fastmail app password with calendar access.')},
+  manual: {name: L('Вручную (CalDAV)','Manual (CalDAV)'), url: '', ph: 'https://…', pass: L('Пароль','Password'),
+    hint: L('Любой сервер CalDAV: адрес, логин и пароль.', 'Any CalDAV server: address, login and password.')},
+};
+function serviceOf(acc){
+  if(acc.kind === 'ha') return 'ha';
+  for(const [k, v] of Object.entries(SERVICES)) if(v.url && acc.url && acc.url.startsWith(v.url)) return k;
+  return acc.url ? (acc.url.includes('remote.php') || acc.url.includes('nextcloud') || acc.url.includes('.mesh') ? 'nextcloud' : 'manual') : 'nextcloud';
+}
+let svc = null;
+
 function renderSettings(){
   const acc = st.account || {};
+  if(!svc) svc = serviceOf(acc);
+  const S = SERVICES[svc];
   const cals = (st.calendars || []).map(c => `<label class="cal ck"><input type="checkbox" data-cal="${esc(c.href)}" ${c.shown ? 'checked' : ''}>
     <span class="dot" style="--c:${esc(c.color || '')}"></span>${esc(c.name)}${c.contacts ? ' — ' + L('контакты','contacts') : ''}
     <span class="hint">${c.count}${c.readOnly ? ', ' + L('только чтение','read-only') : ''}</span></label>`).join('');
+  const same = serviceOf(acc) === svc;
+  const url = same ? (acc.url || S.url) : S.url;
   $('body').innerHTML = `<div class="form">
-    <div class="hint">${L('Адрес Nextcloud лучше брать в сети устройств (например http://ubuntu.mesh:8080): так он доступен и дома, и вне дома. Пароль — «пароль приложения» из настроек безопасности Nextcloud, хранится зашифрованным.',
-      'Use the Nextcloud address on the device network (e.g. http://ubuntu.mesh:8080) so it works at home and away. The password is a Nextcloud app password; it is stored encrypted.')}</div>
-    <label>${L('Адрес Nextcloud','Nextcloud address')}<input type="url" id="fUrl" value="${esc(acc.url || '')}" placeholder="http://ubuntu.mesh:8080"></label>
-    <label>${L('Логин','Login')}<input type="text" id="fUser" value="${esc(acc.user || '')}" autocomplete="username"></label>
-    <label>${L('Пароль приложения','App password')}<input type="password" id="fPass" placeholder="${st.hasPassword ? L('сохранён — оставь пустым','saved — leave empty') : ''}" autocomplete="new-password"></label>
-    <label class="ck"><input type="checkbox" id="fContacts" ${acc.contacts ? 'checked' : ''}>${L('Ещё и контакты (CardDAV)', 'Contacts too (CardDAV)')}</label>
+    <label>${L('Сервис','Service')}<select id="fSvc">${Object.entries(SERVICES).map(([k, v]) =>
+      `<option value="${k}"${k === svc ? ' selected' : ''}>${esc(v.name)}</option>`).join('')}</select></label>
+    <div class="hint">${esc(S.hint)} ${L('Пароль и токен хранятся зашифрованными.', 'Passwords and tokens are stored encrypted.')}</div>
+    <label>${L('Адрес','Address')}<input type="url" id="fUrl" value="${esc(url)}" placeholder="${esc(S.ph || S.url)}"></label>
+    ${S.noUser ? '' : `<label>${L('Логин','Login')}<input type="text" id="fUser" value="${esc(same ? acc.user || '' : '')}" autocomplete="username"></label>`}
+    <label>${esc(S.pass)}<input type="password" id="fPass" placeholder="${same && st.hasPassword ? L('сохранён — оставь пустым','saved — leave empty') : ''}" autocomplete="new-password"></label>
+    ${S.kind === 'ha' ? '' : `<label class="ck"><input type="checkbox" id="fContacts" ${acc.contacts ? 'checked' : ''}>${L('Ещё и контакты (CardDAV)', 'Contacts too (CardDAV)')}</label>`}
     <div class="btns"><button class="btn primary" id="fSave">${L('Подключить','Connect')}</button>
       ${acc.url ? `<button class="btn danger" id="fForget">${L('Отключить','Disconnect')}</button>` : ''}</div>
     <div class="status" id="fMsg"></div>
@@ -277,8 +308,9 @@ function renderSettings(){
   </div>`;
   $('fSave').onclick = async () => {
     $('fMsg').className = 'status'; $('fMsg').textContent = L('Проверяю вход…', 'Checking login…');
-    const contacts = $('fContacts').checked;
-    const r = await api('/api/calendar/account', {url: $('fUrl').value.trim(), user: $('fUser').value.trim(), password: $('fPass').value, contacts});
+    const contacts = !!$('fContacts') && $('fContacts').checked;
+    const r = await api('/api/calendar/account', {url: $('fUrl').value.trim(), user: $('fUser') ? $('fUser').value.trim() : '',
+      password: $('fPass').value, contacts, kind: S.kind || ''});
     if(r.error){ $('fMsg').className = 'status err'; $('fMsg').textContent = r.error; return; }
     st = r;
     // Телефон: свой аккаунт в системе, разрешения на календарь (и контакты).
@@ -292,6 +324,7 @@ function renderSettings(){
     if(ANDROID && window.SSHTunnelAndroid.calendarForget) window.SSHTunnelAndroid.calendarForget();
     render();
   };
+  $('fSvc').onchange = () => { svc = $('fSvc').value; renderSettings(); };
   $('body').querySelectorAll('[data-cal]').forEach(el => el.onchange = async () => {
     st = await api('/api/calendar/settings', {cal: el.dataset.cal, shown: el.checked});
   });
@@ -365,20 +398,32 @@ function editor(e, day){
 }
 
 // ── виджет ────────────────────────────────────────────────────────────────
+// Виджет — месяц (стрелки листают), день — открыть календарь на нём.
 function renderWidget(){
-  const now = new Date();
+  view = 'month';
   $('page').innerHTML = `<div class="wh" id="wh">
-      <span class="t">${esc(now.toLocaleDateString(LOC, {weekday:'long', day:'numeric', month:'long'}))}</span>
+      <button class="ico" id="wPrev">${ic('chevron_left')}</button>
+      <span class="t">${esc(cursor.toLocaleDateString(LOC, {month:'long', year:'numeric'}))}</span>
+      <button class="ico" id="wNext">${ic('chevron_right')}</button>
       <button class="ico" id="wOpen" title="${L('Открыть календарь','Open calendar')}">${ic('open_in_new')}</button>
       <button class="ico" id="wSync" title="${L('Сверить сейчас','Sync now')}">${ic('sync')}</button>
     </div>${statusLine()}
-    <div class="body" id="body">${st.account && st.account.url ? dayList(startOfDay(now), 8, true)
+    <div class="body" id="body">${st.account && st.account.url ? ''
       : `<div class="empty">${L('Календарь не подключён', 'Calendar not connected')}</div>`}</div>`;
+  if(st.account && st.account.url){
+    renderMonth();
+    $('body').querySelectorAll('[data-d]').forEach(el => el.onclick = ev => {
+      if(ev.target.closest('.ev')) return;
+      openWindow('calendar', L('Календарь','Calendar'), pageURL('addons/calendar.html', {solo: '1', key: 'calendar'}));
+    });
+  }
+  const flip = n => async () => { cursor = new Date(cursor.getFullYear(), cursor.getMonth() + n, 1); await loadEvents(); render(); };
+  $('wPrev').onclick = flip(-1);
+  $('wNext').onclick = flip(1);
   // Окно без рамки таскается за заголовок (sshtunnelDrag даёт нативное окно ПК).
   $('wh').onmousedown = ev => { if(ev.button === 0 && !ev.target.closest('button') && window.sshtunnelDrag) window.sshtunnelDrag(); };
   $('wSync').onclick = async () => { await api('/api/calendar/sync', {}); load(); };
   $('wOpen').onclick = () => openWindow('calendar', L('Календарь','Calendar'), pageURL('addons/calendar.html', {solo: '1', key: 'calendar'}));
-  bindEvents($('body'));
 }
 
 // Свежие данные: после сверки в фоне номер версии растёт.

@@ -14,6 +14,9 @@ type Account struct {
 	User string `json:"user"`
 	// Contacts — синхронизировать и контакты (CardDAV). По умолчанию выкл.
 	Contacts bool `json:"contacts,omitempty"`
+	// Kind — чем подключён: "" — CalDAV (Nextcloud, Яндекс, iCloud…),
+	// "ha" — Home Assistant по токену (ha.go; токен лежит вместо пароля).
+	Kind string `json:"kind,omitempty"`
 }
 
 // item — объект на сервере (событие .ics или контакт .vcf) как есть.

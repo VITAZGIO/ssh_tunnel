@@ -140,15 +140,15 @@ func (e *Engine) Configured() bool {
 	return e.st != nil && e.st.Account.URL != ""
 }
 
-func (e *Engine) client() (*client, error) {
+func (e *Engine) client() (backend, error) {
 	e.mu.Lock()
 	if e.st == nil || e.st.Account.URL == "" {
 		e.mu.Unlock()
-		return nil, errors.New("календарь не подключён: укажи адрес Nextcloud, логин и пароль приложения")
+		return nil, errors.New("календарь не подключён: выбери сервис и укажи адрес и вход")
 	}
 	acc, dir, dial := e.st.Account, e.dir, e.dial
 	e.mu.Unlock()
-	return newClient(acc.URL, acc.User, loadPassword(dir), dial)
+	return newBackend(acc, loadPassword(dir), dial)
 }
 
 // SetAccount проверяет вход и сохраняет аккаунт; пароль "" — оставить
@@ -164,7 +164,10 @@ func (e *Engine) SetAccount(acc Account, pass string) error {
 	if pass == "" {
 		pass = loadPassword(dir)
 	}
-	c, err := newClient(acc.URL, acc.User, pass, dial)
+	if acc.Kind == KindHA {
+		acc.Contacts = false // контактов у HA нет
+	}
+	c, err := newBackend(acc, pass, dial)
 	if err != nil {
 		return err
 	}
@@ -175,7 +178,7 @@ func (e *Engine) SetAccount(acc Account, pass string) error {
 		return err
 	}
 	e.mu.Lock()
-	same := e.st.Account.URL == acc.URL && e.st.Account.User == acc.User
+	same := e.st.Account.URL == acc.URL && e.st.Account.User == acc.User && e.st.Account.Kind == acc.Kind
 	e.st.Account = acc
 	if !same {
 		e.st.Collections = nil
