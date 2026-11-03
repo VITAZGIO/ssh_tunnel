@@ -239,6 +239,8 @@ class TunnelService : VpnService(), Callbacks {
     override fun onCreate() {
         super.onCreate()
         current = this
+        // Служба файлов и ключ SSH (ТЗ 4) живут в ядре, пока жив процесс.
+        DeviceApps.init(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

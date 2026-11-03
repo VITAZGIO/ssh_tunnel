@@ -185,3 +185,20 @@ curl -s -H "Authorization: Bearer $TOK" -d '{"mesh":true}' $URL/api/state
 Invoke-RestMethod "$($a.url)/api/calendar/events?from=2026-11-01&to=2026-11-08" -Headers $h |
   Select-Object -Expand events | Format-Table start, title
 ```
+
+## Устройства сети (ТЗ 4)
+
+Отвечают, только пока приложение добавлено и включено.
+
+- `GET /api/netmap` — карта: `{"state","self","nodes":[{name,host,ip,platform,os,online,lastSeen,direct,rttMs,server}]}`.
+- `GET /api/ssh` — серверы этого устройства и открытый ключ программы;
+  `POST /api/ssh` `{"op":"save","server":{…}}`, `{"op":"delete"|"forgethost","id"}`.
+  `GET /api/ssh/devices` — устройства сети для анкеты.
+  `POST /api/ssh/install` `{"id","password"}` — поставить ключ (пароль не хранится).
+  `POST /api/ssh/open` `{"id"}` — внешний терминал (`{"builtin":true}` — его нет).
+  `POST /api/ssh/term` (`start`/`in`/`resize`/`close`) и `GET /api/ssh/term/out?sid=`
+  (SSE) — встроенный терминал.
+- `GET|POST /api/files/shares` — свои открытые папки (`add`, `remove`,
+  `write`); `GET /api/files/devices`; `/api/files/remote?peer=<198.19.x.y>&x=shares|list|get|part|put|op`
+  — файлы другого устройства (Range передаётся); `POST /api/files/save`
+  `{"peer","s","p"}` — скачать в «Загрузки» с докачкой.

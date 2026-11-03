@@ -18,6 +18,7 @@ import (
 
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/core"
+	"sshtunnel/internal/devnet"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/mesh"
 	"sshtunnel/internal/routing"
@@ -666,6 +667,29 @@ func (a *App) MeshStatus() mesh.Status {
 		return mesh.Status{State: "stopped"}
 	}
 	return mesh.Status{State: "off"}
+}
+
+// Mesh — клиент сети устройств работающего туннеля (nil — нет). Вместе с
+// DialApp делает App источником сети для приложений (internal/devnet).
+func (a *App) Mesh() *mesh.Client {
+	a.mu.Lock()
+	tun := a.tun
+	a.mu.Unlock()
+	if tun == nil {
+		return nil
+	}
+	return tun.Mesh()
+}
+
+// DialApp — соединение от имени программы: путь выбирает ядро.
+func (a *App) DialApp(network, addr string) (net.Conn, error) {
+	a.mu.Lock()
+	tun := a.tun
+	a.mu.Unlock()
+	if tun == nil {
+		return nil, devnet.ErrOff
+	}
+	return tun.DialApp(addr)
 }
 
 // ProxyURL — адрес HTTP-прокси для подсказок в интерфейсе.

@@ -72,6 +72,45 @@ var catalog = []Manifest{
 		Page:        "addons/calendar.html",
 		Permissions: []string{},
 	},
+	// ТЗ 4: устройства сети (internal/netmap, internal/sshapp, internal/devfiles).
+	{
+		ID:   "netmap",
+		Name: map[string]string{"ru": "Карта сети", "en": "Network map"},
+		Icon: "hub",
+		Hint: map[string]string{
+			"ru": "Устройства сети: кто в сети, напрямую (сплошная линия) или через сервер (пунктир), задержка. Нажми на устройство — SSH и файлы. Имена меняются в панели главного сервера.",
+			"en": "Devices of your network: who is online, direct (solid line) or via the server (dashed), latency. Tap a device for SSH and files. Names are changed in the main server's panel.",
+		},
+		Book:        "app-netmap",
+		Window:      true,
+		Page:        "addons/netmap.html",
+		Permissions: []string{},
+	},
+	{
+		ID:   "ssh",
+		Name: map[string]string{"ru": "SSH", "en": "SSH"},
+		Icon: "terminal",
+		Hint: map[string]string{
+			"ru": "Свои серверы: вход по ключу, который создаёт программа. «Установить ключ» — пароль один раз. На ПК открывается терминал, на телефоне — встроенный.",
+			"en": "Your servers: sign-in with a key the app creates. «Install key» asks for the password once. A terminal opens on a PC, a built-in one on a phone.",
+		},
+		Book:        "app-ssh",
+		Page:        "addons/ssh.html",
+		Permissions: []string{},
+	},
+	{
+		ID:   "files",
+		Name: map[string]string{"ru": "Файлы устройства", "en": "Device files"},
+		Icon: "folder_shared",
+		Hint: map[string]string{
+			"ru": "Файлы других устройств сети: смотреть, скачать, загрузить. Другим видны только папки, которые ты сам отметил на этом устройстве.",
+			"en": "Files of your other devices: browse, download, upload. Others see only the folders you marked on this device.",
+		},
+		Book:        "app-files",
+		Window:      true,
+		Page:        "addons/files.html",
+		Permissions: []string{},
+	},
 }
 
 // showDev — показывать ли образцы. В релизе версия проставлена сборкой.

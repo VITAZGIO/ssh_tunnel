@@ -20,6 +20,7 @@ import (
 	"sshtunnel/android/core"
 	"sshtunnel/internal/calendar"
 	core2 "sshtunnel/internal/core"
+	"sshtunnel/internal/devnet"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/mesh"
 	"sshtunnel/internal/routing"
@@ -109,6 +110,9 @@ func NewTunnel() *Tunnel {
 	t := &Tunnel{}
 	// Календарь ходит к Nextcloud через это ядро (calendar.go).
 	calendar.SetDial(t.dialSelf)
+	// Туннель в процессе один (служба VPN): он и даёт сеть устройств
+	// дополнительным приложениям.
+	devnet.Set(devnetSrc{t})
 	return t
 }
 

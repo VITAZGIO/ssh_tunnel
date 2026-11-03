@@ -47,4 +47,7 @@
     <string name="calendar_account">Календарь ssh_tunnel</string>
     <string name="calendar_widget_desc">Ближайшие события из Nextcloud</string>
     <string name="calendar_widget_empty">Нет событий на неделе</string>
+    <string name="files_transfer_channel">Передача файлов</string>
+    <string name="files_transfer_title">Файлы устройства</string>
+    <string name="files_transfer_many">Передач: %1$d</string>
 </resources>

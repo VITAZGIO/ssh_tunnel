@@ -19,8 +19,10 @@ type Module interface {
 }
 
 var (
-	regMu   sync.Mutex
-	modules = map[string]func() Module{}
+	regMu     sync.Mutex
+	modules   = map[string]func() Module{}
+	appRoutes = map[string][]Route{}
+	dataDir   string
 )
 
 // Register задаёт модуль ядра для приложения id. Зовётся из init пакета
@@ -29,6 +31,32 @@ func Register(id string, f func() Module) {
 	regMu.Lock()
 	modules[id] = f
 	regMu.Unlock()
+}
+
+// RegisterRoutes — адреса API приложения id. Отвечают, только пока
+// приложение работает (Active); охрану ключом ставит тот, кто подключает
+// Routes. Зовётся из init пакета приложения.
+func RegisterRoutes(id string, rs ...Route) {
+	regMu.Lock()
+	appRoutes[id] = append(appRoutes[id], rs...)
+	regMu.Unlock()
+}
+
+// AppRoutes — адреса API приложения id без проверки Active: для окна
+// VPN-версии Windows, где их обслуживает процесс окна (рабочий стол,
+// ключи пользователя), а список приложений хранит служба.
+func AppRoutes(id string) []Route {
+	regMu.Lock()
+	defer regMu.Unlock()
+	return append([]Route(nil), appRoutes[id]...)
+}
+
+// DataDir — папка данных программы на этом устройстве (там addons.json и
+// данные приложений).
+func DataDir() string {
+	regMu.Lock()
+	defer regMu.Unlock()
+	return dataDir
 }
 
 // Opener открывает отдельное окно (ПК с нативным окном). key — чьё окно (id
@@ -49,6 +77,9 @@ type Service struct {
 
 // New открывает хранилище в dir и запускает модули добавленных приложений.
 func New(dir string) *Service {
+	regMu.Lock()
+	dataDir = dir
+	regMu.Unlock()
 	s := &Service{store: Open(dir), running: map[string]Module{}}
 	s.sync()
 	return s
@@ -145,35 +176,25 @@ func (s *Service) Routes() []Route {
 	}
 	regMu.Lock()
 	defer regMu.Unlock()
-	for _, ar := range appRoutes {
-		id, h := ar.id, ar.H
-		rt := ar.Route
-		rt.H = func(w http.ResponseWriter, r *http.Request) {
-			if !s.Active(id) {
-				http.Error(w, "приложение не добавлено или выключено", http.StatusNotFound)
-				return
-			}
-			h(w, r)
+	for _, m := range catalog {
+		for _, rt := range appRoutes[m.ID] {
+			rt.H = s.onlyActive(m.ID, rt.H)
+			rs = append(rs, rt)
 		}
-		rs = append(rs, rt)
 	}
 	return rs
 }
 
-type appRoute struct {
-	id string
-	Route
-}
-
-var appRoutes []appRoute
-
-// RegisterRoutes — свои адреса API приложения id (зовётся из init пакета
-// приложения). Отвечают, только пока приложение работает (Active).
-func RegisterRoutes(id string, rs ...Route) {
-	regMu.Lock()
-	defer regMu.Unlock()
-	for _, r := range rs {
-		appRoutes = append(appRoutes, appRoute{id, r})
+// onlyActive — адрес приложения отвечает, только пока оно работает.
+func (s *Service) onlyActive(id string, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.Active(id) {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "приложение не добавлено или выключено"})
+			return
+		}
+		h(w, r)
 	}
 }
 

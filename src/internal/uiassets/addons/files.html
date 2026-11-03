@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Файлы устройства</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../pages.css">
+<style>
+  body{background:transparent}
+  .box{padding:0 14px 16px;display:flex;flex-direction:column;gap:10px}
+  .tabs{display:flex;gap:6px;padding-top:10px}
+  .tabs button{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:7px 12px;cursor:pointer}
+  .tabs button.on{border-color:var(--accent);background:var(--card2)}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .bar .sp{flex:1}
+  .btn{display:inline-flex;align-items:center;gap:6px}
+  .btn .mi{width:18px;height:18px}
+  select,input{font:inherit;color:var(--text);background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+  .crumbs{display:flex;flex-wrap:wrap;gap:2px;align-items:center;font-size:13px}
+  .crumbs button{border:0;background:transparent;color:var(--accent);cursor:pointer;padding:3px 5px;border-radius:6px}
+  .crumbs button:hover{background:var(--card2)}
+  .crumbs .last{color:var(--text);cursor:default}
+  .list{display:flex;flex-direction:column}
+  .row{display:grid;grid-template-columns:22px 1fr 90px 130px auto;gap:10px;align-items:center;min-height:42px;
+       border-bottom:1px solid var(--line);padding:0 4px}
+  .row:hover{background:var(--card)}
+  .row .mi{width:20px;height:20px;color:var(--dim)}
+  .row.dir .mi{color:var(--accent)}
+  .row .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;border:0;background:transparent;text-align:left;padding:4px 0}
+  .row .sz,.row .dt{color:var(--dim);font-size:12px;white-space:nowrap}
+  .row .sz{text-align:right}
+  .row .tools{display:flex;gap:2px}
+  .row .tools .ico{width:30px;height:30px}
+  @media (max-width:640px){ .row{grid-template-columns:22px 1fr auto} .row .sz,.row .dt{display:none} }
+  .share{display:flex;gap:10px;align-items:center;margin-bottom:8px}
+  .share .tx{flex:1;min-width:0}
+  .share .p{font-family:var(--mono);font-size:12px;color:var(--dim);word-break:break-all}
+  .chk{display:inline-flex;gap:6px;align-items:center;font-size:13px;cursor:pointer;white-space:nowrap}
+  .msg{font-size:13px}
+  .msg.err{color:var(--err)} .msg.ok{color:var(--ok)}
+  .prog{height:6px;border-radius:3px;background:var(--card2);overflow:hidden}
+  .prog i{display:block;height:100%;background:var(--accent);width:0}
+  #viewer{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:10;display:flex;flex-direction:column}
+  #viewer .h{display:flex;align-items:center;gap:8px;padding:8px;color:#fff}
+  #viewer .h .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #viewer .c{flex:1;min-height:0;display:grid;place-items:center;padding:8px;overflow:auto}
+  #viewer img,#viewer video{max-width:100%;max-height:100%}
+  #viewer pre{white-space:pre-wrap;word-break:break-word;color:#e8ebf2;font:12.5px/1.45 var(--mono);margin:0;
+              align-self:start;justify-self:stretch;max-width:1000px}
+  .warn{border-color:var(--warn)}
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="tabs"><button id="tabBrowse" class="on"></button><button id="tabMine"></button></div>
+
+  <!-- Файлы другого устройства. -->
+  <div id="vBrowse" class="box" style="padding:0">
+    <div class="bar">
+      <select id="dev"></select>
+      <span class="sp"></span>
+      <button class="ico" id="reload"></button>
+    </div>
+    <div class="crumbs" id="crumbs"></div>
+    <div class="bar" id="writeBar" hidden>
+      <button class="btn" id="upBtn"></button>
+      <button class="btn" id="mkBtn"></button>
+      <input type="file" id="upFile" multiple hidden>
+    </div>
+    <div id="xfer" hidden><div class="hint" id="xferText"></div><div class="prog"><i id="xferBar"></i></div></div>
+    <div class="msg" id="msg"></div>
+    <div class="list" id="list"></div>
+  </div>
+
+  <!-- Мои папки: что видно другим. -->
+  <div id="vMine" class="box" style="padding:0" hidden>
+    <div class="card warn" id="perm" hidden></div>
+    <div class="hint" id="mineHint"></div>
+    <div id="shares"></div>
+    <div class="card">
+      <div class="bar">
+        <select id="sugg"></select>
+        <input id="manual" style="flex:1;min-width:200px">
+        <button class="btn primary" id="shareAdd"></button>
+      </div>
+    </div>
+    <div class="msg" id="mineMsg"></div>
+  </div>
+</div>
+
+<div id="viewer" hidden>
+  <div class="h"><button class="ico" id="vClose" style="color:#fff"></button><span class="t" id="vTitle"></span>
+    <button class="ico" id="vDl" style="color:#fff"></button></div>
+  <div class="c" id="vBody"></div>
+</div>
+
+<script src="../pages.js"></script>
+<script>
+/* Файлы устройства. Другое устройство — через ядро этого (/api/files/remote →
+   служба файлов того устройства по сети устройств). Своё — какие папки видны
+   другим (/api/files/shares). */
+const set = (id, t) => $(id).textContent = t;
+let PEER = Q.get('peer') || '', SHARES = [], CUR = null, PATH = '/', WRITE = false;
+
+set('tabBrowse', L('Устройства', 'Devices'));
+set('tabMine', L('Мои папки', 'My folders'));
+$('reload').innerHTML = icon('refresh');
+$('upBtn').innerHTML = icon('upload') + L('Загрузить сюда', 'Upload here');
+$('mkBtn').innerHTML = icon('create_new_folder') + L('Новая папка', 'New folder');
+$('shareAdd').innerHTML = icon('add') + L('Открыть', 'Share');
+$('manual').placeholder = L('или полный путь к папке', 'or the full path to a folder');
+set('mineHint', L('По умолчанию другим не видно ничего. Отмеченные папки видят все устройства твоей сети устройств — только смотреть и скачивать. «Можно менять» разрешает загружать, переименовывать и удалять.',
+  'By default nothing is visible to others. Every device of your network can see the folders listed here — view and download only. «Can change» allows uploading, renaming and deleting.'));
+$('vClose').innerHTML = icon('close'); $('vDl').innerHTML = icon('download');
+
+function tab(mine){
+  $('tabBrowse').classList.toggle('on', !mine); $('tabMine').classList.toggle('on', mine);
+  $('vBrowse').hidden = mine; $('vMine').hidden = !mine;
+  if(mine) loadMine();
+}
+$('tabBrowse').onclick = () => tab(false);
+$('tabMine').onclick = () => tab(true);
+
+function msg(t, cls, id){ const m = $(id || 'msg'); m.textContent = t || ''; m.className = 'msg ' + (cls || ''); }
+
+// rURL — адрес запроса к службе файлов устройства PEER.
+function rURL(x, extra){
+  const p = new URLSearchParams({peer: PEER, x, t: T, lang: LANG});
+  for(const [k, v] of Object.entries(extra || {})) p.set(k, v);
+  return '/api/files/remote?' + p.toString();
+}
+async function rGet(x, extra){
+  const r = await fetch(rURL(x, extra), {headers: {'X-Token': T}});
+  const j = await r.json().catch(() => ({error: r.statusText}));
+  if(!r.ok && !j.error) j.error = r.statusText;
+  return j;
+}
+async function rPost(body){
+  const r = await fetch(rURL('op'), {method: 'POST', headers: {'X-Token': T, 'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  return r.json().catch(() => ({error: r.statusText}));
+}
+
+const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n/1024).toFixed(1) + ' KB' : n < 1073741824 ? (n/1048576).toFixed(1) + ' MB' : (n/1073741824).toFixed(2) + ' GB';
+const fmtDate = s => new Date(s*1000).toLocaleString(LANG === 'en' ? 'en-GB' : 'ru-RU', {day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'});
+const ext = n => (n.split('.').pop() || '').toLowerCase();
+const IMG = ['jpg','jpeg','png','gif','webp','bmp','heic','avif','svg'], VID = ['mp4','webm','mov','m4v','mkv','3gp'],
+      TXT = ['txt','md','log','json','yaml','yml','ini','conf','cfg','csv','xml','html','css','js','go','py','sh','kt','java','c','h','cpp','rs','ts','toml','env'];
+const kindIcon = e => e.dir ? 'folder' : IMG.includes(ext(e.name)) ? 'image' : VID.includes(ext(e.name)) ? 'movie' : 'draft';
+const join = (a, b) => (a === '/' ? '' : a) + '/' + b;
+
+async function loadDevices(){
+  const r = await api('/api/files/devices');
+  const devs = (r.devices || []).filter(d => !d.self);
+  const sel = $('dev');
+  if(r.state !== 'online'){
+    sel.innerHTML = '';
+    msg(L('Сеть устройств не подключена — включи её на главном экране.', 'The device network is not connected — turn it on on the main screen.'), 'err');
+    return;
+  }
+  msg('');
+  sel.innerHTML = `<option value="">${L('Выбери устройство…', 'Pick a device…')}</option>` +
+    devs.map(d => `<option value="${esc(d.ip)}"${d.online ? '' : ' disabled'}>${esc(d.name)}${d.online ? '' : ' (' + L('не в сети', 'offline') + ')'}</option>`).join('');
+  if(PEER && devs.some(d => d.ip === PEER)) sel.value = PEER;
+  if(sel.value) openDevice(sel.value);
+}
+$('dev').onchange = () => openDevice($('dev').value);
+$('reload').onclick = () => CUR ? list() : (PEER ? openDevice(PEER) : loadDevices());
+
+async function openDevice(ip){
+  PEER = ip; CUR = null; PATH = '/';
+  $('list').innerHTML = ''; $('writeBar').hidden = true; msg('');
+  if(!ip){ $('crumbs').innerHTML = ''; return; }
+  msg(L('Спрашиваю устройство…', 'Asking the device…'));
+  const r = await rGet('shares');
+  if(r.error){
+    msg(/не слушает|не принимает|refused|47835/i.test(r.error) ? L('На устройстве не добавлено приложение «Файлы устройства».', 'The «Device files» app is not added on that device.') : r.error, 'err');
+    return;
+  }
+  msg('');
+  SHARES = r.shares || [];
+  crumbs();
+  if(!SHARES.length){
+    $('list').innerHTML = `<div class="empty">${esc(L('На этом устройстве не открыто ни одной папки. Открыть — там: «Файлы устройства» → «Мои папки».', 'No folders are shared on that device. Share one there: «Device files» → «My folders».'))}</div>`;
+    return;
+  }
+  $('list').innerHTML = '';
+  for(const s of SHARES){
+    const row = document.createElement('div');
+    row.className = 'row dir';
+    row.innerHTML = `${icon('folder_shared')}<button class="nm">${esc(s.name)}</button><span class="sz"></span><span class="dt">${s.write ? esc(L('можно менять', 'can change')) : esc(L('только смотреть', 'view only'))}</span><span></span>`;
+    row.querySelector('.nm').onclick = () => { CUR = s; PATH = '/'; list(); };
+    $('list').appendChild(row);
+  }
+}
+
+function crumbs(){
+  const c = $('crumbs');
+  c.innerHTML = '';
+  const add = (text, fn) => {
+    const b = document.createElement('button');
+    b.textContent = text;
+    if(fn) b.onclick = fn; else b.className = 'last';
+    c.appendChild(b);
+  };
+  add(L('Папки', 'Folders'), CUR ? () => openDevice(PEER) : null);
+  if(!CUR) return;
+  const parts = PATH.split('/').filter(Boolean);
+  add('/ ' + CUR.name, parts.length ? () => { PATH = '/'; list(); } : null);
+  parts.forEach((p, i) => add('/ ' + p, i < parts.length - 1 ? () => { PATH = '/' + parts.slice(0, i+1).join('/'); list(); } : null));
+}
+
+async function list(){
+  crumbs();
+  const r = await rGet('list', {s: CUR.id, p: PATH});
+  if(r.error){ msg(r.error, 'err'); return; }
+  msg('');
+  WRITE = !!r.write;
+  $('writeBar').hidden = !WRITE;
+  const box = $('list');
+  box.innerHTML = '';
+  if(!r.entries.length){ box.innerHTML = `<div class="empty">${esc(L('Папка пустая.', 'The folder is empty.'))}</div>`; return; }
+  for(const e of r.entries){
+    const row = document.createElement('div');
+    row.className = 'row' + (e.dir ? ' dir' : '');
+    row.innerHTML = `${icon(kindIcon(e))}<button class="nm" title="${esc(e.name)}">${esc(e.name)}</button>
+      <span class="sz">${e.dir ? '' : fmtSize(e.size)}</span><span class="dt">${fmtDate(e.mtime)}</span>
+      <span class="tools">${e.dir ? '' : `<button class="ico" data-a="dl" title="${L('Скачать', 'Download')}">${icon('download')}</button>`}
+        ${WRITE ? `<button class="ico" data-a="ren" title="${L('Переименовать', 'Rename')}">${icon('edit')}</button>
+                   <button class="ico" data-a="del" title="${L('Удалить', 'Delete')}">${icon('delete')}</button>` : ''}</span>`;
+    const p = join(PATH, e.name);
+    row.querySelector('.nm').onclick = () => e.dir ? (PATH = p, list()) : view(e, p);
+    row.querySelectorAll('[data-a]').forEach(b => b.onclick = () => ({dl: download, ren: rename, del: remove})[b.dataset.a](e, p));
+    box.appendChild(row);
+  }
+}
+
+/* ---------- скачать / смотреть ---------- */
+async function download(e, p){
+  if(ANDROID){
+    // У WebView своих загрузок нет — качает ядро в «Загрузки» (с докачкой).
+    msg(L('Скачиваю ', 'Downloading ') + e.name + '…');
+    const r = await api('/api/files/save', {peer: PEER, s: CUR.id, p});
+    msg(r.error || L('Сохранено: ', 'Saved: ') + r.path, r.error ? 'err' : 'ok');
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = rURL('get', {s: CUR.id, p});
+  a.download = e.name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function view(e, p){
+  const k = ext(e.name);
+  const url = rURL('get', {s: CUR.id, p, inline: '1'});
+  const body = $('vBody');
+  if(IMG.includes(k)) body.innerHTML = `<img src="${esc(url)}" alt="">`;
+  else if(VID.includes(k)) body.innerHTML = `<video src="${esc(url)}" controls autoplay playsinline></video>`;
+  else if(TXT.includes(k) && e.size < 2*1048576){
+    body.innerHTML = '<pre></pre>';
+    fetch(url).then(r => r.text()).then(t => body.querySelector('pre').textContent = t);
+  } else return download(e, p);
+  set('vTitle', e.name);
+  $('vDl').onclick = () => download(e, p);
+  $('viewer').hidden = false;
+}
+$('vClose').onclick = () => { $('viewer').hidden = true; $('vBody').innerHTML = ''; };
+
+/* ---------- менять ---------- */
+async function rename(e, p){
+  const to = prompt(L('Новое имя:', 'New name:'), e.name);
+  if(!to || to === e.name) return;
+  const r = await rPost({op: 'rename', s: CUR.id, p, to});
+  r.error ? msg(r.error, 'err') : list();
+}
+async function remove(e, p){
+  if(!confirm(L(`Удалить «${e.name}» на том устройстве? Вернуть будет нельзя.`, `Delete «${e.name}» on that device? It cannot be undone.`))) return;
+  let r = await rPost({op: 'delete', s: CUR.id, p});
+  if(r.needsRecursive){
+    if(!confirm(L(`Папка «${e.name}» не пустая. Удалить вместе со всем содержимым?`, `Folder «${e.name}» is not empty. Delete it with everything inside?`))) return;
+    r = await rPost({op: 'delete', s: CUR.id, p, recursive: true});
+  }
+  r.error ? msg(r.error, 'err') : list();
+}
+$('mkBtn').onclick = async () => {
+  const to = prompt(L('Имя новой папки:', 'New folder name:'));
+  if(!to) return;
+  const r = await rPost({op: 'mkdir', s: CUR.id, p: PATH, to});
+  r.error ? msg(r.error, 'err') : list();
+};
+
+/* ---------- загрузить сюда (кусками, с докачкой) ---------- */
+const CHUNK = 8 << 20;
+$('upBtn').onclick = () => $('upFile').click();
+$('upFile').onchange = async () => {
+  const files = [...$('upFile').files];
+  $('upFile').value = '';
+  for(const f of files) if(!await upload(f)) break;
+  list();
+};
+async function upload(f){
+  const p = join(PATH, f.name);
+  $('xfer').hidden = false;
+  const show = done => { set('xferText', `${f.name} — ${fmtSize(done)} / ${fmtSize(f.size)}`); $('xferBar').style.width = (f.size ? done*100/f.size : 100) + '%'; };
+  let off = 0, tries = 0;
+  // Недогруженное с прошлого раза продолжается с места обрыва.
+  const part = await rGet('part', {s: CUR.id, p});
+  if(part.error){ msg(part.error, 'err'); $('xfer').hidden = true; return false; }
+  off = Math.min(part.size || 0, f.size);
+  for(;;){
+    show(off);
+    const end = Math.min(off + CHUNK, f.size), done = end >= f.size;
+    try {
+      const r = await fetch(rURL('put', {s: CUR.id, p, off, total: f.size, done: done ? '1' : ''}),
+                            {method: 'PUT', headers: {'X-Token': T}, body: f.slice(off, end)});
+      const j = await r.json().catch(() => ({}));
+      if(r.status === 409 && j.size !== undefined){ off = j.size; continue; }
+      if(!r.ok || j.error) throw new Error(j.error || r.statusText);
+      tries = 0;
+      if(done){ show(f.size); msg(L('Загружено: ', 'Uploaded: ') + (j.name || f.name), 'ok'); break; }
+      off = end;
+    } catch(err){
+      // Обрыв связи — ждём и продолжаем с того, что уже дошло.
+      if(++tries > 5){ msg(L('Загрузка прервалась: ', 'Upload failed: ') + err.message + L(' — повтори, продолжится с места обрыва.', ' — retry, it continues where it stopped.'), 'err'); $('xfer').hidden = true; return false; }
+      await new Promise(res => setTimeout(res, 2000 * tries));
+      const pr = await rGet('part', {s: CUR.id, p});
+      if(!pr.error) off = pr.size || 0;
+    }
+  }
+  $('xfer').hidden = true;
+  return true;
+}
+
+/* ---------- мои папки ---------- */
+async function loadMine(r){
+  r = r || await api('/api/files/shares');
+  if(r.error){ msg(r.error, 'err', 'mineMsg'); return; }
+  if(ANDROID && window.SSHTunnelAndroid.hasAllFiles && !window.SSHTunnelAndroid.hasAllFiles()){
+    $('perm').hidden = false;
+    $('perm').innerHTML = `<p style="margin:0 0 8px">${esc(L('Чтобы другие устройства видели папки телефона (Фото, Загрузки…), Android должен разрешить программе «Доступ ко всем файлам».', 'For other devices to see phone folders (Photos, Downloads…), Android must give the app «All files access».'))}</p>
+      <button class="btn primary" id="permBtn">${esc(L('Разрешить', 'Allow'))}</button>`;
+    $('permBtn').onclick = () => window.SSHTunnelAndroid.requestAllFiles();
+  } else $('perm').hidden = true;
+  const box = $('shares');
+  box.innerHTML = r.shares.length ? '' : `<div class="empty" style="padding:20px">${esc(L('Другим ничего не видно.', 'Nothing is visible to others.'))}</div>`;
+  for(const s of r.shares){
+    const c = document.createElement('div');
+    c.className = 'card share';
+    c.innerHTML = `${icon('folder_shared')}<div class="tx"><div>${esc(s.name)}</div><div class="p">${esc(s.path)}</div></div>
+      <label class="chk"><input type="checkbox"${s.write ? ' checked' : ''}>${esc(L('можно менять', 'can change'))}</label>
+      <button class="ico" title="${L('Закрыть доступ', 'Stop sharing')}">${icon('close')}</button>`;
+    c.querySelector('input').onchange = async ev => loadMine(await api('/api/files/shares', {op: 'write', id: s.id, value: ev.target.checked}));
+    c.querySelector('.ico').onclick = async () => loadMine(await api('/api/files/shares', {op: 'remove', id: s.id}));
+    box.appendChild(c);
+  }
+  const have = new Set(r.shares.map(s => s.path));
+  $('sugg').innerHTML = `<option value="">${L('Обычные папки…', 'Common folders…')}</option>` +
+    (r.suggest || []).filter(p => !have.has(p)).map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+}
+$('sugg').onchange = () => { $('manual').value = $('sugg').value; };
+$('shareAdd').onclick = async () => {
+  const path = $('manual').value.trim();
+  if(!path) return;
+  const r = await api('/api/files/shares', {op: 'add', path});
+  if(r.error){ msg(r.error, 'err', 'mineMsg'); return; }
+  msg('', '', 'mineMsg'); $('manual').value = '';
+  loadMine(r);
+};
+// Вернулись из настроек Android после «Разрешить».
+document.addEventListener('visibilitychange', () => { if(!document.hidden && !$('vMine').hidden) loadMine(); });
+
+loadDevices().catch(() => msg(L('Нет связи с программой.', 'No connection to the app.'), 'err'));
+</script>
+</body>
+</html>

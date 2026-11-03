@@ -19,6 +19,7 @@ import (
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/nativeui"
+	"sshtunnel/internal/sshapp"
 	"sshtunnel/internal/updater"
 	"sshtunnel/internal/webui"
 	"sshtunnel/vpn/internal/winsvc"
@@ -70,6 +71,13 @@ func runClient(tray, noWindow bool) {
 	// рабочего стола. Можно ли открыть приложение, проверит служба, отдавая
 	// его страницу.
 	c.p.Local["/api/window"] = addons.WindowHandler(nativeui.Opener("http://"+ln.Addr().String(), dir), nil)
+	// SSH (ТЗ 4) — тоже дело окна: ключ шифруется учётной записью
+	// пользователя (DPAPI), терминал открывается на его рабочем столе. ssh
+	// идёт сам, в сеть устройств его ведёт адаптер службы.
+	sshapp.SetDir(dir)
+	for _, rt := range addons.AppRoutes("ssh") {
+		c.p.Local[rt.Path] = rt.H
+	}
 	go (&http.Server{Handler: c.p, ReadHeaderTimeout: 10 * time.Second}).Serve(ln)
 	pageURL := fmt.Sprintf("http://%s/?t=%s", ln.Addr(), c.p.Token)
 	if noWindow {
