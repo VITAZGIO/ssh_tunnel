@@ -337,4 +337,5 @@
     <string name="vpn_permission_denied">The tunnel can't start without VPN permission</string>
     <string name="applies_on_reconnect">takes effect on the next connection</string>
     <string name="key_bad">This is not a private key: it starts with “-----BEGIN”</string>
+    <string name="ui_failed">The screen failed to start. The tunnel still works from the quick settings tile; reinstalling the app usually helps.</string>
 </resources>

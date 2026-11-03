@@ -339,4 +339,5 @@
     <string name="vpn_permission_denied">Без разрешения на VPN туннель не включить</string>
     <string name="applies_on_reconnect">подействует при следующем подключении</string>
     <string name="key_bad">Это не приватный ключ: он начинается с «-----BEGIN»</string>
+    <string name="ui_failed">Экран не запустился. Туннель можно включить плиткой в шторке; переустановка приложения обычно помогает.</string>
 </resources>

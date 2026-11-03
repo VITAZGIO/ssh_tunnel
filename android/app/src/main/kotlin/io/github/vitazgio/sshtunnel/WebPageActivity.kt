@@ -55,6 +55,12 @@ class WebPageActivity : AppCompatActivity() {
                 if (web.canGoBack()) web.goBack() else finish()
             }
         })
+        // Готовый адрес страницы от главного экрана (Книга, приложение
+        // окном): путь ядра с параметрами.
+        intent.getStringExtra(EXTRA_URL)?.takeIf { it.startsWith("/") }?.let {
+            web.loadUrl(base + it)
+            return
+        }
         val s = Settings(this)
         val q = Uri.Builder()
             .appendQueryParameter("t", mobile.Mobile.uiToken())
@@ -89,6 +95,7 @@ class WebPageActivity : AppCompatActivity() {
     }
 
     companion object {
+        const val EXTRA_URL = "url"
         const val EXTRA_PAGE = "page"
         const val EXTRA_OPEN = "open"
         const val EXTRA_CHAPTER = "chapter"
