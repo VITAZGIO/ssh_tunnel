@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Кто трогает трафик</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../pages.css">
+<style>
+  body{background:transparent}
+  .wrap{padding:4px 14px 16px;display:flex;flex-direction:column;gap:10px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .f .nm{font-weight:600}
+  .f.info .nm{font-weight:500}
+  .f p{margin:4px 0 0;font-size:13px}
+  .f .dim{color:var(--dim)}
+  .ask{margin-top:8px;padding:10px;border-radius:9px;background:var(--card2)}
+  input{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--text);font:inherit}
+  h3{margin:8px 0 0;font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row">
+    <button class="btn primary" id="scan"></button>
+    <span class="hint" id="siteLbl"></span><input id="site" value="youtube.com" size="16" spellcheck="false">
+  </div>
+  <div id="sum" class="hint"></div>
+  <div id="list" class="wrap" style="padding:0"></div>
+  <h3 id="offTitle"></h3>
+  <div id="off" class="wrap" style="padding:0"></div>
+</div>
+<script src="../pages.js"></script>
+<script>
+/* «Кто трогает трафик»: ищет ядро (/api/diag/meddlers). Остановка — ТОЛЬКО
+   после кнопки «Разрешаю» (POST …/try); дальше ядро само перепроверяет и,
+   если не помогло, само возвращает. */
+$('scan').textContent = L('Проверить, кто мешает', 'Check who interferes');
+$('siteLbl').textContent = L('Проверочный сайт:', 'Test site:');
+$('offTitle').textContent = L('Что я отключал', 'What I turned off');
+const STATE = {stopped: L('остановлено', 'stopped'), disabled: L('отключено насовсем (автозапуск)', 'turned off for good (autostart)'), reconciled: L('помирено', 'reconciled')};
+
+async function act(op, id, extra){
+  return api('/api/diag/meddlers/' + op, Object.assign({id, site: $('site').value.trim()}, extra || {}))
+    .catch(() => ({error: L('Нет связи с программой.', 'No connection to the app.')}));
+}
+
+function renderOff(list){
+  const o = $('off');
+  o.innerHTML = '';
+  if(!list || !list.length){ o.innerHTML = `<div class="hint">${esc(L('Ничего.', 'Nothing.'))}</div>`; return; }
+  for(const u of list){
+    const c = document.createElement('div');
+    c.className = 'card row';
+    c.innerHTML = `<span style="flex:1"><b>${esc(u.name)}</b><div class="hint">${esc(STATE[u.state] || u.state)} · ${esc(new Date(u.time).toLocaleString())}</div></span>
+      <button class="btn">${esc(L('Вернуть', 'Restore'))}</button>`;
+    c.querySelector('button').onclick = async ev => {
+      ev.target.disabled = true;
+      const r = await act('restore', u.id);
+      if(r.error) alert(r.error);
+      renderOff(r.disabled);
+    };
+    o.appendChild(c);
+  }
+}
+
+// askNext — «Без X работает. Что дальше?»
+function askNext(box, f, r){
+  box.innerHTML = `<div>${esc(r.text)}</div><div class="row" style="margin-top:8px">
+    <button class="btn primary" data-a="keep">${esc(L('Отключить насовсем', 'Turn off for good'))}</button>
+    <button class="btn" data-a="restore">${esc(L('Вернуть как было', 'Restore as it was'))}</button>
+    ${r.canReconcile ? `<button class="btn" data-a="reconcile">${esc(L('Помирить', 'Reconcile'))}</button>` : ''}</div>
+    <div class="hint" data-n></div>`;
+  box.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => {
+    box.querySelectorAll('button').forEach(x => x.disabled = true);
+    box.querySelector('[data-n]').textContent = L('Делаю…', 'Working…');
+    const res = await act(b.dataset.a, f.id);
+    const t = res.error || (res.result && res.result.text) ||
+      (b.dataset.a === 'keep' ? L('Отключил: автозапуск выключен, ничего не удалено.', 'Turned off: autostart disabled, nothing removed.')
+                              : L('Вернул как было.', 'Restored as it was.'));
+    box.querySelector('[data-n]').textContent = t;
+    renderOff(res.disabled);
+  });
+}
+
+function renderScan(sc){
+  $('sum').textContent = sc ? sc.summary : '';
+  const l = $('list');
+  l.innerHTML = '';
+  for(const f of (sc && sc.findings) || []){
+    const c = document.createElement('div');
+    c.className = 'card f ' + f.severity;
+    c.innerHTML = `<div class="row">${icon(f.severity === 'warn' ? 'warning' : 'policy')}<span class="nm">${esc(f.what)}</span></div>
+      <p>${esc(f.harm)}</p><p class="dim">${esc(f.todo)}</p>
+      ${f.canStop ? `<div class="ask"><div>${esc(L('«' + f.name + '» может мешать VPN. Остановить на время проверки?', '"' + f.name + '" may interfere with the VPN. Stop it for the check?'))}</div>
+        <div class="row" style="margin-top:8px"><button class="btn primary" data-yes>${esc(L('Разрешаю', 'Allow'))}</button>
+        <button class="btn" data-no>${esc(L('Нет', 'No'))}</button></div></div>` : ''}`;
+    const ask = c.querySelector('.ask');
+    if(ask){
+      ask.querySelector('[data-no]').onclick = () => ask.remove();
+      ask.querySelector('[data-yes]').onclick = async () => {
+        ask.innerHTML = `<div class="hint">${esc(L('Останавливаю и перепроверяю — до минуты…', 'Stopping and re-checking — up to a minute…'))}</div>`;
+        const r = await act('try', f.id);
+        if(r.error){ ask.innerHTML = `<div>${esc(r.error)}</div>`; renderOff(r.disabled); return; }
+        renderOff(r.disabled);
+        if(r.result.helped) askNext(ask, f, r.result);
+        else ask.innerHTML = `<div>${esc(r.result.text)}</div>`;
+      };
+    }
+    l.appendChild(c);
+  }
+}
+
+$('scan').onclick = async () => {
+  $('scan').disabled = true;
+  $('sum').textContent = L('Ищу…', 'Searching…');
+  const d = await api('/api/diag/meddlers', {}).catch(() => ({}));
+  $('scan').disabled = false;
+  renderScan(d.scan);
+  renderOff(d.disabled);
+};
+api('/api/diag/meddlers').then(d => { renderScan(d.scan); renderOff(d.disabled); if(Q.get('scan')) $('scan').click(); });
+</script>
+</body>
+</html>

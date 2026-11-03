@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Отчёт для поддержки</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../pages.css">
+<style>
+  body{background:transparent}
+  .wrap{padding:4px 14px 16px;display:flex;flex-direction:column;gap:10px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  details{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+  summary{cursor:pointer;font-weight:600}
+  pre{white-space:pre-wrap;word-break:break-all;font:12px/1.45 var(--mono);max-height:320px;overflow:auto;margin:8px 0 0;
+      -webkit-user-select:text;user-select:text}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hint" id="intro"></div>
+  <div id="files" class="wrap" style="padding:0"></div>
+  <div class="row">
+    <button class="btn primary" id="save"></button>
+    <button class="btn" id="share"></button>
+    <span class="hint" id="note"></span>
+  </div>
+</div>
+<script src="../pages.js"></script>
+<script>
+/* Отчёт: ядро собирает файлы и прячет секреты (/api/diag/report), страница
+   сначала показывает, что внутри. На сервер ничего не уходит. */
+$('intro').textContent = L('Вот что будет в файле. Пароли, ключи и токены заменены на ***. Никуда не отправляется — сохранишь и передашь сам.',
+  'This is what goes into the file. Passwords, keys and tokens are replaced with ***. Nothing is sent anywhere — you save and pass it on yourself.');
+$('save').textContent = L('Сохранить', 'Save');
+$('share').textContent = L('Поделиться', 'Share');
+
+async function run(op){
+  $('save').disabled = $('share').disabled = true;
+  const r = await api('/api/diag/report', {op}).catch(() => ({error: L('Нет связи с программой.', 'No connection to the app.')}));
+  $('save').disabled = $('share').disabled = false;
+  if(r.error){ $('note').textContent = r.error; return; }
+  $('note').textContent = op === 'share'
+    ? L('Файл в буфере обмена — вставь его в мессенджер или письмо. ', 'The file is in the clipboard — paste it into a messenger or email. ') + r.path
+    : L('Сохранён: ', 'Saved: ') + r.path;
+}
+$('save').onclick = () => run('save');
+$('share').onclick = () => run('share');
+
+api('/api/diag/report').then(d => {
+  for(const f of d.files || []){
+    const el = document.createElement('details');
+    el.innerHTML = `<summary>${esc(f.name)} <span class="hint">${(f.text.length / 1024).toFixed(1)} KB</span></summary><pre></pre>`;
+    el.querySelector('pre').textContent = f.text || L('(пусто)', '(empty)');
+    $('files').appendChild(el);
+  }
+});
+</script>
+</body>
+</html>

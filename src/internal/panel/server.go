@@ -118,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/update/install", s.requireAuth(s.handleUpdateInstall))
 	mux.HandleFunc("/api/update/progress", s.requireAuth(s.handleUpdateProgress))
 	s.meshRoutes(mux)
+	s.diagRoutes(mux)
 	return mux
 }
 
