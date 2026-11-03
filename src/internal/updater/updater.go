@@ -75,7 +75,7 @@ var (
 	cacheMu  sync.Mutex
 	cached   *Release
 	cachedAt time.Time
-	cacheTTL = time.Hour
+	cacheTTL = time.Minute
 	// httpClient — свой, а не http.DefaultClient: у проверки обновлений свой
 	// таймаут, и менять его глобально для всей программы нельзя.
 	httpClient = &http.Client{Timeout: 10 * time.Second}
@@ -87,8 +87,10 @@ var (
 var ErrRateLimited = errors.New("GitHub временно ограничил число запросов — попробуй позже")
 
 // Check возвращает результат сравнения установленной версии с последним
-// релизом. Ответ GitHub кешируется на час: анонимный лимит — 60 запросов в
-// час на адрес, а кнопку можно нажимать сколько угодно.
+// релизом. Ответ GitHub кешируется на минуту: этого хватает, чтобы частые
+// нажатия не съели анонимный лимит (60 запросов в час на адрес), и при этом
+// кнопка сразу видит только что вышедший релиз. Час был слишком долгим:
+// после выхода версии кнопка ещё час отвечала «у тебя последняя».
 func Check(ctx context.Context) (Result, error) {
 	rel, err := latest(ctx)
 	if err != nil {
@@ -113,7 +115,7 @@ func Check(ctx context.Context) (Result, error) {
 	return res, nil
 }
 
-// Latest — последний релиз (с тем же часовым кешем, что и у Check).
+// Latest — последний релиз (с тем же коротким кешем, что и у Check).
 func Latest(ctx context.Context) (Release, error) {
 	rel, err := latest(ctx)
 	if err != nil {

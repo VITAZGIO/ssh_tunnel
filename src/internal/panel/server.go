@@ -285,7 +285,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 // handleUpdateCheck сравнивает версию панели с последним релизом на GitHub.
 // Ходит сам сервер, а не браузер: панель может стоять там, где у браузера
 // администратора нет доступа к github.com, и CORS чужого домена со страницы
-// всё равно не пройдёт. Ответ кешируется на час внутри internal/updater.
+// всё равно не пройдёт. Ответ кешируется на минуту внутри internal/updater.
 //
 // Скачивать и подменять себя панель не будет: сервер обновляют по SSH одной
 // командой из docs/PANEL_SETUP.md — см. docs/UPDATE_SPEC.md.
