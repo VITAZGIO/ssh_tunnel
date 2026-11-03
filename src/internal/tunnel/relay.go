@@ -80,6 +80,7 @@ func (t *Tunnel) serve(r request) {
 		}
 		return
 	}
+	remote = metered(remote, proc, route)
 	defer remote.Close()
 
 	if r.writeOK != nil {

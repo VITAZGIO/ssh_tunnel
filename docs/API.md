@@ -223,3 +223,38 @@ Invoke-RestMethod "$($a.url)/api/calendar/events?from=2026-11-01&to=2026-11-08" 
 
 Между устройствами — свой протокол на порту 47836 сети устройств
 (`internal/mirror/proto.go`).
+
+## Трафик, сканер, буфер (ТЗ 5)
+
+Отвечают, только пока приложение добавлено (и, если фоновое, включено).
+
+- `GET /api/traffic?period=day|week|month&net=all|wifi|mobile` — расход:
+  `days` (`date`, `server`, `direct`, `mesh` — байты), `total`, `top`
+  (программы: `name`, байты по путям, `up`, `down`, `total`), `hasNet`
+  (телефон: есть деление Wi-Fi / мобильная), `limit` (`on`, `gb`, `period`,
+  `scope`, `used`, `pct`). `name` — exe на ПК, пакет на телефоне, `""` —
+  без программы, `ssh_tunnel` — сама программа.
+- `POST /api/traffic/limit` `{"on":bool,"gb":50,"period":"month|day","scope":"all|server|mobile"}`
+  — лимит: только предупреждения на 80% и 100%, VPN не выключается.
+- `GET /api/lanscan` — как идёт сканирование и кто найден: `running`,
+  `subnet`, `iface`, `done`/`total`, `hosts` (`ip`, `mac` — пусто, если
+  система не дала, `randomMac`, `name`, `vendor`, `rttMs`, `ports` — открытые
+  из 22/80/443, `self`). `POST {}` — сканировать заново. Ничего не хранится.
+- `GET /api/clipboard?after=<seq>[&wait=1]` — общий буфер: `items` (новые
+  первыми: `id`, `seq`, `kind` text|image|file, `name`, `size`, `preview`,
+  `from`, `out`, `sent`, `gone`), `seq`, `max`, `mesh`. `wait=1` — ждать
+  новой записи до 25 с.
+- `GET /api/clipboard/data?id=[&dl=1]` — содержимое записи.
+- `POST /api/clipboard/push?kind=text|image|file&name=&mime=` — тело —
+  содержимое (до 50 МБ): в историю и всем устройствам сети, кто в сети.
+  Ответ `{"ok":true,"item"}` или `{"error","tooBig"}`.
+- `POST /api/clipboard/delete` `{"id"}` или `{"all":true}`.
+
+Между устройствами буфер ходит по сети устройств на порт 47837
+(`POST /clip?id=&kind=&name=&mime=`); нет службы на порту — устройство не
+участвует.
+
+```powershell
+Invoke-RestMethod "$($a.url)/api/clipboard/push?kind=text" -Headers $h -Method Post -Body 'привет'
+(Invoke-RestMethod "$($a.url)/api/traffic?period=month" -Headers $h).top | Select-Object -First 5 name, total
+```

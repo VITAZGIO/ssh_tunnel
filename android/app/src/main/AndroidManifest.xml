@@ -185,6 +185,40 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/calendar_widget_info" />
         </receiver>
+        <!-- Общий буфер (ТЗ 5): «Поделиться → ssh_tunnel», плитка в шторке и
+             прозрачное окно, которое читает буфер (в фоне Android не даёт). -->
+        <activity
+            android:name=".ClipShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="@string/clip_share"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="application/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".ClipReadActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <service
+            android:name=".ClipTile"
+            android:exported="true"
+            android:icon="@drawable/ic_clip"
+            android:label="@string/clip_tile"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
         <!-- Скачанное обновление отдаётся установщику через FileProvider. -->
         <provider
             android:name="androidx.core.content.FileProvider"

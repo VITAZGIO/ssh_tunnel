@@ -58,6 +58,7 @@ func (t *Tunnel) ServeConn(conn net.Conn, target string, byIP bool) {
 		t.bus.Publish(eventConn(proc, pid, shown, "tun", byIP, direct, err))
 		return
 	}
+	remote = metered(remote, t.owner(proc, conn), route)
 	defer remote.Close()
 	untrack := t.track(c, route, entryStack, func() { conn.Close(); remote.Close() })
 	defer untrack()

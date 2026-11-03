@@ -22,6 +22,7 @@ import (
 
 	"sshtunnel/internal/core"
 	"sshtunnel/internal/procinfo"
+	"sshtunnel/internal/traffic"
 )
 
 // rules — правила решения прямо сейчас: режим кнопок и настройки.
@@ -75,7 +76,11 @@ func (t *Tunnel) dialRoute(route core.Route, target string) (net.Conn, error) {
 // SSH, «Файлы устройства»): путь выбирает ядро, как для любой программы.
 func (t *Tunnel) DialApp(target string) (net.Conn, error) {
 	route, _ := t.decide("", target)
-	return t.dialRoute(route, target)
+	c, err := t.dialRoute(route, target)
+	if err != nil {
+		return nil, err
+	}
+	return metered(c, selfName, route), nil
 }
 
 var (
@@ -277,13 +282,13 @@ func (t *Tunnel) RouteUDP(src netip.AddrPort, target string, byIP bool) func(app
 	route, c := t.decide(proc, target)
 	switch route {
 	case core.RouteDirect:
-		return func(app net.Conn) { t.serveUDPDirect(app, c, proc, pid, byIP) }
+		return func(app net.Conn) { t.serveUDPDirect(app, c, proc, pid, byIP, t.udpOwner(proc, src)) }
 	case core.RouteServer:
 		relay := t.UDPRelay()
 		if relay == nil {
 			return nil
 		}
-		return func(app net.Conn) { t.serveUDPRelay(app, c, relay) }
+		return func(app net.Conn) { t.serveUDPRelay(app, c, relay, t.udpOwner(proc, src)) }
 	}
 	return nil
 }
@@ -292,13 +297,14 @@ func (t *Tunnel) RouteUDP(src netip.AddrPort, target string, byIP bool) func(app
 const udpIdle = 60 * time.Second
 
 // serveUDPDirect ведёт UDP-поток приложения напрямую мимо сервера.
-func (t *Tunnel) serveUDPDirect(app net.Conn, c core.Conn, proc string, pid int, byIP bool) {
+func (t *Tunnel) serveUDPDirect(app net.Conn, c core.Conn, proc string, pid int, byIP bool, owner string) {
 	defer app.Close()
 	remote, err := t.dialDirect("udp", c.Target, 10*time.Second)
 	if err != nil {
 		t.bus.Publish(eventConn(proc, pid, c.Target, "udp", byIP, true, err))
 		return
 	}
+	remote = metered(remote, owner, core.RouteDirect)
 	defer remote.Close()
 	untrack := t.track(c, core.RouteDirect, entryStack, func() { app.Close(); remote.Close() })
 	defer untrack()
@@ -342,7 +348,7 @@ func pumpDatagrams(a, b net.Conn) {
 }
 
 // serveUDPRelay ведёт UDP-поток через ретранслятор на сервере.
-func (t *Tunnel) serveUDPRelay(app net.Conn, c core.Conn, relay udpRelay) {
+func (t *Tunnel) serveUDPRelay(app net.Conn, c core.Conn, relay udpRelay, owner string) {
 	defer app.Close()
 	host, portStr, err := net.SplitHostPort(c.Target)
 	if err != nil {
@@ -353,6 +359,7 @@ func (t *Tunnel) serveUDPRelay(app net.Conn, c core.Conn, relay udpRelay) {
 		return
 	}
 	sessionID := relay.Open(func(data []byte, _ string, _ uint16) {
+		traffic.Count(owner, traffic.RouteServer, 0, int64(len(data)))
 		app.Write(data)
 	})
 	defer relay.Close(sessionID)
@@ -369,6 +376,7 @@ func (t *Tunnel) serveUDPRelay(app net.Conn, c core.Conn, relay udpRelay) {
 		if err := relay.Send(sessionID, host, uint16(port), buf[:n]); err != nil {
 			return
 		}
+		traffic.Count(owner, traffic.RouteServer, int64(n), 0)
 	}
 }
 
@@ -384,5 +392,9 @@ type udpRelay interface {
 // устройств, домашний адрес — напрямую).
 func (t *Tunnel) DialSelf(target string) (net.Conn, error) {
 	route, _ := t.decide("", target)
-	return t.dialRoute(route, target)
+	c, err := t.dialRoute(route, target)
+	if err != nil {
+		return nil, err
+	}
+	return metered(c, selfName, route), nil
 }

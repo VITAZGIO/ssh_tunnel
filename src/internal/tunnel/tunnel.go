@@ -120,6 +120,12 @@ type Config struct {
 	// а на Windows программу-владельца видно по порту, как и у прокси.
 	TunProcessRules bool
 
+	// OwnerOf — чьё соединение из стека (proto 6 — TCP, 17 — UDP; src —
+	// адрес приложения, dst — куда оно шло). Только для учёта трафика по
+	// программам на телефоне (ConnectivityManager.getConnectionOwnerUid);
+	// на решение «куда» не влияет. nil — не узнаём.
+	OwnerOf func(proto int, src, dst netip.AddrPort) string
+
 	// LocalViaTunnel — вести ли в туннель и адреса локальной сети.
 	//
 	// По умолчанию (false) 192.168.x.x, домашние имена и прочая локальная

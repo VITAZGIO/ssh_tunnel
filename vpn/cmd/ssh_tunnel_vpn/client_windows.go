@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"sshtunnel/internal/addons"
+	"sshtunnel/internal/clipshare"
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/nativeui"
@@ -78,6 +79,9 @@ func runClient(tray, noWindow bool) {
 	for _, rt := range addons.AppRoutes("ssh") {
 		c.p.Local[rt.Path] = rt.H
 	}
+	// Общий буфер (ТЗ 5): служба под SYSTEM буфера пользователя не видит —
+	// за ним следит окно и говорит со службой через её API.
+	go clipshare.WatchRemote(func() (string, string) { ep := c.p.Endpoint(); return ep.Addr, ep.Token })
 	go (&http.Server{Handler: c.p, ReadHeaderTimeout: 10 * time.Second}).Serve(ln)
 	pageURL := fmt.Sprintf("http://%s/?t=%s", ln.Addr(), c.p.Token)
 	if noWindow {

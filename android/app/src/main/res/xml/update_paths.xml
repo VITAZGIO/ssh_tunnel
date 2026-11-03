@@ -2,4 +2,6 @@
 <!-- Откуда установщик может взять скачанное обновление (см. MainActivity.downloadApk). -->
 <paths>
     <cache-path name="updates" path="updates/" />
+    <!-- Общий буфер: полученные картинки и файлы кладутся в буфер ссылкой. -->
+    <files-path name="clipboard" path="clipboard/" />
 </paths>

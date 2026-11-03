@@ -38,6 +38,7 @@ object DeviceApps {
             mobile.Mobile.setKeySealer(KeystoreSealer)
             mobile.Mobile.setTransferListener(TransferNotifier(app))
             mobile.Mobile.setMirrorListener(MirrorNotifier(app))
+            Tools5.init(app) // ТЗ 5: трафик, сканер, буфер
             try {
                 mobile.Mobile.startUI(app.filesDir.absolutePath)
             } catch (_: Exception) {

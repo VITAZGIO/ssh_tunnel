@@ -50,4 +50,11 @@
     <string name="files_transfer_channel">Передача файлов</string>
     <string name="files_transfer_title">Файлы устройства</string>
     <string name="files_transfer_many">Передач: %1$d</string>
+    <!-- ТЗ 5: трафик, сканер, буфер -->
+    <string name="tools_channel">Предупреждения приложений</string>
+    <string name="clip_share">Общий буфер ssh_tunnel</string>
+    <string name="clip_tile">Общий буфер</string>
+    <string name="clip_sent">Отправлено устройств: %1$d</string>
+    <string name="clip_too_big">Больше 50 МБ — передай через «Файлы устройства»</string>
+    <string name="clip_empty">В буфере нечего отправить</string>
 </resources>
