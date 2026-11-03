@@ -58,31 +58,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".AppsActivity"
-            android:exported="false"
-            android:label="@string/apps_title" />
-
-        <activity
-            android:name=".AdBlockActivity"
-            android:exported="false"
-            android:label="@string/ad_block_title" />
-
-        <activity
-            android:name=".DomainsActivity"
-            android:exported="false"
-            android:label="@string/domains_title" />
-
-        <activity
-            android:name=".MeshActivity"
-            android:exported="false"
-            android:label="@string/mesh_title" />
-
-        <activity
-            android:name=".UsersActivity"
-            android:exported="false"
-            android:label="@string/users_title" />
-
         <!-- Общие с ПК страницы: Книга и дополнительные приложения. -->
         <activity
             android:name=".WebPageActivity"

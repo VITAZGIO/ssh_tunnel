@@ -48,8 +48,6 @@ class TunnelService : VpnService(), Callbacks {
         @Volatile var statsJson: String = "{}"
         val log = ArrayDeque<String>()
 
-        var onUpdate: (() -> Unit)? = null
-
         /** Общий экран (AndroidApi): состояние и строки журнала. */
         @Volatile var onApiUpdate: (() -> Unit)? = null
         @Volatile var onApiLog: ((String) -> Unit)? = null
@@ -64,12 +62,12 @@ class TunnelService : VpnService(), Callbacks {
         fun speedTest(): String =
             current?.tunnel?.speedTest() ?: """{"error":"туннель выключен"}"""
 
-        /** Создание пользователя на сервере для UsersActivity (JSON, см. mobile.ServerUsers). */
+        /** Создание пользователя на сервере для экрана (/api/serverusers, JSON, см. mobile.ServerUsers). */
         fun serverUsers(op: String, name: String, type: String, pass: String): String =
             current?.tunnel?.serverUsers(op, name, type, pass)
                 ?: """{"error":"туннель выключен"}"""
 
-        /** Состояние сети устройств для MeshActivity (JSON, см. mobile.MeshStatusJSON). */
+        /** Состояние сети устройств для экрана (/api/mesh, JSON, см. mobile.MeshStatusJSON). */
         fun meshStatus(): String =
             current?.tunnel?.meshStatusJSON() ?: """{"state":"stopped"}"""
 
@@ -697,7 +695,6 @@ class TunnelService : VpnService(), Callbacks {
     }
 
     private fun fireUpdate() {
-        onUpdate?.invoke()
         onApiUpdate?.invoke()
     }
 
