@@ -51,7 +51,9 @@ func Install(newFile, exe string, stop func()) error {
 	return nil
 }
 
-// ownUnit — служба systemd, в которой мы работаем («ssh_tunnel.service»).
+// OwnUnit — служба systemd, в которой мы работаем («ssh_tunnel.service»).
+func OwnUnit() string { return ownUnit() }
+
 func ownUnit() string {
 	b, err := os.ReadFile("/proc/self/cgroup")
 	if err != nil {

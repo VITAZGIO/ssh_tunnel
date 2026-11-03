@@ -95,6 +95,7 @@ func Run(o Options) {
 		"свой адрес веб-интерфейса (по умолчанию "+defaultWebAddr+", с -web-lan — "+lanWebAddr+")")
 	save := flag.Bool("save", false, "сохранить настройки и выйти")
 	printEnv := flag.Bool("env", false, "напечатать строки для подключения прокси в оболочке и выйти")
+	resetPass := flag.Bool("reset-password", false, "забыл пароль входа в панель: убрать его и выйти (потом перезапусти службу)")
 	flag.Parse()
 
 	p.FilterApps = splitApps(*apps)
@@ -105,6 +106,14 @@ func Run(o Options) {
 		for _, line := range envLines(p) {
 			fmt.Println(line)
 		}
+		return
+	}
+	if *resetPass {
+		cfg.UIPassHash = ""
+		if err := cfg.Save(); err != nil {
+			fatal("не удалось сохранить настройки: %v", err)
+		}
+		fmt.Println("Пароль входа убран (" + config.Path() + "). Перезапусти программу или службу — и задай новый в настройках.")
 		return
 	}
 	if *save {

@@ -505,6 +505,11 @@
                      border:0;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--text);font:inherit}
   #quickPanel button:hover{background:var(--card)}
   #quickPanel .mi{color:var(--accent)}
+  #loginView{position:fixed;inset:0;z-index:50;background:var(--bg);display:grid;place-items:center;padding:16px}
+  #loginView[hidden]{display:none}
+  .loginBox{display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px}
+  .loginBox input{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:9px 10px;color:var(--text);font:inherit}
+  #loginHow code{font-family:var(--mono);background:var(--card2);padding:2px 5px;border-radius:5px;word-break:break-all}
   /* Телефон (WebView, мост SSHTunnelAndroid): чего на нём нет — не видно. */
   body.android .desk-only{display:none!important}
   body:not(.android) .android-only{display:none!important}
@@ -680,6 +685,19 @@
     <span class="mi" style="--i:url(icons/keyboard_double_arrow_left.svg)"></span>
   </button>
   <div id="quickPanel" hidden></div>
+
+  <!-- Вход по паролю (Linux, панель по локальной сети): пока не вошёл —
+       только это окно. -->
+  <div id="loginView" hidden>
+    <div class="card loginBox">
+      <b data-i18n="login_title">Вход в панель</b>
+      <input type="password" id="loginPass" autocomplete="current-password" data-i18n-placeholder="login_ph" placeholder="пароль">
+      <button class="btn primary" id="loginGo" data-i18n="login_go">Войти</button>
+      <span class="hint" id="loginNote"></span>
+      <a href="#" id="loginForgot" data-i18n="login_forgot">Забыли пароль?</a>
+      <div class="hint" id="loginHow" hidden></div>
+    </div>
+  </div>
 
   <!-- ГЛАВНЫЙ ЭКРАН -->
   <div class="view on" id="viewMain">
@@ -1097,6 +1115,20 @@
             сможет нажимать кнопки программы и менять правила через «ssh_tunnel.exe mcp». Только на этом
             устройстве, наружу ничего не открывается. Как подключить — в Книге, глава «Команды и нейросеть».</span></span></label>
       </div>
+      <div class="chk-row" id="uiLockRow" hidden>
+        <label class="chk"><input type="checkbox" id="uiLock">
+          <span class="lbl" data-i18n="ui_lock">Вход по паролю</span>
+          <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)"
+            >?<span class="tip" data-i18n="ui_lock_note">Панель, открытую по локальной сети, сначала спросит
+            пароль. Пока пароль не задан — не спрашивает. Забыл — на сервере под root:
+            «ssh_tunnel_linux -reset-password» и перезапуск службы.</span></span></label>
+      </div>
+      <div class="chk-row" id="uiPassRow" hidden>
+        <input type="password" id="uiPass" autocomplete="new-password" style="flex:1;min-width:0"
+          data-i18n-placeholder="ui_pass_ph" placeholder="новый пароль">
+        <button class="btn" type="button" id="uiPassSet" data-i18n="ui_pass_set">Задать пароль</button>
+      </div>
+      <span class="hint" id="uiPassNote" hidden style="display:block;margin:-2px 0 6px"></span>
       <div class="chk-row">
         <label class="chk"><input type="checkbox" id="appProfilesOn">
           <span class="lbl" data-i18n="app_profiles_on">Профили приложения</span>
@@ -1745,6 +1777,48 @@ const api = (path, body, raw) => fetch(path, {
   headers: {'X-Token': T, 'Content-Type': 'application/json'},
   body: body ? (raw ? body : JSON.stringify(body)) : undefined
 }).then(r => r.json());
+// Вход по паролю (Linux, панель по локальной сети; webui/login.go).
+async function checkLogin(){
+  const r = await fetch('/api/login', {cache: 'no-store'}).then(x => x.json()).catch(() => null);
+  if(!r || !r.need) return;
+  $('loginView').hidden = false;
+  $('loginPass').focus();
+  const how = $('loginHow');
+  how.textContent = tr('login_how');
+  for(const line of [(r.exe || 'ssh_tunnel_linux') + ' -reset-password', r.unit ? 'systemctl restart ' + r.unit : '']){
+    if(!line) continue;
+    const c = document.createElement('code');
+    c.textContent = line;
+    how.append(document.createElement('br'), c);
+  }
+}
+function loginGo(){
+  fetch('/api/login', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({password: $('loginPass').value})}).then(x => x.json()).then(r => {
+    if(r.ok){ location.reload(); return; }
+    $('loginNote').textContent = r.error || '';
+  }).catch(() => {});
+}
+$('loginGo').onclick = loginGo;
+$('loginPass').onkeydown = ev => { if(ev.key === 'Enter') loginGo(); };
+$('loginForgot').onclick = ev => { ev.preventDefault(); $('loginHow').hidden = !$('loginHow').hidden; };
+checkLogin();
+
+// showUIPass — поле пароля видно только при галке «Вход по паролю».
+async function showUIPass(){
+  const on = OS === 'linux' && $('uiLock').checked;
+  $('uiPassRow').hidden = $('uiPassNote').hidden = !on;
+  if(!on) return;
+  const r = await api('/api/uipass').catch(() => ({}));
+  $('uiPassNote').textContent = r.set ? tr('ui_pass_isset') : tr('ui_pass_unset');
+}
+$('uiLock').addEventListener('change', showUIPass);
+$('uiPassSet').onclick = async () => {
+  const r = await api('/api/uipass', {password: $('uiPass').value}).catch(e => ({error: String(e)}));
+  $('uiPassNote').textContent = r.error || tr('ui_pass_saved');
+  if(!r.error) $('uiPass').value = '';
+};
+
 // apiWithin — тот же запрос, но ждём не дольше ms: кнопка не должна
 // зависать, даже если ответ задержался (сама операция идёт дальше, а итог
 // придёт событием состояния).
@@ -2086,6 +2160,11 @@ const I18N = {
     update_failed:'не получилось связаться с GitHub — проверь интернет',
     update_rate_limited:'GitHub временно ограничил число запросов, попробуй позже',
     update_download:'Скачать в «Загрузки»', update_downloading:'скачиваю…',
+    ui_lock:'Вход по паролю', ui_pass_ph:'новый пароль', ui_pass_set:'Задать пароль',
+    ui_pass_unset:'Пароль не задан — пока не спрашивается.', ui_pass_isset:'Пароль задан.', ui_pass_saved:'Пароль сохранён.',
+    ui_lock_note:'Панель, открытую по локальной сети, сначала спросит пароль. Пока пароль не задан — не спрашивает. Забыл — на сервере под root: «ssh_tunnel_linux -reset-password» и перезапуск службы.',
+    login_title:'Вход в панель', login_ph:'пароль', login_go:'Войти', login_forgot:'Забыли пароль?',
+    login_how:'На сервере в консоли под root выполни:',
     update_install:'Обновить', update_installing_self:'скачиваю и проверяю…',
     update_restarting:'ставлю новую версию и перезапускаюсь…',
     update_downloaded:'скачано: {path} — закрой программу и замени ею старый файл',
@@ -2410,6 +2489,11 @@ const I18N = {
     update_failed:'could not reach GitHub — check your connection',
     update_rate_limited:'GitHub is rate-limiting requests, try again later',
     update_download:'Download to Downloads', update_downloading:'downloading…',
+    ui_lock:'Password sign-in', ui_pass_ph:'new password', ui_pass_set:'Set password',
+    ui_pass_unset:'No password set — not asked yet.', ui_pass_isset:'Password is set.', ui_pass_saved:'Password saved.',
+    ui_lock_note:'The panel opened over the local network asks for a password first. Until one is set, it does not ask. Forgot it — on the server as root: “ssh_tunnel_linux -reset-password” and restart the service.',
+    login_title:'Sign in', login_ph:'password', login_go:'Sign in', login_forgot:'Forgot the password?',
+    login_how:'On the server, in a root console, run:',
     update_install:'Update', update_installing_self:'downloading and checking…',
     update_restarting:'installing the new version and restarting…',
     update_downloaded:'saved to {path} — close the program and replace the old file with it',
@@ -2493,7 +2577,7 @@ $('language').addEventListener('change', () => {
 const FIELDS = ['host','user','keyPath','sshPort','socksPort','httpPort','poolSize','meshName','meshKey',
                 'keepAliveSec','connectTimeoutSec','cipher','ipVersion'];
 const PROFILE_CHECKS = ['localViaTunnel', 'udpRelayEnabled', 'meshEnabled', 'meshIncoming', 'shareLan'];
-const CHECKS = ['verbose', 'adBlockEnabled', 'mcpEnabled', 'fakeIP'];
+const CHECKS = ['verbose', 'adBlockEnabled', 'mcpEnabled', 'fakeIP', 'uiLock'];
 
 /* Правила фильтра живут отдельно от полей формы: они правятся на своём
    экране и сохраняются своей кнопкой. */
@@ -4896,6 +4980,8 @@ async function refresh(){
   if(st.version) $('appVersion').textContent = st.version === 'dev' ? tr('version_dev') : st.version;
   if(st.os && st.os !== OS){
     OS = st.os;
+    $('uiLockRow').hidden = OS !== 'linux';
+    showUIPass();
     // Галочка «Подключаться сразу при запуске» в верхней части настроек —
     // для Windows: и обычный запуск двойным щелчком, и запуск из автозагрузки
     // при входе в систему используют один и тот же exe, так что достаточно

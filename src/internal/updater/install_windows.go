@@ -8,6 +8,9 @@ import (
 	"syscall"
 )
 
+// OwnUnit — службы systemd здесь нет.
+func OwnUnit() string { return "" }
+
 // CanInstall — умеет ли эта сборка поставить новую версию сама. VPN-версия:
 // ядро живёт в службе Windows, его файл меняет только установщик службы.
 func CanInstall() bool { return !VPN }

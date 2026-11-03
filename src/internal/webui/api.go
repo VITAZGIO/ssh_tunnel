@@ -89,6 +89,7 @@ func (s *Server) coreRoutes() []route {
 		{"/api/bootstart", "GET, POST", "Запуск при старте системы: состояние; POST {\"on\":bool}.", s.handleBootStart},
 		{"/api/update/check", "GET", "Есть ли новая версия на GitHub.", s.handleUpdateCheck},
 		{"/api/update/download", "POST", "Скачать новую версию в «Загрузки».", s.handleUpdateDownload},
+		{"/api/uipass", "GET, POST", "Пароль входа в панель из сети (Linux): GET {lock,set}, POST {\"password\"} (\"\" — убрать). Действует при галке uiLock в настройках.", s.handleUIPass},
 		{"/api/update/install", "POST", "Обновиться: скачать, сверить сумму, поставить и перезапуститься (если canInstall).", s.handleUpdateInstall},
 		{"/api/adblock/update", "POST", "Скачать и применить списки блокировки рекламы {\"sources\"}.", s.handleAdBlockUpdate},
 	}
