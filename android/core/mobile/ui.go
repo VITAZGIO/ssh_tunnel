@@ -8,8 +8,11 @@ package mobile
 // не зависит.
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 	"sync"
 
 	"sshtunnel/internal/uihost"
@@ -34,6 +37,53 @@ func StartUI(dir string) (string, error) {
 		uiHost = h
 	}
 	return uiHost.URL(), nil
+}
+
+// API — остальное API главного экрана (связь, настройки, серверы, выбор
+// приложений), которое на телефоне держит приложение: те же адреса и тот же
+// JSON, что у webui на ПК (docs/API.md). Handle получает метод, путь,
+// строку запроса без «?» и тело и отдаёт ответ: JSON или "png:<base64>"
+// для картинки (значок приложения).
+type API interface {
+	Handle(method, path, query, body string) string
+}
+
+// SetAPI подключает обработчик приложения к серверу страниц.
+func SetAPI(a API) {
+	uiMu.Lock()
+	h := uiHost
+	uiMu.Unlock()
+	if h == nil {
+		return
+	}
+	h.SetAPI(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+		out := a.Handle(r.Method, r.URL.Path, r.URL.RawQuery, string(body))
+		if png, ok := strings.CutPrefix(out, "png:"); ok {
+			b, err := base64.StdEncoding.DecodeString(png)
+			if err != nil || len(b) == 0 {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "image/png")
+			w.Header().Set("Cache-Control", "max-age=86400")
+			w.Write(b)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, out)
+	}))
+}
+
+// Emit отправляет событие экрану (поток /events): готовый JSON вида
+// {"kind":"core",…} — те же виды, что у webui на ПК.
+func Emit(event string) {
+	uiMu.Lock()
+	h := uiHost
+	uiMu.Unlock()
+	if h != nil {
+		h.Emit([]byte(event))
+	}
 }
 
 // UIToken — ключ к API страниц (передаётся страницам параметром t).
