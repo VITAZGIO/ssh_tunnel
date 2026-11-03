@@ -6,6 +6,7 @@ package devapps
 
 import (
 	_ "sshtunnel/internal/devfiles"
+	_ "sshtunnel/internal/mirror"
 	_ "sshtunnel/internal/netmap"
 	_ "sshtunnel/internal/sshapp"
 )

@@ -37,6 +37,7 @@ object DeviceApps {
             val app = ctx.applicationContext
             mobile.Mobile.setKeySealer(KeystoreSealer)
             mobile.Mobile.setTransferListener(TransferNotifier(app))
+            mobile.Mobile.setMirrorListener(MirrorNotifier(app))
             try {
                 mobile.Mobile.startUI(app.filesDir.absolutePath)
             } catch (_: Exception) {
@@ -126,5 +127,40 @@ class TransferNotifier(private val ctx: Context) : mobile.TransferListener {
     companion object {
         private const val CHANNEL = "files"
         private const val ID = 4013
+    }
+}
+
+/**
+ * Зеркальные папки: уведомление о конфликте (обе версии сохранены, решать —
+ * в приложении, вкладка «Конфликты»). Не постоянное: фоновую работу держит
+ * служба VPN.
+ */
+class MirrorNotifier(private val ctx: Context) : mobile.MirrorListener {
+    private val nm = ctx.getSystemService(NotificationManager::class.java)
+
+    override fun onMirror(text: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            nm.createNotificationChannel(
+                NotificationChannel(CHANNEL, CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT)
+            )
+        }
+        val n = Notification.Builder(ctx, CHANNEL)
+            .setSmallIcon(R.drawable.ic_notify)
+            .setContentTitle(CHANNEL_NAME)
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .build()
+        try {
+            nm.notify(ID, n)
+        } catch (_: SecurityException) {
+            // Нет разрешения на уведомления — конфликт виден в приложении.
+        }
+    }
+
+    companion object {
+        private const val CHANNEL = "mirror"
+        private const val CHANNEL_NAME = "Зеркальные папки"
+        private const val ID = 4014
     }
 }

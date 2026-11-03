@@ -202,3 +202,24 @@ Invoke-RestMethod "$($a.url)/api/calendar/events?from=2026-11-01&to=2026-11-08" 
   `write`); `GET /api/files/devices`; `/api/files/remote?peer=<198.19.x.y>&x=shares|list|get|part|put|op`
   — файлы другого устройства (Range передаётся); `POST /api/files/save`
   `{"peer","s","p"}` — скачать в «Загрузки» с докачкой.
+
+## Зеркальные папки (ТЗ 6)
+
+Отвечают, только пока приложение добавлено и включено. Раздаваемая папка
+этого устройства — `id` вида `hub:<id>`, подключённая — её `id`.
+
+- `GET /api/mirror` — `{"serve":[{id,name,path,ignore,files,conflicts}],
+  "subs":[{id,peer,host,folder,name,path,mode,status:{state,pending,conflicts,files,error,lastOk}}],
+  "found":[{peer,host,folders:[{id,name}],joined}],"self","suggest","platform","devnet"}`.
+  `state`: `ok` | `pending` | `conflict` | `offline` | `error`.
+- `POST /api/mirror`: `{"op":"serve","path","name"}`, `{"op":"unserve","id"}`,
+  `{"op":"ignore","id","list":[шаблоны]}`, `{"op":"join","peer","host","folder","name","path","mode":"both|recv|send"}`,
+  `{"op":"leave","id"}` (файлы остаются), `{"op":"mode","id","mode"}`,
+  `{"op":"sync","id"}`, `{"op":"resolve","id","path":<копия конфликта>,"keep":"orig|copy|both"}`,
+  `{"op":"restore","id","blob"}`.
+- `GET /api/mirror/versions?id=[&p=]` — версии и корзина (30 дней), новые сверху.
+- `GET /api/mirror/file?id=&p=` или `?id=&blob=` — текст файла или версии
+  для просмотра (до 2 МБ).
+
+Между устройствами — свой протокол на порту 47836 сети устройств
+(`internal/mirror/proto.go`).
