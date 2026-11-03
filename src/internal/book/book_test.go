@@ -60,7 +60,7 @@ func TestChapters(t *testing.T) {
 	if ru[0].Title != "С чего начать" || en[0].Title != "Getting started" {
 		t.Fatalf("заголовки: %q, %q", ru[0].Title, en[0].Title)
 	}
-	if got := ids(Chapters("de", nil)); got != "start,main,mesh,problems" {
+	if got := ids(Chapters("de", nil)); got != "start,main,mesh,commands,own-apps,problems" {
 		t.Fatalf("неизвестный язык → русский без глав приложений: %s", got)
 	}
 }
