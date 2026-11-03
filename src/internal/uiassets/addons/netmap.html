@@ -678,6 +678,29 @@ function renderMap(){
     }
     if(r.p2p) setEdgeText(r.p2p, edgeMs(n.rttMs), 'var(--accent)');
   });
+  // Общая карта (право в панели сервера): прямые соединения и между
+  // другими устройствами, не только этого.
+  const want = new Map();
+  (DATA.links || []).forEach(l => {
+    if(l.a === self.ip || l.b === self.ip) return; // свои — выше
+    const ra = MAP_REFS[l.a], rb = MAP_REFS[l.b];
+    if(ra && rb) want.set(l.a + '|' + l.b, {ra, rb, l});
+  });
+  sim.direct.forEach((e, key) => {
+    if(want.has(key)) return;
+    removeEdge(sim, e);
+    sim.direct.delete(key);
+    kickSim(0.2);
+  });
+  want.forEach((w, key) => {
+    let e = sim.direct.get(key);
+    if(!e){
+      e = mapEdge(sim, w.ra.n, w.rb.n, 'p2p', !sim.many);
+      sim.direct.set(key, e);
+      kickSim(0.35);
+    }
+    setEdgeText(e, edgeMs(w.l.rttMs), 'var(--accent)');
+  });
   const m = MAP_REFS[MAIN_IP];
   m.data = main;
   m.node.classList.toggle('offline', main.online === false);
@@ -819,7 +842,9 @@ async function refresh(){
     : st === 'connecting' ? L('Подключаюсь к сети устройств…', 'Connecting to the device network…')
     : st === 'error' ? L('Ошибка сети устройств: ', 'Device network error: ') + (DATA.error || '')
     : L('Только просмотр: имена меняются в панели главного сервера. Узлы можно таскать, колесо — масштаб.',
-        'View only: names are changed in the main server panel. Drag the nodes, wheel to zoom.');
+        'View only: names are changed in the main server panel. Drag the nodes, wheel to zoom.') +
+      (DATA.links ? '' : L(' Соединения между другими устройствами видны, если в панели сервера этому клиенту дано право создавать пользователей.',
+        ' Links between other devices are shown if this client may create users (set in the server panel).'));
   if(SEL && DATA.self){
     const n = ring().concat([mainNode()]).find(x => x.ip === SEL.ip);
     if(n) SEL = n;

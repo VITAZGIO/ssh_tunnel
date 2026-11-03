@@ -893,3 +893,6 @@ type appNet struct{ a *app.App }
 
 func (n appNet) Mesh() *mesh.Client                          { return n.a.Mesh() }
 func (n appNet) Dial(network, addr string) (net.Conn, error) { return n.a.DialApp(network, addr) }
+func (n appNet) DialServer(network, addr string) (net.Conn, error) {
+	return n.a.DialServer(network, addr)
+}
