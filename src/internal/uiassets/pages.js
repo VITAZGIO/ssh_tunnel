@@ -100,3 +100,23 @@ function openBook(chapter){
   if(ANDROID){ location.href = pageURL('book.html', chapter ? {ch: chapter} : {}); return; }
   openWindow('book', L('Книга', 'Book') + ' — ssh_tunnel', url);
 }
+
+// Телефон: поле ввода под клавиатурой — прокрутить его на середину, когда
+// клавиатура уже выехала и окно стало ниже.
+if(ANDROID){
+  document.addEventListener('focusin', ev => {
+    const el = ev.target;
+    if(!el.matches || !el.matches('input,textarea,select,[contenteditable]')) return;
+    setTimeout(() => { try { el.scrollIntoView({block: 'center', behavior: 'smooth'}); } catch(e) {} }, 350);
+  });
+}
+
+// Ответ телефона на выбор папки приходит в верхнюю страницу; страница
+// приложения живёт во фрейме — передаём ей (своя страница фрейма его заменит).
+if(ANDROID && !window.sshtunnelPicked){
+  window.sshtunnelPicked = (id, path) => {
+    for(const f of document.querySelectorAll('iframe')){
+      try { if(f.contentWindow.sshtunnelPicked) f.contentWindow.sshtunnelPicked(id, path); } catch(e) {}
+    }
+  };
+}

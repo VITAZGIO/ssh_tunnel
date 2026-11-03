@@ -83,6 +83,7 @@ func (s *Server) coreRoutes() []route {
 		{"/api/processes", "GET", "Запущенные программы (для правил по программам).", s.handleProcesses},
 		{"/api/appicon", "GET", "Значок программы по пути: ?path=… (PNG, Windows).", s.handleAppIcon},
 		{"/api/pickfile", "POST", "Системный диалог выбора программы (Windows).", s.handlePickFile},
+		{"/api/pickfolder", "POST", "Системный диалог выбора папки (Windows): {\"path\"}, отмена — пустой путь.", s.handlePickFolder},
 		{"/api/openterminal", "POST", "Открыть PowerShell (Windows).", s.handleOpenTerminal},
 		{"/api/genkey", "POST", "Создать SSH-ключ по пути и отдать открытую часть.", s.handleGenKey},
 		{"/api/bootstart", "GET, POST", "Запуск при старте системы: состояние; POST {\"on\":bool}.", s.handleBootStart},

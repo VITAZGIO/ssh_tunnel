@@ -11,3 +11,8 @@ var ErrCancelled = errors.New("выбор отменён")
 func PickExecutable() (string, error) {
 	return "", errors.New("выбор файла поддерживается только на Windows")
 }
+
+// PickFolder — системный диалог есть только в версии для Windows.
+func PickFolder(string) (string, error) {
+	return "", errors.New("выбор папки поддерживается только на Windows")
+}

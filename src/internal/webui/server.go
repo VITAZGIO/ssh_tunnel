@@ -654,6 +654,23 @@ func HandlePickFile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"path": path})
 }
 
+func (s *Server) handlePickFolder(w http.ResponseWriter, r *http.Request) { HandlePickFolder(w, r) }
+
+// HandlePickFolder — системный диалог выбора папки (зеркальные папки);
+// как HandlePickFile, открывается на рабочем столе пользователя.
+func HandlePickFolder(w http.ResponseWriter, r *http.Request) {
+	path, err := filedialog.PickFolder("Выбери папку")
+	if errors.Is(err, filedialog.ErrCancelled) {
+		writeJSON(w, map[string]string{"path": ""})
+		return
+	}
+	if err != nil {
+		writeJSON(w, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, map[string]string{"path": path})
+}
+
 // handleOpenTerminal открывает PowerShell рядом с окном. Саму команду туда
 // подставить нельзя: любой способ «напечатать за пользователя» либо выполняет
 // её сразу, либо ломается от раскладки и задержек. Поэтому команда кладётся в
