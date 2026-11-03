@@ -1,18 +1,22 @@
 package io.github.vitazgio.sshtunnel
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import org.json.JSONArray
 
 // Общая страница интерфейса — та же, что в окне ПК (Книга, дополнительные
 // приложения): HTML и API отдаёт ядро (mobile.StartUI), здесь только WebView
@@ -22,11 +26,17 @@ class WebPageActivity : AppCompatActivity() {
 
     private lateinit var web: WebView
     private var base = ""
+    private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private val pickFiles = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        fileCallback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(r.resultCode, r.data))
+        fileCallback = null
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Look.apply(this)
+        DeviceApps.init(this)
         base = try {
             mobile.Mobile.startUI(filesDir.absolutePath)
         } catch (e: Exception) {
@@ -41,6 +51,22 @@ class WebPageActivity : AppCompatActivity() {
         web.settings.domStorageEnabled = true
         web.settings.allowFileAccess = false
         web.addJavascriptInterface(Bridge(), "SSHTunnelAndroid")
+        web.webChromeClient = object : WebChromeClient() {
+            // «Загрузить сюда» в Файлах устройства: системный выбор файлов.
+            override fun onShowFileChooser(
+                view: WebView, cb: ValueCallback<Array<Uri>>, params: FileChooserParams,
+            ): Boolean {
+                fileCallback?.onReceiveValue(null)
+                fileCallback = cb
+                try {
+                    pickFiles.launch(params.createIntent())
+                } catch (_: Exception) {
+                    fileCallback = null
+                    return false
+                }
+                return true
+            }
+        }
         web.webViewClient = object : WebViewClient() {
             // Свои страницы — здесь, всё остальное — в браузере телефона.
             override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
@@ -55,6 +81,12 @@ class WebPageActivity : AppCompatActivity() {
                 if (web.canGoBack()) web.goBack() else finish()
             }
         })
+        // Готовый адрес страницы от главного экрана (Книга, приложение
+        // окном): путь ядра с параметрами.
+        intent.getStringExtra(EXTRA_URL)?.takeIf { it.startsWith("/") }?.let {
+            web.loadUrl(base + it)
+            return
+        }
         val s = Settings(this)
         val q = Uri.Builder()
             .appendQueryParameter("t", mobile.Mobile.uiToken())
@@ -86,29 +118,53 @@ class WebPageActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun openExternal(url: String) = runOnUiThread { this@WebPageActivity.openExternal(url) }
+
+        // Календарь подключён на странице: спросить разрешения и завести
+        // аккаунт в системе (CalendarSync).
+        @JavascriptInterface
+        fun calendarSetup(contacts: Boolean) = runOnUiThread { this@WebPageActivity.calendarSetup(contacts) }
+
+        @JavascriptInterface
+        fun calendarForget() = runOnUiThread { CalendarSync.forget(this@WebPageActivity) }
+
+        @JavascriptInterface
+        fun hasAllFiles(): Boolean = DeviceApps.hasAllFiles()
+
+        @JavascriptInterface
+        fun requestAllFiles() = runOnUiThread { DeviceApps.requestAllFiles(this@WebPageActivity) }
+    }
+
+    private var calendarContacts = false
+
+    private fun calendarSetup(contacts: Boolean) {
+        calendarContacts = contacts
+        val perms = mutableListOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
+        if (contacts) perms += listOf(Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS)
+        val need = perms.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (need.isEmpty()) CalendarSync.setup(this, contacts)
+        else requestPermissions(need.toTypedArray(), REQ_CALENDAR)
+    }
+
+    override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, res: IntArray) {
+        super.onRequestPermissionsResult(code, perms, res)
+        // Без разрешения на контакты календарь всё равно работает.
+        if (code == REQ_CALENDAR) CalendarSync.setup(this,
+            calendarContacts && checkSelfPermission(Manifest.permission.WRITE_CONTACTS) == PackageManager.PERMISSION_GRANTED)
     }
 
     companion object {
+        const val EXTRA_URL = "url"
         const val EXTRA_PAGE = "page"
         const val EXTRA_OPEN = "open"
         const val EXTRA_CHAPTER = "chapter"
         const val PAGE_APPS = "apps.html"
         const val PAGE_BOOK = "book.html"
+        private const val REQ_CALENDAR = 71
 
         fun open(ctx: Context, page: String, app: String? = null) {
             ctx.startActivity(Intent(ctx, WebPageActivity::class.java)
                 .putExtra(EXTRA_PAGE, page)
                 .apply { if (app != null) putExtra(EXTRA_OPEN, app) })
-        }
-
-        // starred — приложения со звёздочкой (id → название) для быстрого
-        // доступа на главном экране.
-        fun starred(ctx: Context, lang: String): List<Pair<String, String>> = try {
-            mobile.Mobile.startUI(ctx.filesDir.absolutePath)
-            val a = JSONArray(mobile.Mobile.starredJSON(lang))
-            (0 until a.length()).map { a.getJSONObject(it).let { o -> o.getString("id") to o.getString("name") } }
-        } catch (_: Exception) {
-            emptyList()
         }
     }
 }

@@ -44,6 +44,7 @@ func (s *Server) routes() []route {
 	for _, r := range s.addons.Routes() {
 		rs = append(rs, route{r.Path, r.Methods, r.Desc, r.H})
 	}
+	rs = append(rs, s.diagRoutes()...)
 	return append(rs, route{"/api/book", "GET", "Книга: все главы на языке ?lang=ru|en (Markdown), вместе с главами приложений каталога.", book.Handler(addons.BookChapters)})
 }
 

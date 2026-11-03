@@ -87,6 +87,50 @@
 Текст — Markdown из `docs/book/`, главы приложений каталога стоят перед
 «Частыми проблемами».
 
+## Телефон
+
+На Android тот же API отдаёт сервер страниц ядра (`internal/uihost`, адрес и
+ключ знает только само приложение): Книга и приложения — Go, остальное —
+`AndroidApi.kt` (те же адреса и JSON, `/api/status` → `"os":"android"`).
+Только на телефоне:
+
+- `POST /api/key` `{"id":"<сервер>","key":"-----BEGIN …"}` — сохранить
+  приватный ключ сервера (пути к файлу у человека на телефоне нет; в
+  профиле — `keySaved`).
+- `GET /api/processes` — установленные приложения `[{name: пакет, label}]`,
+  `GET /api/appicon?pkg=<пакет>` — значок PNG.
+- `/api/update/download` скачивает APK и открывает установщик.
+
+Настольного (`/api/bootstart`, `/api/pickfile`, `/api/vpssetup/*`, `/api/window`
+…) на телефоне нет — ответ `{"error":…}`, экран эти пункты не показывает.
+
+## Диагностика
+
+Отвечают, только пока соответствующее приложение добавлено и включено (иначе
+404). Язык итогов — `?lang=ru|en`.
+
+- `POST /api/diag/site` `{"site":"youtube.com"}` — проверка двумя путями
+  (`direct`, `vpn`), у каждого шаги `dns`, `tcp`, `tls`, `http` с `ok`, `ms`,
+  `kind` (что сломалось: `dns_spoof`, `tls_reset` — DPI, `http_stub` —
+  заглушка…). `verdict` — код итога, `text` — итог фразой, `suggest` —
+  `vpn`/`direct`: какое правило предложить (правило добавляется обычным
+  `POST /api/config`). `GET` — 10 последних проверок и список «популярных».
+- `POST /api/diag/site/popular` `{"list":[…]}` — сохранить список,
+  `{"check":true}` — проверить все.
+- `GET|POST /api/diag/meddlers` — кто трогает трафик (последний поиск / искать
+  заново) и `disabled` — «Что я отключал».
+  `POST /api/diag/meddlers/try {"id","site"}` — это и есть «Разрешаю»:
+  остановить, перепроверить, не помогло — вернуть само. `/keep {"id"}` —
+  отключить насовсем (только автозапуск), `/restore {"id"}`, `/reconcile
+  {"id","site"}` — помирить (исключить сервер VPN в списках zapret).
+- `GET|POST /api/diag/leaks` — утечки: что видят сайты, чей DNS, IPv6,
+  `fixes` — что включить через `/api/config`, `webrtc` — страница на панели.
+- `GET /api/diag/report` — файлы отчёта (секреты уже `***`);
+  `POST {"op":"save"|"share"}` — zip в «Загрузки» / поделиться.
+
+Панель VPS: `GET /ip` — `{"ip"}` спрашивающего, `GET /webrtc` — страница
+проверки WebRTC. Обе без входа.
+
 ## Остальное
 
 Настройки (`/api/config`), серверы (`/api/profile/*`), профили приложения,
@@ -112,3 +156,49 @@ URL=$(jq -r .url $A); TOK=$(jq -r .token $A)
 curl -s -H "Authorization: Bearer $TOK" $URL/api/state
 curl -s -H "Authorization: Bearer $TOK" -d '{"mesh":true}' $URL/api/state
 ```
+
+## Календарь
+
+Отвечает, только пока добавлено и включено приложение «Календарь» (иначе
+404). Пароль приложения Nextcloud в ответах не бывает никогда.
+
+- `GET /api/calendar` — аккаунт (`url`, `user`, `contacts`), `hasPassword`,
+  календари (`href`, `name`, `color`, `readOnly`, `shown`, `count`), `busy`,
+  `lastSync`, `lastError`, `conflict`, `widget`, `rev` (растёт на каждом
+  изменении данных).
+- `POST /api/calendar/account` — `{"url","user","password","contacts":bool}`:
+  проверить вход и сохранить (`password` пустой — прежний);
+  `{"forget":true}` — отключить и забыть скачанное.
+- `POST /api/calendar/sync` — сверить сейчас (ответ — после сверки).
+- `GET /api/calendar/events?from=…&to=…` — события видимых календарей,
+  повторы развёрнуты. `from`/`to` — дата `2026-11-01` или RFC 3339; `&all=1`
+  — и скрытых.
+- `POST /api/calendar/event` — `{"cal","href","title","start","end","allDay","location","description"}`:
+  без `href` — новое событие в календаре `cal`. Время — RFC 3339; у события
+  на весь день — полночь UTC, `end` — следующий день после последнего. Ответ
+  `{"ok":true,"href"}` или `{"error","conflict":true}` — событие изменили в
+  другом месте, показана версия сервера.
+- `POST /api/calendar/delete` — `{"href"}` (у повторяющегося — вся серия).
+- `POST /api/calendar/settings` — `{"cal","shown":bool}` или `{"widget":bool}`.
+
+```powershell
+Invoke-RestMethod "$($a.url)/api/calendar/events?from=2026-11-01&to=2026-11-08" -Headers $h |
+  Select-Object -Expand events | Format-Table start, title
+```
+
+## Устройства сети (ТЗ 4)
+
+Отвечают, только пока приложение добавлено и включено.
+
+- `GET /api/netmap` — карта: `{"state","self","nodes":[{name,host,ip,platform,os,online,lastSeen,direct,rttMs,server}]}`.
+- `GET /api/ssh` — серверы этого устройства и открытый ключ программы;
+  `POST /api/ssh` `{"op":"save","server":{…}}`, `{"op":"delete"|"forgethost","id"}`.
+  `GET /api/ssh/devices` — устройства сети для анкеты.
+  `POST /api/ssh/install` `{"id","password"}` — поставить ключ (пароль не хранится).
+  `POST /api/ssh/open` `{"id"}` — внешний терминал (`{"builtin":true}` — его нет).
+  `POST /api/ssh/term` (`start`/`in`/`resize`/`close`) и `GET /api/ssh/term/out?sid=`
+  (SSE) — встроенный терминал.
+- `GET|POST /api/files/shares` — свои открытые папки (`add`, `remove`,
+  `write`); `GET /api/files/devices`; `/api/files/remote?peer=<198.19.x.y>&x=shares|list|get|part|put|op`
+  — файлы другого устройства (Range передаётся); `POST /api/files/save`
+  `{"peer","s","p"}` — скачать в «Загрузки» с докачкой.

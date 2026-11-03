@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Виджет календаря (CalendarWidget.kt). Обновляется после сверки сам;
+     updatePeriodMillis — запасной раз в полчаса (меньше Android не даёт). -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="2"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_calendar"
+    android:previewLayout="@layout/widget_calendar"
+    android:description="@string/calendar_widget_desc"
+    android:widgetCategory="home_screen" />

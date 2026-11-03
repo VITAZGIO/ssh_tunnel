@@ -1,446 +1,175 @@
 package io.github.vitazgio.sshtunnel
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
-import android.view.Gravity
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
-import android.widget.CheckBox
-import android.widget.EditText
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.PopupWindow
-import android.widget.ScrollView
+import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.TextView
 import android.widget.Toast
-import android.widget.ViewFlipper
-import androidx.appcompat.app.AlertDialog
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
-import androidx.core.os.LocaleListCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
-import org.json.JSONObject
+import java.lang.ref.WeakReference
 
 /**
- * Экран приложения — повторяет окно на компьютере.
- *
- * Сам он ничем не управляет: просит службу включиться или выключиться и
- * показывает то, что она сообщает. Поэтому туннель продолжает работать, даже
- * когда приложение закрыто.
+ * Главный экран телефона — тот же index.html, что в окне ПК (общий HTML из
+ * internal/uiassets, его отдаёт ядро). Данные экран берёт из того же API
+ * (AndroidApi), здесь только WebView и мост SSHTunnelAndroid к тому, что
+ * умеет лишь сам телефон: разрешение на VPN, камера для QR, буфер обмена,
+ * файлы, ссылки наружу. Нативными остаются VPN-служба и плитка в шторке.
  */
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), AndroidApi.Screen {
 
-    private companion object {
-        const val MAIN = 0
-        const val SELFCHECK = 1
-        const val LOG = 2
-        const val SETTINGS = 3
-        const val SERVERS = 4
-        const val APP = 5
-        const val KEY_PAGE = "page"
-        const val KEY_GROUPS = "groups"
-        const val KEY_SCROLL = "scroll"
-    }
-
-    private lateinit var settings: Settings
-
-    private lateinit var flipper: ViewFlipper
-    private lateinit var power: View
-    private lateinit var powerIcon: ImageView
-    private lateinit var powerCap: TextView
-    private lateinit var stateView: TextView
-    private lateinit var detailView: TextView
-    private lateinit var errorView: TextView
-    private lateinit var logView: TextView
-    private lateinit var logScroll: ScrollView
-    private lateinit var keyStateView: TextView
-    private lateinit var appsSummary: TextView
-    private lateinit var speedButton: TextView
-
-    private lateinit var pingView: TextView
-    private lateinit var rowSpeed: View
-    private lateinit var tileDown: TextView
-    private lateinit var tileUp: TextView
-    private lateinit var tileConns: TextView
-    private lateinit var tileLinks: TextView
-
-    private lateinit var issuedByPanel: TextView
-    private lateinit var hostEdit: EditText
-    private lateinit var portEdit: EditText
-    private lateinit var poolEdit: EditText
-    private lateinit var userEdit: EditText
-    private lateinit var keyEdit: EditText
-    private lateinit var localCheck: CheckBox
-    private lateinit var localCheckInfo: View
-
-    private lateinit var profileTabs: LinearLayout
-    private lateinit var removeProfileBtn: View
-    private lateinit var exportProfileClipBtn: View
-    private lateinit var pasteConfigBtn: View
-    private lateinit var scanConfigBtn: View
-    private lateinit var importNote: TextView
-    private lateinit var cityBtn: View
-    private lateinit var cityFlagView: FlagView
-    private lateinit var cityLabelView: TextView
-    private lateinit var customCityName: EditText
-    private lateinit var selectServerBtn: View
-
-    private lateinit var bundleNote: TextView
-    private lateinit var updateNote: TextView
-    private lateinit var updateDownloadBtn: View
-
-    private lateinit var serverPanelBody: LinearLayout
-
-    /** Раскрыты ли настройки правленого сервера под его строкой. */
-    private var srvOpen = false
-
-    // Главный экран: прокрутка к списку устройств и фигурные кнопки.
-    private lateinit var mainScroll: ScrollView
-    private lateinit var mainPage: View
-    private lateinit var devPage: View
-    private lateinit var devHex: View
-    private lateinit var devGap: View
-    private lateinit var devRows: LinearLayout
-    private lateinit var linkBars: TextView
-    private lateinit var backdrop: BackdropView
-    private val hexBg by lazy { ShapeBg(ShapeBg.Kind.HEX, tc(R.color.card2), dp(20).toFloat()) }
-    private var devHit = ""
-
-    /** id профиля, который сейчас показан в форме — не обязательно активного. */
-    private var editingProfileId: String = ""
-
-    /** Выбранный в выпадающем списке город, либо null — своё имя без флага. */
-    private var pickedCity: Cities.City? = null
-
-    private lateinit var adBlockRow: View
-    private lateinit var adBlockSummary: TextView
-    private lateinit var meshRow: View
-    private lateinit var meshSummary: TextView
-    private lateinit var domainsSummary: TextView
-    private lateinit var meshBtn: View
-    private lateinit var udpRelayEnabledCheck: CheckBox
-    private lateinit var showServerPickerCheck: CheckBox
-    private lateinit var appProfiles: AppProfiles
-
-    private lateinit var homePicker: View
-    private lateinit var homePickerFlag: FlagView
-    private lateinit var homePickerName: TextView
-
-    private lateinit var selfCheckSteps: LinearLayout
-    private lateinit var selfCheckStartButton: Button
+    private lateinit var web: WebView
+    private var base = ""
 
     private val vpnPermission = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK) startWith(pendingBypass, pendingMesh)
-    }
-
-    // С какими режимами включать после разрешения на VPN: большая кнопка —
-    // всё, кнопка «Сеть устройств» — только сеть.
-    // Ошибка, которую убрали нажатием: та же самая больше не всплывает.
-    private var dismissedError = ""
-
-    private var pendingBypass = true
-    private var pendingMesh = true
-
-    private val bundleSaveFile = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json")
-    ) { uri ->
-        val text = pendingBundle
-        pendingBundle = ""
-        if (uri != null && text.isNotEmpty()) {
-            bundleNote.text = if (Xfer.write(this, uri, text)) getString(R.string.bundle_saved, settings.profiles.size)
-            else getString(R.string.file_failed)
-        }
-    }
-    private var pendingBundle = ""
-
-    private val bundleOpenFile = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
-    ) { uri -> if (uri != null) confirmBundle(Xfer.read(this, uri)) }
+        ActivityResultContracts.StartActivityForResult()
+    ) { result -> AndroidApi.vpnAllowed(result.resultCode == RESULT_OK) }
 
     private val notificationPermission = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+        ActivityResultContracts.RequestPermission()
     ) { /* отказ не мешает работе, просто не будет уведомления */ }
 
     private val cameraPermission = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+        ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) launchScanner()
-        else importNote.text = getString(R.string.camera_denied)
+        else Toast.makeText(this, R.string.camera_denied, Toast.LENGTH_LONG).show()
     }
-
-    /**
-     * id сервера, вкладка которого была открыта, когда человек нажал
-     * «Сканировать QR-код». После успешного сканирования этот сервер
-     * удаляется: смысл сканирования — «перенастрой вот этот сервер по коду»,
-     * а не «заведи ещё один рядом». Новый профиль всё равно создаётся заново
-     * (в коде приезжает и ключ, и имя), поэтому старый просто убирается.
-     */
-    private var scanSourceProfileId: String = ""
 
     private val scanLauncher = registerForActivityResult(ScanContract()) { result ->
-        val text = result.contents
-        if (text != null) applyImportedText(text, replaceSourceProfileId = scanSourceProfileId)
-        scanSourceProfileId = ""
+        result.contents?.let { importText(it) }
     }
 
+    // Сохранение файла (перенос настроек, списки) — системный выбор места.
+    private var pendingSave = ""
+    private val saveFile = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val text = pendingSave
+        pendingSave = ""
+        if (uri != null && text.isNotEmpty()) {
+            val ok = try {
+                contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) } != null
+            } catch (_: Exception) {
+                false
+            }
+            if (!ok) Toast.makeText(this, R.string.file_failed, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // Открытие файла (<input type=file> на странице).
+    private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private val openFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        fileCallback?.onReceiveValue(if (uri != null) arrayOf(uri) else null)
+        fileCallback = null
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        settings = Settings(this)
-        applyLanguage(settings.language)
         Look.apply(this)
-        setContentView(R.layout.activity_main)
-
-        flipper = findViewById(R.id.flipper)
-        power = findViewById(R.id.power)
-        powerIcon = findViewById(R.id.powerIcon)
-        powerCap = findViewById(R.id.powerCap)
-        stateView = findViewById(R.id.state)
-        detailView = findViewById(R.id.detail)
-        errorView = findViewById(R.id.error)
-        logView = findViewById(R.id.log)
-        logScroll = findViewById(R.id.logScroll)
-        keyStateView = findViewById(R.id.keyState)
-        appsSummary = findViewById(R.id.appsSummary)
-        speedButton = findViewById(R.id.speedtest)
-        mainScroll = findViewById(R.id.mainScroll)
-        mainPage = findViewById(R.id.mainPage)
-        devPage = findViewById(R.id.devPage)
-        devHex = findViewById(R.id.devHex)
-        devGap = findViewById(R.id.devGap)
-        devRows = findViewById(R.id.devRows)
-        linkBars = findViewById(R.id.linkBars)
-        backdrop = findViewById(R.id.backdrop)
-
-        pingView = findViewById(R.id.ping)
-        rowSpeed = findViewById(R.id.rowSpeed)
-        tileDown = findViewById(R.id.tileDown)
-        tileUp = findViewById(R.id.tileUp)
-        tileConns = findViewById(R.id.tileConns)
-        tileLinks = findViewById(R.id.tileLinks)
-
-        issuedByPanel = findViewById(R.id.issuedByPanel)
-        hostEdit = findViewById(R.id.host)
-        portEdit = findViewById(R.id.port)
-        poolEdit = findViewById(R.id.pool)
-        userEdit = findViewById(R.id.user)
-        keyEdit = findViewById(R.id.key)
-        localCheck = findViewById(R.id.localViaTunnel)
-        localCheckInfo = findViewById(R.id.localViaTunnelInfo)
-
-        profileTabs = findViewById(R.id.profileTabs)
-        removeProfileBtn = findViewById(R.id.removeProfileBtn)
-        exportProfileClipBtn = findViewById(R.id.exportProfileClipBtn)
-        pasteConfigBtn = findViewById(R.id.pasteConfigBtn)
-        scanConfigBtn = findViewById(R.id.scanConfigBtn)
-        importNote = findViewById(R.id.importNote)
-        cityBtn = findViewById(R.id.cityBtn)
-        cityFlagView = findViewById(R.id.cityFlagView)
-        cityLabelView = findViewById(R.id.cityLabelView)
-        customCityName = findViewById(R.id.customCityName)
-        selectServerBtn = findViewById(R.id.selectServerBtn)
-
-        bundleNote = findViewById(R.id.bundleNote)
-        updateNote = findViewById(R.id.updateNote)
-        updateDownloadBtn = findViewById(R.id.updateDownloadBtn)
-        findViewById<TextView>(R.id.versionLine).text =
-            getString(R.string.version_line, BuildConfig.VERSION_NAME)
-        findViewById<View>(R.id.bundleExportBtn).setOnClickListener { onBundleExport() }
-        findViewById<View>(R.id.bundleImportBtn).setOnClickListener { onBundleImport() }
-        findViewById<View>(R.id.updateCheckBtn).setOnClickListener { onCheckUpdates(it) }
-        updateDownloadBtn.setOnClickListener { onDownloadUpdate() }
-        findViewById<View>(R.id.authorSite).setOnClickListener {
-            openLink("https://vitazgio.ru")
-        }
-        findViewById<View>(R.id.codeLink).setOnClickListener {
-            openLink("https://github.com/VITAZGIO/ssh_tunnel")
-        }
-
-        serverPanelBody = findViewById(R.id.serverPanelBody)
-
-        adBlockRow = findViewById(R.id.adBlockRow)
-        adBlockSummary = findViewById(R.id.adBlockSummary)
-        adBlockRow.setOnClickListener { startActivity(Intent(this, AdBlockActivity::class.java)) }
-        meshRow = findViewById(R.id.meshRow)
-        meshSummary = findViewById(R.id.meshSummary)
-        meshRow.setOnClickListener { startActivity(Intent(this, MeshActivity::class.java)) }
-        domainsSummary = findViewById(R.id.domainsSummary)
-        findViewById<View>(R.id.domainsRow).setOnClickListener {
-            startActivity(Intent(this, DomainsActivity::class.java))
-        }
-        meshBtn = findViewById(R.id.meshBtn)
-        meshBtn.setOnClickListener { onMeshButton() }
-        setupGroups()
-        Xfer.bindModeSeg(findViewById(R.id.xferModeSeg), settings)
-        findViewById<View>(R.id.usersRow).setOnClickListener {
-            startActivity(Intent(this, UsersActivity::class.java))
-        }
-        // Книга и дополнительные приложения — общие с ПК страницы.
-        findViewById<View>(R.id.addonsRow).setOnClickListener {
-            WebPageActivity.open(this, WebPageActivity.PAGE_APPS)
-        }
-        findViewById<View>(R.id.bookRow).setOnClickListener {
-            WebPageActivity.open(this, WebPageActivity.PAGE_BOOK)
-        }
-        findViewById<View>(R.id.quickBtn).setOnClickListener { showQuick(it) }
-        udpRelayEnabledCheck = findViewById(R.id.udpRelayEnabled)
-        showServerPickerCheck = findViewById(R.id.showServerPicker)
-        appProfiles = AppProfiles(this, settings)
-        findViewById<CheckBox>(R.id.appProfilesOn).apply {
-            isChecked = appProfiles.enabled
-            setOnCheckedChangeListener { _, on ->
-                appProfiles.setEnabled(on)
-                renderAppProfiles()
-            }
-        }
-        renderAppProfiles()
-
-        homePicker = findViewById(R.id.homePicker)
-        homePickerFlag = findViewById(R.id.homePickerFlag)
-        homePickerName = findViewById(R.id.homePickerName)
-        homePicker.setOnClickListener { showServerPickerMenu() }
-
-        selfCheckSteps = findViewById(R.id.selfCheckSteps)
-        selfCheckStartButton = findViewById(R.id.selfCheckStart)
-        renderSelfCheckSteps(null)
-
-        editingProfileId = settings.activeProfileId.ifBlank { settings.active().id }
-        setupLangBtn()
-        setupSegs()
-        setupMainScreen()
-        renderProfileTabs()
-        loadProfileIntoForm(settings.active())
-        loadAppSettings()
-
-        power.setOnClickListener { onToggle() }
-        // Ошибка лежит поверх кнопки — нажатие убирает её до следующей.
-        errorView.setOnClickListener {
-            dismissedError = TunnelService.detail
-            errorView.visibility = View.GONE
-        }
-        speedButton.setOnClickListener { runSpeedTest() }
-        for (id in listOf(R.id.save, R.id.saveServers, R.id.saveApp)) {
-            findViewById<Button>(id).setOnClickListener { saveSettings() }
-        }
-        findViewById<View>(R.id.toServers).setOnClickListener { flipper.displayedChild = SERVERS }
-        findViewById<View>(R.id.toApp).setOnClickListener {
-            // Из корня настроек — все группы свёрнуты, видно оглавление.
-            collapseGroups()
-            flipper.displayedChild = APP
-        }
-        findViewById<View>(R.id.backFromServers).setOnClickListener { flipper.displayedChild = SETTINGS }
-        findViewById<View>(R.id.backFromApp).setOnClickListener { flipper.displayedChild = SETTINGS }
-        findViewById<View>(R.id.addServerBtn).setOnClickListener { onAddProfile() }
-        bindInfo(R.id.xferInfo, R.string.xfer_note)
-        bindInfo(R.id.startModeInfo, R.string.start_mode_note)
-        selfCheckStartButton.setOnClickListener { runSelfCheck() }
-        findViewById<View>(R.id.toSelfCheck).setOnClickListener {
-            flipper.displayedChild = SELFCHECK
-            runSelfCheck()
-        }
-        findViewById<View>(R.id.apps).setOnClickListener {
-            startActivity(Intent(this, AppsActivity::class.java))
-        }
-
-        removeProfileBtn.setOnClickListener { onRemoveProfile() }
-        exportProfileClipBtn.setOnClickListener { onExportProfileClip() }
-        cityBtn.setOnClickListener { showCityMenu() }
-        customCityName.addOnTextChanged { liveRetitleEditingTab() }
-        selectServerBtn.setOnClickListener { onSelectServer() }
-        pasteConfigBtn.setOnClickListener { onPasteConfig() }
-        scanConfigBtn.setOnClickListener { onScanConfig() }
-        localCheckInfo.setOnClickListener { showTip(it, getString(R.string.local_via_tunnel_note)) }
-        bindInfo(R.id.alwaysOnInfo, R.string.always_on_hint)
-        bindInfo(R.id.udpRelayInfo, R.string.udp_relay_note)
-        bindInfo(R.id.appProfilesInfo, R.string.app_profiles_note)
-        bindInfo(R.id.poolInfo, R.string.pool_note)
-        bindInfo(R.id.meshStartInfo, R.string.mesh_start_note)
-
-        // Шапка одна на все экраны: логотип всегда возвращает на главную (а на
-        // главной — прокручивает от списка устройств наверх), значки открывают
-        // своё, а повторное нажатие на уже открытый экран возвращает на главную.
-        findViewById<View>(R.id.btnHome).setOnClickListener {
-            if (flipper.displayedChild == MAIN) mainScroll.smoothScrollTo(0, 0)
-            else flipper.displayedChild = MAIN
-        }
-        findViewById<View>(R.id.btnLog).setOnClickListener {
-            flipper.displayedChild = if (flipper.displayedChild == LOG) MAIN else LOG
-            if (flipper.displayedChild == LOG) {
-                // Журнал открывается на последней строке и дальше следит за новыми.
-                logFollow = true
-                logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
-            }
-        }
-        logScroll.setOnScrollChangeListener { _, _, y, _, _ ->
-            if (logScroll.isShown) logFollow = y + logScroll.height >= logView.height - dp(24)
-        }
-        // Значок настроек: с главной (и журнала) — в настройки, из корня
-        // настроек — на главную, из подэкрана — в корень настроек.
-        findViewById<View>(R.id.btnSettings).setOnClickListener {
-            flipper.displayedChild = when (flipper.displayedChild) {
-                SERVERS, APP -> SETTINGS
-                SETTINGS -> MAIN
-                else -> SETTINGS
-            }
-        }
-
-        applyInsets()
-
-        // Кнопка «назад» возвращает на главную, а не закрывает приложение:
-        // выйти из настроек хочется чаще, чем выйти совсем.
-        onBackPressedDispatcher.addCallback(this,
-            object : androidx.activity.OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() {
-                    if (flipper.displayedChild == SERVERS || flipper.displayedChild == APP) {
-                        flipper.displayedChild = SETTINGS
-                    } else if (flipper.displayedChild != MAIN) {
-                        flipper.displayedChild = MAIN
-                    } else {
-                        isEnabled = false
-                        onBackPressedDispatcher.onBackPressed()
-                    }
-                }
+        if (!AndroidApi.init(this)) {
+            // Без ядра экрана нет. VPN по-прежнему включается плиткой в шторке.
+            setContentView(TextView(this).apply {
+                setText(R.string.ui_failed)
+                setPadding(48, 160, 48, 48)
             })
+            return
+        }
+        base = mobile.Mobile.startUI(filesDir.absolutePath)
+
+        web = WebView(this)
+        web.setBackgroundColor(Color.TRANSPARENT)
+        setContentView(web)
+        // С Android 15 окно занимает весь экран — отступы под системные полосы.
+        ViewCompat.setOnApplyWindowInsetsListener(web) { v, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or
+                    WindowInsetsCompat.Type.ime()
+            )
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+        web.settings.javaScriptEnabled = true
+        web.settings.domStorageEnabled = true
+        web.settings.allowFileAccess = false
+        web.addJavascriptInterface(Bridge(), "SSHTunnelAndroid")
+        web.webViewClient = object : WebViewClient() {
+            // Свои страницы — здесь, всё остальное — в браузере телефона.
+            override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
+                val u = req.url.toString()
+                if (u.startsWith("$base/")) return false
+                openExternal(u)
+                return true
+            }
+        }
+        web.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams,
+            ): Boolean {
+                fileCallback?.onReceiveValue(null)
+                fileCallback = callback
+                return try {
+                    openFile.launch(arrayOf("application/json", "text/plain", "*/*"))
+                    true
+                } catch (_: Exception) {
+                    fileCallback = null
+                    false
+                }
+            }
+        }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                web.evaluateJavascript("window.androidBack ? androidBack() : false") { r ->
+                    if (r != "true") moveTaskToBack(true)
+                }
+            }
+        })
+        web.loadUrl(AndroidApi.mainUrl())
 
         askNotificationPermission()
-        if (savedInstanceState == null) applyStartMode()
-        else savedInstanceState.getInt(KEY_PAGE, MAIN).let { page ->
-            // Смена темы или языка пересоздаёт экран — остаёмся там же, без анимации.
-            val inA = flipper.inAnimation
-            val outA = flipper.outAnimation
-            flipper.inAnimation = null
-            flipper.outAnimation = null
-            flipper.displayedChild = page
-            // Раскрытые группы настроек остаются раскрытыми: смена темы
-            // пересоздаёт экран, и сворачивать всё было бы неудобно.
-            savedInstanceState.getBooleanArray(KEY_GROUPS)?.let { open ->
-                for ((i, g) in groups.withIndex()) {
-                    if (open.getOrElse(i) { false }) {
-                        findViewById<View>(g.second).visibility = View.VISIBLE
-                        findViewById<View>(g.third).rotation = 90f
-                    }
-                }
-            }
-            flipper.inAnimation = inA
-            flipper.outAnimation = outA
-            val y = savedInstanceState.getInt(KEY_SCROLL, 0)
-            (flipper.currentView as? ScrollView)?.let { sv -> sv.post { sv.scrollTo(0, y) } }
+        if (savedInstanceState == null) {
+            AndroidApi.applyStartMode()
+            // Пересоздание экрана (поворот, тема) ссылку второй раз не импортирует.
+            handleImportLink(intent)
         }
-        // Пересоздание экрана (поворот, тема) ссылку второй раз не импортирует.
-        if (savedInstanceState == null) handleImportLink(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        AndroidApi.screen = WeakReference(this)
+        AndroidApi.pushState()
+    }
+
+    override fun onPause() {
+        if (AndroidApi.screen?.get() === this) AndroidApi.screen = null
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        if (::web.isInitialized) web.destroy()
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -449,1596 +178,33 @@ class MainActivity : AppCompatActivity() {
         handleImportLink(intent)
     }
 
+    /** Системный вопрос «разрешить VPN?» (AndroidApi, кнопка на экране). */
+    override fun askVpnPermission() {
+        val i = VpnService.prepare(this)
+        if (i == null) AndroidApi.vpnAllowed(true) else vpnPermission.launch(i)
+    }
+
     /**
      * Ссылка sshtunnel://import?… — её несёт QR, который панель сервера
      * показывает при создании клиента: системная камера или браузер
-     * открывают её здесь. Разбирает её то же ядро, что QR и буфер, — сервер
-     * добавляется так же, как по кнопке «Сканировать QR».
+     * открывают её здесь.
      */
     private fun handleImportLink(intent: Intent?) {
         if (intent == null) return
         val uri = intent.data ?: return
         if (!uri.scheme.equals("sshtunnel", ignoreCase = true)) return
         intent.data = null
-        applyImportedText(uri.toString())
-        flipper.displayedChild = SERVERS
+        importText(uri.toString())
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        outState.putInt(KEY_PAGE, flipper.displayedChild)
-        outState.putBooleanArray(KEY_GROUPS,
-            groups.map { findViewById<View>(it.second).visibility == View.VISIBLE }.toBooleanArray())
-        outState.putInt(KEY_SCROLL, (flipper.currentView as? ScrollView)?.scrollY ?: 0)
-    }
-
-    /**
-     * Три кнопки «Туннель при открытии приложения»: включать, как было после
-     * последнего включения/выключения руками, не включать. Включение без
-     * разрешения на VPN не сработает — его спросит система при первом нажатии.
-     */
-    private fun applyStartMode() {
-        fun wanted(mode: String, last: Boolean) = when (mode) {
-            "on" -> true
-            "last" -> last
-            else -> false
-        }
-        val bypass = wanted(settings.startMode, settings.lastRunning)
-        val mesh = settings.meshConfigured() && wanted(settings.meshStartEffective, settings.lastMesh)
-        if ((bypass || mesh) && TunnelService.state == "stopped" && settings.ready() &&
-            VpnService.prepare(this) == null
-        ) {
-            startWith(bypass, mesh)
-        }
-    }
-
-    /**
-     * Отступы под системные полосы.
-     *
-     * Начиная с Android 15 окно занимает экран целиком, вместе с полосой часов
-     * и вырезом под камеру. Без этого шапка оказывается прямо под ними.
-     * Значения берём у системы, а не подбираем на глаз: у каждого телефона
-     * они свои.
-     */
-    private fun applyInsets() {
-        val root = findViewById<View>(R.id.root)
-        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
-            val bars = insets.getInsets(
-                androidx.core.view.WindowInsetsCompat.Type.systemBars() or
-                    androidx.core.view.WindowInsetsCompat.Type.displayCutout()
-            )
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-            insets
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        TunnelService.onUpdate = { runOnUiThread { refresh() } }
-        renderAdBlockSummary()
-        renderMeshSummary()
-        renderDomainsSummary()
-        renderQuick()
-        refresh()
-        // Скачивание обновления шло, пока экран был закрыт, — следим дальше.
-        if (settings.updateDownloadId >= 0) pollDownload()
-    }
-
-    // renderQuick — стрелка быстрого доступа под настройками: есть, если у
-    // приложений есть звёздочки (список хранит ядро, тот же API, что у ПК).
-    private fun renderQuick() {
-        val btn = findViewById<View>(R.id.quickBtn)
-        val lang = if (settings.language == "en") "en" else "ru"
+    /** Сервер из текста — тем же API, что «Вставить»; ответ — странице. */
+    private fun importText(text: String) {
         Thread {
-            val items = WebPageActivity.starred(this, lang)
+            val r = AndroidApi.importText(Settings(this), text)
             runOnUiThread {
-                quickItems = items
-                btn.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+                if (::web.isInitialized) web.evaluateJavascript("window.androidImported && androidImported($r)", null)
             }
         }.start()
-    }
-
-    private var quickItems: List<Pair<String, String>> = emptyList()
-
-    private fun showQuick(anchor: View) {
-        val menu = android.widget.PopupMenu(this, anchor)
-        quickItems.forEachIndexed { i, (_, name) -> menu.menu.add(0, i, i, name) }
-        menu.setOnMenuItemClickListener { item ->
-            quickItems.getOrNull(item.itemId)?.let { (id, _) ->
-                WebPageActivity.open(this, WebPageActivity.PAGE_APPS, id)
-            }
-            true
-        }
-        menu.show()
-    }
-
-    override fun onPause() {
-        TunnelService.onUpdate = null
-        updateNote.removeCallbacks(downloadPoll)
-        super.onPause()
-    }
-
-    // ---------------------------------------------------------------------
-    // Язык интерфейса
-    // ---------------------------------------------------------------------
-
-    private fun applyLanguage(lang: String) {
-        val current = AppCompatDelegate.getApplicationLocales().toLanguageTags()
-        if (current == lang) return
-        AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(lang))
-    }
-
-    /**
-     * Кнопка языка справа от заголовка настроек: нажатие раскрывает список
-     * языков с флагами. После выбора экран пересоздаётся, но остаётся в
-     * настройках (см. onSaveInstanceState).
-     */
-    private fun setupLangBtn() {
-        val btn = findViewById<View>(R.id.langBtn)
-        val langs = listOf(Triple("ru", "RU", "Русский"), Triple("en", "GB", "English"))
-        val cur = langs.firstOrNull { it.first == settings.language } ?: langs[0]
-        findViewById<FlagView>(R.id.langFlag).code = cur.second
-        findViewById<TextView>(R.id.langName).text = if (cur.first == "en") "Eng" else "Рус"
-        btn.setOnClickListener {
-            val list = LinearLayout(this)
-            list.orientation = LinearLayout.VERTICAL
-            val popup = PopupWindow(list, dp(170), ViewGroup.LayoutParams.WRAP_CONTENT, true)
-            for ((code, flag, label) in langs) {
-                val row = cityRow(FlagViewIcon(flag), label) {
-                    popup.dismiss()
-                    if (code != settings.language) {
-                        settings.language = code
-                        applyLanguage(code)
-                    }
-                }
-                if (code == cur.first) row.setBackgroundResource(R.drawable.bg_seg_on)
-                list.addView(row)
-            }
-            popup.setBackgroundDrawable(ContextCompat.getDrawable(this, R.drawable.bg_card))
-            popup.elevation = 12f
-            popup.showAsDropDown(btn, btn.width - dp(170), 4)
-        }
-    }
-
-    /** Ряды вариантов: режим запуска, тема, фон. */
-    private fun setupSegs() {
-        bindSeg(R.id.startModeSeg, { settings.startMode }) { settings.startMode = it }
-        bindSeg(R.id.meshStartSeg, { settings.meshStartEffective }) { settings.meshStartMode = it }
-        bindSeg(R.id.themeSeg, { settings.theme }) {
-            if (it != settings.theme) {
-                settings.theme = it
-                recreate()
-            }
-        }
-        bindSeg(R.id.bgSeg, { settings.background }) {
-            settings.background = it
-            backdrop.mode = it
-        }
-        backdrop.mode = settings.background
-    }
-
-    private fun bindSeg(id: Int, get: () -> String, set: (String) -> Unit) {
-        val box = findViewById<LinearLayout>(id)
-        fun render() {
-            val v = get()
-            for (k in 0 until box.childCount) {
-                val c = box.getChildAt(k)
-                if ((c.tag?.toString() ?: "") == v) c.setBackgroundResource(R.drawable.bg_seg_on)
-                else c.setBackgroundResource(0)
-            }
-        }
-        for (k in 0 until box.childCount) {
-            val c = box.getChildAt(k)
-            c.setOnClickListener {
-                set(c.tag?.toString() ?: "")
-                render()
-            }
-        }
-        render()
-    }
-
-    /**
-     * Главный экран: первая «страница» ровно в высоту экрана, под ней список
-     * устройств. Шестиугольник «Устройства» между кнопками виден, только когда
-     * у сервера включена сеть устройств; у соседних кнопок тогда срезан угол.
-     */
-    private fun setupMainScreen() {
-        mainScroll.viewTreeObserver.addOnGlobalLayoutListener {
-            val h = mainScroll.height
-            if (h > 0 && mainPage.layoutParams.height != h) {
-                mainPage.layoutParams = mainPage.layoutParams.also { it.height = h }
-                devPage.layoutParams = devPage.layoutParams.also { it.height = h }
-            }
-        }
-        devHex.background = hexBg
-        findViewById<View>(R.id.devUp).background =
-            ShapeBg(ShapeBg.Kind.HEX, 0xFF16402B.toInt(), dp(20).toFloat())
-        tintHex(findViewById(R.id.devUpIcon), findViewById(R.id.devUpCap), true)
-        devHex.setOnClickListener {
-            mainScroll.smoothScrollTo(0, devPage.top)
-        }
-        findViewById<View>(R.id.devUp).setOnClickListener { mainScroll.smoothScrollTo(0, 0) }
-        // Пальцем главная не листается (LockedScrollView) — только кнопками.
-        renderActions(false)
-    }
-
-    private fun tintHex(icon: ImageView, cap: TextView, on: Boolean) {
-        val c = if (on) 0xFF7BE3A8.toInt() else tc(R.color.dim)
-        icon.setColorFilter(c)
-        cap.setTextColor(c)
-    }
-
-    /**
-     * Кнопка «Сеть устройств» под большой — как на компьютере. Есть, только
-     * когда у сервера включена сеть устройств: иначе включать нечего.
-     */
-    private fun renderMeshButton(running: Boolean) {
-        meshBtn.visibility = if (settings.meshConfigured()) View.VISIBLE else View.GONE
-        val on = running && TunnelService.meshOn
-        meshBtn.setBackgroundResource(if (on) R.drawable.bg_pill_on else R.drawable.bg_pill_off)
-        val color = tc(if (on) R.color.ok else R.color.dim)
-        findViewById<ImageView>(R.id.meshBtnDot).setColorFilter(if (on) color else tc(R.color.line))
-        findViewById<TextView>(R.id.meshBtnCap).apply {
-            setTextColor(color)
-            setText(if (on) R.string.mesh_btn_on else R.string.mesh_btn_off)
-        }
-    }
-
-    /** Кнопки под сведениями: с сетью устройств — вырезы под шестиугольник. */
-    private fun renderActions(devices: Boolean) {
-        val card = tc(R.color.card2)
-        val depth = dp(20).toFloat()
-        speedButton.background = ShapeBg(if (devices) ShapeBg.Kind.NOTCH_RIGHT else ShapeBg.Kind.RECT, card, depth)
-        findViewById<View>(R.id.toSelfCheck).background =
-            ShapeBg(if (devices) ShapeBg.Kind.NOTCH_LEFT else ShapeBg.Kind.RECT, card, depth)
-        speedButton.setPadding(0, 0, if (devices) dp(22) else 0, 0)
-        findViewById<View>(R.id.toSelfCheck).setPadding(if (devices) dp(22) else 0, 0, 0, 0)
-        devGap.layoutParams = devGap.layoutParams.also { it.width = dp(if (devices) 80 else 8) }
-        devHex.visibility = if (devices) View.VISIBLE else View.GONE
-        // Список устройств всегда под главной, если сеть устройств есть, —
-        // до него можно долистать пальцем, не только шестиугольником.
-        devPage.visibility = if (devices) View.VISIBLE else View.GONE
-    }
-
-    /** Список устройств под главным экраном; нажатие копирует домен. */
-    private fun renderDevices() {
-        val p = settings.active()
-        val devices = p.meshEnabled && p.meshKey.isNotBlank()
-        if (devices != (devHex.visibility == View.VISIBLE)) renderActions(devices)
-        if (!devices) return
-        val o = try { JSONObject(TunnelService.meshStatus()) } catch (e: Exception) { JSONObject() }
-        val online = o.optString("state") == "online"
-        hexBg.setColor(if (online) 0xFF16402B.toInt() else tc(R.color.card2))
-        tintHex(findViewById(R.id.devHexIcon), findViewById(R.id.devHexCap), online)
-        if (devPage.visibility != View.VISIBLE) return
-
-        val peers = o.optJSONArray("peers")
-        val n = peers?.length() ?: 0
-        var up = 0
-        devRows.removeAllViews()
-        for (i in 0 until n) {
-            val peer = peers!!.getJSONObject(i)
-            if (peer.optBoolean("online")) up++
-            devRows.addView(devRow(peer, i))
-        }
-        findViewById<TextView>(R.id.devCount).text = if (n > 0) "$up / $n" else ""
-        if (n == 0) {
-            val empty = TextView(this)
-            empty.text = getString(R.string.mesh_no_peers)
-            empty.setTextColor(tc(R.color.dim))
-            empty.setPadding(dp(8), dp(12), dp(8), dp(12))
-            devRows.addView(empty)
-        }
-    }
-
-    /**
-     * Строка устройства: слева имя крупно, справа домен и под ним IP мельче,
-     * по высоте — по центру имени. Так на узком экране видно всё целиком.
-     */
-    private fun devRow(peer: JSONObject, index: Int): View {
-        val domain = peer.optString("host") + ".mesh"
-        val on = peer.optBoolean("online")
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.gravity = Gravity.CENTER_VERTICAL
-        row.setPadding(dp(10), dp(10), dp(10), dp(10))
-        row.setBackgroundColor(if (index % 2 == 0) tc(R.color.card) else 0)
-        if (devHit == domain) row.setBackgroundColor(0x2216402B)
-        row.isClickable = true
-        val dim = tc(R.color.dim)
-        val name = TextView(this)
-        name.text = peer.optString("name") + if (peer.optBoolean("self")) " " + getString(R.string.mesh_this) else ""
-        name.setTextColor(if (on) tc(R.color.text) else dim)
-        name.textSize = 16f
-        name.maxLines = 2
-        name.ellipsize = android.text.TextUtils.TruncateAt.END
-        name.setPadding(0, 0, dp(12), 0)
-        name.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        row.addView(name)
-        val right = LinearLayout(this)
-        right.orientation = LinearLayout.VERTICAL
-        right.gravity = Gravity.END
-        right.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f)
-        fun small(text: String, size: Float, color: Int) {
-            val tv = TextView(this)
-            tv.text = text
-            tv.setTextColor(color)
-            tv.textSize = size
-            tv.typeface = android.graphics.Typeface.MONOSPACE
-            tv.maxLines = 1
-            tv.ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
-            tv.gravity = Gravity.END
-            right.addView(tv)
-        }
-        small(domain, 13f, if (devHit == domain) tc(R.color.ok) else if (on) tc(R.color.accent) else dim)
-        small(peer.optString("ip"), 11.5f, dim)
-        row.addView(right)
-        row.setOnClickListener {
-            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            cm?.setPrimaryClip(ClipData.newPlainText(domain, domain))
-            devHit = domain
-            findViewById<TextView>(R.id.devNote).text = getString(R.string.copied_domain, domain)
-            renderDevices()
-            row.postDelayed({
-                if (devHit == domain) {
-                    devHit = ""
-                    findViewById<TextView>(R.id.devNote).text = ""
-                    renderDevices()
-                }
-            }, 2500)
-        }
-        return row
-    }
-
-    private fun openSettings() {
-        flipper.displayedChild = SETTINGS
-    }
-
-    // ---------------------------------------------------------------------
-    // Вкладки серверов
-    // ---------------------------------------------------------------------
-
-    /**
-     * Список серверов, как на компьютере: кружок выбирает сервер для
-     * подключения, карандаш раскрывает его настройки прямо под строкой.
-     */
-    private fun renderProfileTabs() {
-        (serverPanelBody.parent as? ViewGroup)?.removeView(serverPanelBody)
-        profileTabs.removeAllViews()
-        val active = settings.activeProfileId
-        for (p in settings.profiles) {
-            val open = srvOpen && p.id == editingProfileId
-            val row = LinearLayout(this)
-            row.orientation = LinearLayout.HORIZONTAL
-            row.gravity = Gravity.CENTER_VERTICAL
-            row.setPadding(dp(2), dp(9), dp(2), dp(9))
-            if (!open) row.setBackgroundResource(R.drawable.bg_row)
-
-            val rad = TextView(this)
-            rad.text = if (p.id == active) "◉" else "○"
-            rad.textSize = 18f
-            rad.setTextColor(if (p.id == active) tc(R.color.accent) else tc(R.color.dim))
-            rad.setPadding(dp(4), 0, dp(10), 0)
-            rad.contentDescription = getString(R.string.select_this_server)
-            rad.setOnClickListener { switchActiveProfile(p.id) }
-            row.addView(rad)
-
-            val flag = FlagView(this)
-            flag.code = p.flag
-            flag.layoutParams = LinearLayout.LayoutParams(dp(22), dp(15))
-            row.addView(flag)
-
-            val col = LinearLayout(this)
-            col.orientation = LinearLayout.VERTICAL
-            col.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                .also { it.marginStart = dp(9) }
-            val name = TextView(this)
-            name.text = p.name
-            name.textSize = 14f
-            name.setTypeface(name.typeface, android.graphics.Typeface.BOLD)
-            name.setTextColor(tc(R.color.text))
-            col.addView(name)
-            val host = TextView(this)
-            host.text = p.host.ifBlank { "—" }
-            host.textSize = 11.5f
-            host.typeface = android.graphics.Typeface.MONOSPACE
-            host.setTextColor(tc(R.color.dim))
-            host.maxLines = 1
-            host.ellipsize = android.text.TextUtils.TruncateAt.END
-            col.addView(host)
-            col.setOnClickListener { toggleEdit(p.id) }
-            row.addView(col)
-
-            val pen = ImageView(this)
-            pen.setImageResource(R.drawable.ic_pen)
-            pen.setPadding(dp(8), dp(8), dp(8), dp(8))
-            pen.layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
-            pen.contentDescription = getString(R.string.edit)
-            if (open) pen.setColorFilter(tc(R.color.accent))
-            pen.setOnClickListener { toggleEdit(p.id) }
-            row.addView(pen)
-
-            profileTabs.addView(row)
-            if (open) {
-                profileTabs.addView(serverPanelBody)
-                serverPanelBody.visibility = View.VISIBLE
-            }
-        }
-        if (!srvOpen) {
-            profileTabs.addView(serverPanelBody)
-            serverPanelBody.visibility = View.GONE
-        }
-        selectServerBtn.visibility = if (editingProfileId == active) View.GONE else View.VISIBLE
-        removeProfileBtn.visibility = if (settings.profiles.size > 1) View.VISIBLE else View.GONE
-
-        val a = settings.active()
-        findViewById<TextView>(R.id.serversSummary).text =
-            if (settings.profiles.size > 1) getString(R.string.servers_total, a.name, settings.profiles.size) else a.name
-
-        renderHomePicker()
-    }
-
-    /** Виджет «город и флаг активного сервера» под кнопкой на главном
-     *  экране — как #homePicker в панели на компьютере. */
-    private fun renderHomePicker() {
-        val show = settings.showServerPicker && settings.profiles.size > 1
-        homePicker.visibility = if (show) View.VISIBLE else View.GONE
-        if (!show) return
-        val active = settings.profiles.find { it.id == settings.activeProfileId } ?: settings.active()
-        homePickerFlag.code = active.flag
-        homePickerName.text = active.name
-    }
-
-    private fun showServerPickerMenu() {
-        val list = LinearLayout(this)
-        list.orientation = LinearLayout.VERTICAL
-        for (p in settings.profiles) {
-            list.addView(cityRow(FlagViewIcon(p.flag), p.name) {
-                switchActiveProfile(p.id)
-            })
-        }
-        val popup = PopupWindow(list, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, true)
-        popup.setBackgroundDrawable(ContextCompat.getDrawable(this, R.drawable.bg_card))
-        popup.elevation = 12f
-        popup.showAsDropDown(homePicker, 0, 4)
-    }
-
-    /** Переключает активный сервер (не обязательно тот, что сейчас в форме
-     *  настроек) — общий код для «Выбрать этот сервер» и виджета на главной. */
-    /**
-     * Переключение активного сервера. Работающий туннель принадлежит прежнему
-     * серверу, поэтому его надо остановить — но раньше на этом всё и
-     * заканчивалось, и человеку приходилось жать «Подключить» самому. Теперь,
-     * если туннель работал, он поднимается на новом сервере сам: смена
-     * сервера при включённом туннеле означает «хочу ходить через тот, другой»,
-     * а не «выключи мне интернет».
-     *
-     * Выключенный туннель так и остаётся выключенным: включать его без
-     * просьбы — сюрприз, а не удобство.
-     */
-    private fun switchActiveProfile(id: String) {
-        if (id == settings.activeProfileId) return
-        val wasRunning = TunnelService.state != "stopped"
-        if (wasRunning) {
-            startService(Intent(this, TunnelService::class.java).setAction(TunnelService.ACTION_STOP))
-        }
-        settings.setActive(id)
-        renderProfileTabs()
-        if (wasRunning) {
-            Toast.makeText(this, R.string.server_switched_reconnecting, Toast.LENGTH_LONG).show()
-            // Служба останавливается не мгновенно (закрывает сессии SSH и
-            // отпускает интерфейс VPN), поэтому запуск на новом сервере —
-            // следующим сообщением, а не сразу: иначе она получила бы START
-            // раньше, чем закончила STOP.
-            power.postDelayed({ if (settings.ready()) startWith(true, true) }, 900)
-        } else {
-            Toast.makeText(this, R.string.server_switched, Toast.LENGTH_SHORT).show()
-        }
-        refresh()
-    }
-
-    /**
-     * Полоска профилей приложения вверху настроек: «Профиль 1, 2 … +», у
-     * выбранного — крестик (если профилей больше одного).
-     */
-    private fun renderAppProfiles() {
-        findViewById<View>(R.id.appProfilesScroll).visibility =
-            if (appProfiles.enabled) View.VISIBLE else View.GONE
-        val bar = findViewById<LinearLayout>(R.id.appProfilesBar)
-        bar.removeAllViews()
-        fun chip(text: String, on: Boolean, click: () -> Unit): TextView = TextView(this).apply {
-            this.text = text
-            textSize = 13f
-            setTextColor(tc(if (on) R.color.text else R.color.dim))
-            if (on) setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setBackgroundResource(if (on) R.drawable.bg_seg_on else R.drawable.bg_outline)
-            gravity = android.view.Gravity.CENTER
-            minHeight = dp(34)
-            setPadding(dp(12), 0, dp(12), 0)
-            setOnClickListener { click() }
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, dp(34)).apply { marginEnd = dp(6) }
-        }
-        val many = appProfiles.list.size > 1
-        appProfiles.list.forEachIndexed { i, p ->
-            val on = p.id == appProfiles.active
-            val name = getString(R.string.app_profile, i + 1)
-            bar.addView(chip(if (on && many) "$name  ×" else name, on) {
-                if (!on) changeAppProfile { appProfiles.switchTo(p.id) }
-                else if (many) {
-                    AlertDialog.Builder(this)
-                        .setMessage(getString(R.string.app_profile_del, name))
-                        .setNegativeButton(android.R.string.cancel, null)
-                        .setPositiveButton(R.string.app_profile_del_yes) { _, _ ->
-                            changeAppProfile { appProfiles.delete(p.id) }
-                        }
-                        .show()
-                }
-            })
-        }
-        bar.addView(chip("+", false) { changeAppProfile { appProfiles.add() } })
-    }
-
-    /**
-     * Смена профиля приложения: туннель останавливается, настройки целиком
-     * подменяются, экран перечитывает их. Работал туннель — поднимается снова
-     * уже по новому профилю, как при смене сервера (см. switchActiveProfile).
-     */
-    private fun changeAppProfile(action: () -> Unit) {
-        val wasRunning = TunnelService.state != "stopped"
-        if (wasRunning) {
-            startService(Intent(this, TunnelService::class.java).setAction(TunnelService.ACTION_STOP))
-        }
-        try {
-            action()
-        } catch (e: Exception) {
-            Toast.makeText(this, R.string.bundle_bad, Toast.LENGTH_LONG).show()
-        }
-        editingProfileId = settings.activeProfileId
-        applyLanguage(settings.language)
-        renderProfileTabs()
-        loadProfileIntoForm(settings.active())
-        loadAppSettings()
-        renderAppProfiles()
-        if (wasRunning) {
-            power.postDelayed({ if (settings.ready()) startWith(true, true) }, 900)
-        }
-        refresh()
-    }
-
-    private fun toggleEdit(id: String) {
-        if (id == editingProfileId) {
-            srvOpen = !srvOpen
-            if (!srvOpen) saveCurrentFormInto(id)
-            renderProfileTabs()
-            return
-        }
-        saveCurrentFormInto(editingProfileId)
-        editingProfileId = id
-        srvOpen = true
-        val p = settings.profiles.find { it.id == id } ?: settings.active()
-        loadProfileIntoForm(p)
-        renderProfileTabs()
-    }
-
-    private fun onAddProfile() {
-        saveCurrentFormInto(editingProfileId)
-        val p = settings.addProfile("", "")
-        editingProfileId = p.id
-        srvOpen = true
-        loadProfileIntoForm(p)
-        renderProfileTabs()
-    }
-
-    private fun onRemoveProfile() {
-        if (settings.profiles.size <= 1) {
-            Toast.makeText(this, R.string.remove_server_last, Toast.LENGTH_SHORT).show()
-            return
-        }
-        val p = settings.profiles.find { it.id == editingProfileId } ?: return
-        AlertDialog.Builder(this)
-            .setMessage(getString(R.string.remove_server_confirm, p.name))
-            .setPositiveButton(R.string.remove_server) { _, _ ->
-                settings.removeProfile(p.id)
-                editingProfileId = settings.activeProfileId
-                loadProfileIntoForm(settings.profiles.find { it.id == editingProfileId } ?: settings.active())
-                renderProfileTabs()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    /** Тот же формат JSON, что читает импорт (и панель на компьютере) —
-     *  чтобы этим сервером можно было поделиться, вставив текст на другом
-     *  устройстве. Сначала сохраняет форму — экспортируется то, что видно
-     *  на экране, а не последнее сохранённое состояние. */
-    private fun onExportProfileClip() {
-        saveCurrentFormInto(editingProfileId)
-        val p = settings.profiles.find { it.id == editingProfileId } ?: return
-        val keyFile = settings.keyFile(p.id)
-        val keyContents = if (keyFile.exists() && keyFile.length() > 0) keyFile.readText() else ""
-        val json = try {
-            mobile.Mobile.buildConfig(
-                p.name, p.flag, p.host, p.sshPort.toLong(), p.user, p.poolSize.toLong(),
-                p.filterMode, p.filterApps.joinToString("\n"), p.directHosts,
-                p.localViaTunnel, keyContents.isNotBlank(), keyContents, p.panel, p.deviceName,
-                if (p.meshEnabled) p.meshKey else "",
-            )
-        } catch (e: Exception) {
-            Toast.makeText(this, e.message ?: getString(R.string.import_bad_apps), Toast.LENGTH_SHORT).show()
-            return
-        }
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-        cm?.setPrimaryClip(ClipData.newPlainText(getString(R.string.export_server_clip), json))
-        Toast.makeText(this, R.string.export_server_copied, Toast.LENGTH_SHORT).show()
-    }
-
-    private fun onSelectServer() {
-        saveCurrentFormInto(editingProfileId)
-        if (editingProfileId == settings.activeProfileId) {
-            Toast.makeText(this, R.string.server_switched, Toast.LENGTH_SHORT).show()
-            return
-        }
-        switchActiveProfile(editingProfileId)
-    }
-
-    // ---------------------------------------------------------------------
-    // Выбор города/флага
-    // ---------------------------------------------------------------------
-
-    private fun showCityMenu() {
-        val list = LinearLayout(this)
-        list.orientation = LinearLayout.VERTICAL
-        val scroll = ScrollView(this)
-        scroll.addView(list)
-        scroll.layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(280)
-        )
-
-        for (city in Cities.ALL) {
-            list.addView(cityRow(FlagViewIcon(city.code), Cities.label(city, settings.language)) {
-                pickedCity = city
-                renderCityBtn()
-                customCityName.visibility = View.GONE
-                liveRetitleEditingTab()
-            })
-        }
-        list.addView(cityRow(FlagViewIcon(""), getString(R.string.custom_flag_name)) {
-            pickedCity = null
-            renderCityBtn()
-            customCityName.visibility = View.VISIBLE
-            customCityName.requestFocus()
-            liveRetitleEditingTab()
-        })
-
-        val popup = PopupWindow(scroll, cityBtn.width, ViewGroup.LayoutParams.WRAP_CONTENT, true)
-        popup.setBackgroundDrawable(ContextCompat.getDrawable(this, R.drawable.bg_card))
-        popup.elevation = 12f
-        popup.showAsDropDown(cityBtn, 0, 4)
-    }
-
-    private fun FlagViewIcon(code: String): FlagView {
-        val fv = FlagView(this)
-        fv.code = code
-        fv.layoutParams = LinearLayout.LayoutParams(dp(26), dp(18))
-        return fv
-    }
-
-    private fun cityRow(flag: FlagView, label: String, onClick: () -> Unit): View {
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.gravity = Gravity.CENTER_VERTICAL
-        row.setPadding(dp(12), dp(10), dp(12), dp(10))
-        row.isClickable = true
-        row.isFocusable = true
-        row.addView(flag)
-        val text = TextView(this)
-        text.text = label
-        text.setTextColor(tc(R.color.text))
-        text.textSize = 13.5f
-        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        lp.marginStart = dp(10)
-        text.layoutParams = lp
-        row.addView(text)
-        row.setOnClickListener { onClick() }
-        return row
-    }
-
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-
-    private fun renderCityBtn() {
-        val city = pickedCity
-        if (city == null) {
-            cityFlagView.code = ""
-            cityLabelView.text = getString(R.string.custom_flag_name)
-        } else {
-            cityFlagView.code = city.code
-            cityLabelView.text = Cities.label(city, settings.language)
-        }
-    }
-
-    private fun liveRetitleEditingTab() {
-        // Подпись вкладки обновится при следующем renderProfileTabs() —
-        // после сохранения формы (переключение вкладки, «Выбрать этот
-        // сервер» или «Сохранить»). Здесь достаточно того, что renderCityBtn
-        // уже показал выбор в самой кнопке.
-    }
-
-    // ---------------------------------------------------------------------
-    // Загрузка и сохранение формы
-    // ---------------------------------------------------------------------
-
-    private fun loadProfileIntoForm(p: Settings.Profile) {
-        if (p.panel.isBlank()) {
-            issuedByPanel.visibility = View.GONE
-        } else {
-            issuedByPanel.visibility = View.VISIBLE
-            issuedByPanel.text = getString(R.string.issued_by_panel, p.deviceName.ifBlank { p.name })
-            issuedByPanel.setOnClickListener {
-                try {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(p.panel)))
-                } catch (e: Exception) {
-                    // Нет браузера или адрес некорректен — тихо игнорируем,
-                    // строка и так только подсказка, а не единственный способ
-                    // добраться до панели.
-                }
-            }
-        }
-        hostEdit.setText(p.host)
-        portEdit.setText(p.sshPort.toString())
-        poolEdit.setText(p.poolSize.toString())
-        userEdit.setText(p.user)
-        keyEdit.setText("")
-        localCheck.isChecked = p.localViaTunnel
-        keyStateView.setText(if (settings.keyFile(p.id).let { it.exists() && it.length() > 0 }) R.string.key_saved else R.string.key_missing)
-        appsSummary.text = appsSummaryText(p)
-
-        val city = Cities.forProfile(p.name, p.flag)
-        pickedCity = city
-        renderCityBtn()
-        customCityName.visibility = if (city == null) View.VISIBLE else View.GONE
-        customCityName.setText(if (city == null) p.name else "")
-    }
-
-    /** Переносит текущие поля формы в профиль с указанным id и сохраняет его. */
-    private fun saveCurrentFormInto(id: String) {
-        val list = settings.profiles
-        val p = list.find { it.id == id } ?: return
-        val city = pickedCity
-        if (city != null) {
-            p.name = Cities.label(city, settings.language)
-            p.flag = city.code
-        } else {
-            p.name = customCityName.text.toString().trim().ifBlank { p.name.ifBlank { "Server" } }
-            p.flag = ""
-        }
-        p.host = hostEdit.text.toString().trim()
-        p.sshPort = portEdit.text.toString().toIntOrNull() ?: 22
-        p.poolSize = poolEdit.text.toString().toIntOrNull() ?: 4
-        p.user = userEdit.text.toString().trim()
-        p.localViaTunnel = localCheck.isChecked
-        settings.saveProfile(p)
-
-        val key = keyEdit.text.toString()
-        if (key.isNotBlank()) {
-            settings.saveKeyFor(id, key)
-            keyEdit.setText("")
-        }
-    }
-
-    // Блокировка рекламы и проброс UDP относятся ко всему приложению, а не к
-    // отдельному серверу: они не переезжают вместе с профилем и читаются один
-    // раз при открытии экрана.
-    private fun loadAppSettings() {
-        renderAdBlockSummary()
-        udpRelayEnabledCheck.isChecked = settings.udpRelayEnabled
-        showServerPickerCheck.isChecked = settings.showServerPicker
-    }
-
-    /** Список блокировки и белый список редактируются в AdBlockActivity —
-     *  здесь только сводка в строке, которую надо освежить после возврата. */
-    private fun renderAdBlockSummary() {
-        adBlockSummary.text = if (settings.adBlockEnabled) {
-            getString(R.string.ad_block_enabled) + " · " + getString(R.string.tile_blocked) + ": " + settings.adBlockTotal
-        } else {
-            getString(R.string.ad_block_off)
-        }
-    }
-
-    /** Сводка исключений доменов: сколько записей в каждом списке. */
-    private fun renderDomainsSummary() {
-        fun count(t: String) = t.split(Regex("[\\s,;]+")).count { it.isNotBlank() }
-        val p = settings.active()
-        domainsSummary.text = getString(R.string.domains_summary, count(p.directHosts), count(p.tunnelHosts))
-    }
-
-    /** Сводка сети устройств — про активный сервер: сеть живёт на нём. */
-    private fun renderMeshSummary() {
-        val p = settings.active()
-        meshSummary.text = if (p.meshEnabled && p.meshKey.isNotBlank()) {
-            getString(R.string.mesh_on_for, p.name)
-        } else {
-            getString(R.string.mesh_off)
-        }
-    }
-
-    private fun saveAppSettings() {
-        settings.udpRelayEnabled = udpRelayEnabledCheck.isChecked
-        val pickerChanged = settings.showServerPicker != showServerPickerCheck.isChecked
-        settings.showServerPicker = showServerPickerCheck.isChecked
-        if (pickerChanged) renderHomePicker()
-    }
-
-    private fun saveSettings() {
-        saveCurrentFormInto(editingProfileId)
-        settings.profiles.find { it.id == editingProfileId }?.let { settings.shareTraffic(it) }
-        saveAppSettings()
-        renderProfileTabs()
-        loadProfileIntoForm(settings.profiles.find { it.id == editingProfileId } ?: settings.active())
-        refresh()
-        Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show()
-    }
-
-    // ---------------------------------------------------------------------
-    // Настройка из буфера обмена или QR-кода (ядро на Go разбирает текст)
-    // ---------------------------------------------------------------------
-
-    private fun onPasteConfig() {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-        val text = cm?.primaryClip?.takeIf { it.itemCount > 0 }
-            ?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
-        if (text.isBlank()) {
-            importNote.text = getString(R.string.paste_failed)
-            return
-        }
-        applyImportedText(text)
-    }
-
-    private fun onScanConfig() {
-        saveCurrentFormInto(editingProfileId)
-        scanSourceProfileId = ""
-        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
-            PackageManager.PERMISSION_GRANTED
-        if (granted) launchScanner() else cameraPermission.launch(Manifest.permission.CAMERA)
-    }
-
-    private fun launchScanner() {
-        scanLauncher.launch(
-            ScanOptions()
-                .setOrientationLocked(true)
-                .setBeepEnabled(false)
-                .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                // Стандартная подсказка снизу экрана сканера у zxing не
-                // учитывает системные отступы (жесты/панель навигации) — на
-                // Android 15+ с обязательным edge-to-edge текст съезжает за
-                // край экрана. Рамка видоискателя и так понятна без слов.
-                .setPrompt("")
-        )
-    }
-
-    /**
-     * Разбирает текст (из буфера или QR-кода) через то же ядро на Go, что
-     * читает файлы экспорта на компьютере, и создаёт из него новый сервер.
-     * Если текст не похож на конфиг ssh_tunnel — ничего не меняем, только
-     * показываем ошибку на месте.
-     */
-    private fun applyImportedText(text: String, replaceSourceProfileId: String = "") {
-        val parsed = try {
-            mobile.Mobile.parseConfig(text)
-        } catch (e: Exception) {
-            importNote.text = e.message ?: getString(R.string.import_bad_apps)
-            return
-        }
-
-        // Явные getX(): gomobile сам решает регистр синтетических свойств
-        // Kotlin для полей вроде SSHPort, полагаться на него не стоит.
-        val name = parsed.getName()
-        val flag = parsed.getFlag()
-        val host = parsed.getHost()
-        // gomobile отдаёт поля Go-типа int как Long — приводим сразу здесь,
-        // чтобы ниже не путаться с типами при сравнении и присваивании в Int.
-        val sshPort = parsed.getSshPort().toInt()
-        val user = parsed.getUser()
-        val poolSize = parsed.getPoolSize().toInt()
-        val filterMode = parsed.getFilterMode()
-        val filterApps = parsed.getFilterApps()
-        val directHosts = parsed.getDirectHosts()
-        val localViaTunnel = parsed.getLocalViaTunnel()
-        val keyIncluded = parsed.getKeyIncluded()
-        val keyContents = parsed.getKeyContents()
-        val panel = parsed.getPanel()
-        val deviceName = parsed.getDeviceName()
-        val meshKey = parsed.getMeshKey()
-
-        saveCurrentFormInto(editingProfileId)
-        val p = settings.addProfile(name, flag)
-        p.host = host
-        p.sshPort = if (sshPort > 0) sshPort else 22
-        p.user = user.ifBlank { "tunnel" }
-        p.poolSize = if (poolSize > 0) poolSize else 4
-        p.filterMode = filterMode.ifBlank { "all" }
-        p.filterApps = filterApps.split("\n").map { it.trim() }.filter { it.isNotBlank() }.toMutableSet()
-        p.directHosts = directHosts
-        p.localViaTunnel = localViaTunnel
-        p.panel = panel
-        p.deviceName = deviceName
-        // Пришёл ключ сети устройств — телефон сразу в ней (входящие на
-        // телефоне остаются выключены, их включают на экране сети).
-        if (meshKey.isNotBlank()) {
-            p.meshEnabled = true
-            p.meshKey = meshKey
-        }
-        settings.saveProfile(p)
-
-        if (keyIncluded && keyContents.isNotBlank()) {
-            settings.saveKeyFor(p.id, keyContents)
-        }
-
-        // Раньше здесь сразу переключали активный сервер на только что
-        // импортированный — с уже подключённым туннелем это выглядело так,
-        // будто данные текущего сервера подменились, хотя на самом деле
-        // просто переключилось подключение. Импорт теперь только добавляет
-        // вкладку и открывает её для проверки — какой сервер активен,
-        // выбирает отдельно кнопка «Выбрать этот сервер».
-        // Сканирование QR — это «перенастрой вот этот сервер»: новый профиль
-        // уже создан выше со всеми данными из кода, а тот, с чьей вкладки
-        // сканировали, теперь лишний. Удаляем именно его и только его — и
-        // только если он вообще ещё есть и это не единственный сервер.
-        var replaced = false
-        if (replaceSourceProfileId.isNotBlank() && replaceSourceProfileId != p.id) {
-            replaced = settings.removeProfile(replaceSourceProfileId)
-        }
-
-        editingProfileId = p.id
-        // Новый сервер сразу раскрыт под своей строкой — видно, что он добавился.
-        srvOpen = true
-        loadProfileIntoForm(p)
-        renderProfileTabs()
-        importNote.text = getString(if (keyIncluded) R.string.import_ok else R.string.import_ok_no_key, p.name)
-        refresh()
-    }
-
-    // ---------------------------------------------------------------------
-    // Перенос всех настроек и обновление приложения
-    // ---------------------------------------------------------------------
-
-    private fun onBundleExport() {
-        saveCurrentFormInto(editingProfileId)
-        val text = try {
-            SettingsBundle.build(settings)
-        } catch (e: Exception) {
-            bundleNote.text = e.message ?: getString(R.string.bundle_bad)
-            return
-        }
-        if (Xfer.toFile(settings)) {
-            pendingBundle = text
-            bundleSaveFile.launch("ssh_tunnel-settings.json")
-            return
-        }
-        Xfer.copy(this, getString(R.string.export_settings), text)
-        bundleNote.text = getString(R.string.bundle_copied, settings.profiles.size)
-    }
-
-    /**
-     * Импорт заменяет всё разом, отменить это нечем — поэтому спрашиваем
-     * подтверждение, как и при удалении сервера.
-     */
-    private fun onBundleImport() {
-        if (Xfer.toFile(settings)) {
-            bundleOpenFile.launch(arrayOf("application/json", "text/plain", "*/*"))
-            return
-        }
-        confirmBundle(Xfer.paste(this))
-    }
-
-    private fun confirmBundle(text: String) {
-        if (text.isBlank()) {
-            bundleNote.text = getString(R.string.paste_failed)
-            return
-        }
-        AlertDialog.Builder(this)
-            .setMessage(R.string.bundle_replace_confirm)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(android.R.string.ok) { _, _ -> applyBundle(text) }
-            .show()
-    }
-
-    private fun applyBundle(text: String) {
-        val count = try {
-            SettingsBundle.apply(settings, text)
-        } catch (e: SettingsBundle.BadBundle) {
-            bundleNote.text = getString(
-                if (e.message == "one server") R.string.bundle_one_server else R.string.bundle_bad
-            )
-            return
-        } catch (e: Exception) {
-            bundleNote.text = getString(R.string.bundle_bad)
-            return
-        }
-        editingProfileId = settings.activeProfileId
-        applyLanguage(settings.language)
-        renderProfileTabs()
-        loadProfileIntoForm(settings.active())
-        loadAppSettings()
-        bundleNote.text = getString(R.string.bundle_imported, count)
-        refresh()
-    }
-
-    /**
-     * Проверка обновлений. Сеть — в отдельном потоке: в основном Android
-     * запрещает сетевые вызовы, и приложение просто упало бы.
-     */
-    private fun onCheckUpdates(btn: View) {
-        btn.isEnabled = false
-        updateNote.text = getString(R.string.update_checking)
-        updateDownloadBtn.visibility = View.GONE
-        Thread {
-            val result = try {
-                UpdateCheck.check(BuildConfig.VERSION_NAME)
-            } catch (e: UpdateCheck.RateLimited) {
-                runOnUiThread {
-                    btn.isEnabled = true
-                    updateNote.text = getString(R.string.update_rate_limited)
-                }
-                return@Thread
-            } catch (e: Exception) {
-                runOnUiThread {
-                    btn.isEnabled = true
-                    updateNote.text = getString(R.string.update_failed)
-                }
-                return@Thread
-            }
-            runOnUiThread {
-                btn.isEnabled = true
-                pendingUpdate = result
-                when {
-                    result.newer -> {
-                        updateNote.text = getString(R.string.update_available, result.latest)
-                        // Кнопка могла остаться «Установить» или «Открыть
-                        // страницу релиза» от прошлой загрузки.
-                        readyDownloadId = -1
-                        readyApk = null
-                        (updateDownloadBtn as TextView).setText(R.string.update_download)
-                        updateDownloadBtn.setOnClickListener { onDownloadUpdate() }
-                        findViewById<View>(R.id.updateProgress).visibility = View.GONE
-                        updateDownloadBtn.visibility = View.VISIBLE
-                    }
-                    result.ahead -> updateNote.text = getString(R.string.update_ahead, result.latest)
-                    else -> updateNote.text = getString(R.string.update_latest)
-                }
-            }
-        }.start()
-    }
-
-    /** Результат последней проверки — из него берётся ссылка на скачивание. */
-    private var pendingUpdate: UpdateCheck.Result? = null
-
-    /**
-     * Скачивает APK сама программа и открывает установщик. Раньше качал
-     * системный менеджер загрузок, и на части телефонов (Xiaomi) при
-     * включённом VPN он намертво вставал «в очередь» / «жду сети». Сама
-     * программа исключена из VPN, поэтому идёт к GitHub напрямую. Если у
-     * релиза APK почему-то нет — открываем страницу релиза в браузере.
-     */
-    private fun onDownloadUpdate() {
-        // Уже скачано — кнопка стала «Установить».
-        readyApk?.let { if (it.exists()) { installApk(it); return } }
-        val ready = readyDownloadId
-        if (ready >= 0) {
-            installDownloaded(ready)
-            return
-        }
-        val u = pendingUpdate ?: return
-        if (u.apkUrl.isBlank()) {
-            updateNote.text = getString(R.string.update_open_release)
-            openLink(u.releaseUrl)
-            return
-        }
-        downloadApk(u)
-    }
-
-    // Скачанный самой программой APK, который осталось установить.
-    private var readyApk: java.io.File? = null
-
-    private fun downloadApk(u: UpdateCheck.Result) {
-        // Старую загрузку менеджера загрузок (из прошлой версии) снимаем.
-        if (settings.updateDownloadId >= 0) {
-            try {
-                (getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager)
-                    .remove(settings.updateDownloadId)
-            } catch (_: Exception) {
-            }
-            settings.updateDownloadId = -1
-        }
-        val bar = findViewById<android.widget.ProgressBar>(R.id.updateProgress)
-        bar.visibility = View.VISIBLE
-        bar.isIndeterminate = true
-        updateNote.text = getString(R.string.update_downloading)
-        updateDownloadBtn.visibility = View.GONE
-        Thread {
-            val dir = java.io.File(cacheDir, "updates").apply { mkdirs() }
-            dir.listFiles()?.forEach { it.delete() }
-            val file = java.io.File(dir, "ssh_tunnel-${u.latest}.apk")
-            val part = java.io.File(dir, file.name + ".part")
-            try {
-                val conn = java.net.URL(u.apkUrl).openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 15000
-                conn.readTimeout = 30000
-                conn.instanceFollowRedirects = true
-                if (conn.responseCode != 200) throw Exception("HTTP ${conn.responseCode}")
-                val total = conn.contentLengthLong
-                var done = 0L
-                var shown = 0L
-                conn.inputStream.use { inp ->
-                    part.outputStream().use { out ->
-                        val buf = ByteArray(64 * 1024)
-                        while (true) {
-                            val n = inp.read(buf)
-                            if (n < 0) break
-                            out.write(buf, 0, n)
-                            done += n
-                            val now = System.currentTimeMillis()
-                            if (now - shown > 300) {
-                                shown = now
-                                val d = done
-                                runOnUiThread {
-                                    updateNote.text = if (total > 0) getString(R.string.update_progress, mb(d), mb(total))
-                                        else getString(R.string.update_progress_unknown, mb(d))
-                                    if (total > 0) {
-                                        bar.isIndeterminate = false
-                                        bar.progress = (d * bar.max / total).toInt()
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if (total > 0 && done != total) throw Exception("оборвалось на $done из $total")
-                if (!part.renameTo(file)) throw Exception("не удалось сохранить файл")
-                runOnUiThread {
-                    readyApk = file
-                    bar.isIndeterminate = false
-                    bar.progress = bar.max
-                    updateNote.setText(R.string.update_done)
-                    (updateDownloadBtn as TextView).setText(R.string.update_install)
-                    updateDownloadBtn.setOnClickListener { onDownloadUpdate() }
-                    updateDownloadBtn.visibility = View.VISIBLE
-                    installApk(file)
-                }
-            } catch (e: Exception) {
-                part.delete()
-                runOnUiThread {
-                    bar.visibility = View.GONE
-                    updateNote.text = getString(R.string.update_open_release)
-                    (updateDownloadBtn as TextView).setText(R.string.update_release_btn)
-                    updateDownloadBtn.setOnClickListener { openLink(u.releaseUrl) }
-                    updateDownloadBtn.visibility = View.VISIBLE
-                }
-            }
-        }.start()
-    }
-
-    /** Открывает скачанный программой APK в системном установщике. */
-    private fun installApk(file: java.io.File) {
-        try {
-            val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", file)
-            startActivity(
-                Intent(Intent.ACTION_VIEW)
-                    .setDataAndType(uri, "application/vnd.android.package-archive")
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        } catch (e: Exception) {
-            pendingUpdate?.let { openLink(it.releaseUrl) }
-        }
-    }
-
-    // Скачанное обновление, которое осталось установить (-1 — нет).
-    private var readyDownloadId = -1L
-
-    private val downloadPoll = Runnable { pollDownload() }
-
-    private fun mb(bytes: Long): String = getString(R.string.mb, bytes / 1048576.0)
-
-    /**
-     * Ход скачивания обновления — полоской и текстом, раз в полсекунды, пока
-     * экран открыт. Раньше загрузка уходила в менеджер загрузок молча, и
-     * было не понять, идёт ли она вообще.
-     */
-    private fun pollDownload() {
-        updateNote.removeCallbacks(downloadPoll)
-        val id = settings.updateDownloadId
-        val bar = findViewById<android.widget.ProgressBar>(R.id.updateProgress)
-        if (id < 0) return
-        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-        val c = try {
-            dm.query(android.app.DownloadManager.Query().setFilterById(id))
-        } catch (e: Exception) {
-            null
-        }
-        c.use { cur ->
-            if (cur == null || !cur.moveToFirst()) {
-                // Загрузку удалили из менеджера — следить не за чем.
-                settings.updateDownloadId = -1
-                bar.visibility = View.GONE
-                return
-            }
-            fun long(col: String) = cur.getLong(cur.getColumnIndexOrThrow(col))
-            val status = cur.getInt(cur.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS))
-            val done = long(android.app.DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
-            val total = long(android.app.DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
-            bar.visibility = View.VISIBLE
-            when (status) {
-                android.app.DownloadManager.STATUS_SUCCESSFUL -> {
-                    settings.updateDownloadId = -1
-                    readyDownloadId = id
-                    bar.isIndeterminate = false
-                    bar.progress = bar.max
-                    updateNote.setText(R.string.update_done)
-                    (updateDownloadBtn as TextView).setText(R.string.update_install)
-                    updateDownloadBtn.visibility = View.VISIBLE
-                    return
-                }
-                android.app.DownloadManager.STATUS_FAILED -> {
-                    settings.updateDownloadId = -1
-                    bar.visibility = View.GONE
-                    val reason = cur.getInt(cur.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_REASON))
-                    updateNote.text = getString(R.string.update_dl_failed, reason)
-                    dm.remove(id)
-                    pendingUpdate?.let { u ->
-                        (updateDownloadBtn as TextView).setText(R.string.update_release_btn)
-                        updateDownloadBtn.setOnClickListener { openLink(u.releaseUrl) }
-                        updateDownloadBtn.visibility = View.VISIBLE
-                    }
-                    return
-                }
-                android.app.DownloadManager.STATUS_PAUSED -> updateNote.setText(R.string.update_waiting)
-                android.app.DownloadManager.STATUS_PENDING -> updateNote.setText(R.string.update_queued)
-                else -> updateNote.text = if (total > 0) getString(R.string.update_progress, mb(done), mb(total))
-                    else getString(R.string.update_progress_unknown, mb(done))
-            }
-            if (total > 0) {
-                bar.isIndeterminate = false
-                bar.progress = (done * bar.max / total).toInt()
-            } else {
-                bar.isIndeterminate = true
-            }
-        }
-        updateNote.postDelayed(downloadPoll, 500)
-    }
-
-    /** Открывает скачанный APK в системном установщике. */
-    private fun installDownloaded(id: Long) {
-        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-        try {
-            val uri = dm.getUriForDownloadedFile(id) ?: throw Exception("нет файла")
-            startActivity(
-                Intent(Intent.ACTION_VIEW)
-                    .setDataAndType(uri, "application/vnd.android.package-archive")
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        } catch (e: Exception) {
-            // Установщик не открылся — хотя бы список загрузок, APK там.
-            try {
-                startActivity(Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS))
-            } catch (e2: Exception) {
-                updateNote.setText(R.string.update_done)
-            }
-        }
-    }
-
-    private fun openLink(url: String) {
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-        } catch (e: Exception) {
-            Toast.makeText(this, url, Toast.LENGTH_LONG).show()
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // Всплывающая подсказка по значку «?» — как .infoq в панели на компьютере.
-    // ---------------------------------------------------------------------
-
-    private fun bindInfo(id: Int, textRes: Int) {
-        findViewById<View>(id).setOnClickListener { showTip(it, getString(textRes)) }
-    }
-
-    private fun showTip(anchor: View, text: String) {
-        val tv = TextView(this)
-        tv.text = text
-        tv.setTextColor(tc(R.color.text))
-        tv.textSize = 12.5f
-        tv.setPadding(dp(12), dp(10), dp(12), dp(10))
-        val popup = PopupWindow(tv, dp(240), ViewGroup.LayoutParams.WRAP_CONTENT, true)
-        popup.setBackgroundDrawable(ContextCompat.getDrawable(this, R.drawable.bg_card))
-        popup.elevation = 12f
-        popup.showAsDropDown(anchor, 0, 4)
-    }
-
-    /**
-     * Большая кнопка — обход блокировок. При включённой сети устройств она
-     * выключает только обход, а сеть остаётся (как на компьютере); без сети —
-     * обычное «Отключить».
-     */
-    private fun onToggle() {
-        val running = TunnelService.state != "stopped" && TunnelService.state != "error"
-        val meshUp = running && settings.meshConfigured() && TunnelService.meshOn
-        if (running && TunnelService.state != "connected") {
-            // Жёлтое состояние (подключение, переподключение): кнопка —
-            // это «Выключить всё сейчас», без ожидания и без оглядки на сеть
-            // устройств. Раньше с сетью устройств она лишь гасила обход, и
-            // туннель так и висел жёлтым.
-            settings.lastRunning = false
-            settings.lastMesh = false
-            startService(Intent(this, TunnelService::class.java).setAction(TunnelService.ACTION_STOP))
-            return
-        }
-        if (running && TunnelService.bypassOn) {
-            settings.lastRunning = false
-            settings.lastMesh = meshUp
-            if (meshUp) sendModes(false, true)
-            else startService(Intent(this, TunnelService::class.java).setAction(TunnelService.ACTION_STOP))
-            return
-        }
-        if (running) {
-            // Работает только сеть — включаем обход поверх неё.
-            settings.lastRunning = true
-            settings.lastMesh = meshUp
-            sendModes(true, meshUp)
-            return
-        }
-        if (TunnelService.state != "stopped") {
-            // Ошибка подключения: кнопка, как и раньше, гасит службу.
-            settings.lastRunning = false
-            startService(Intent(this, TunnelService::class.java).setAction(TunnelService.ACTION_STOP))
-            return
-        }
-        settings.lastRunning = true
-        settings.lastMesh = settings.meshConfigured()
-        launchWith(true, true)
-    }
-
-    /** Кнопка «Сеть устройств» под большой: сеть включается отдельно от обхода. */
-    private fun onMeshButton() {
-        val running = TunnelService.state != "stopped" && TunnelService.state != "error"
-        if (!running) {
-            settings.lastRunning = false
-            settings.lastMesh = true
-            launchWith(false, true)
-            return
-        }
-        val mesh = !TunnelService.meshOn
-        settings.lastMesh = mesh
-        settings.lastRunning = TunnelService.bypassOn
-        if (!mesh && !TunnelService.bypassOn) {
-            startService(Intent(this, TunnelService::class.java).setAction(TunnelService.ACTION_STOP))
-        } else {
-            sendModes(TunnelService.bypassOn, mesh)
-        }
-    }
-
-    private fun launchWith(bypass: Boolean, mesh: Boolean) {
-        if (!settings.ready()) {
-            Toast.makeText(this, R.string.need_settings, Toast.LENGTH_LONG).show()
-            openSettings()
-            return
-        }
-        // Разрешение на VPN-подключение спрашивает сама система; без её
-        // подтверждения служба не запустится.
-        pendingBypass = bypass
-        pendingMesh = mesh
-        val intent = VpnService.prepare(this)
-        if (intent != null) vpnPermission.launch(intent) else startWith(bypass, mesh)
-    }
-
-    private fun sendModes(bypass: Boolean, mesh: Boolean) {
-        startService(
-            Intent(this, TunnelService::class.java).setAction(TunnelService.ACTION_MODES)
-                .putExtra(TunnelService.EXTRA_BYPASS, bypass)
-                .putExtra(TunnelService.EXTRA_MESH, mesh)
-        )
-        refresh()
-    }
-
-    private fun startWith(bypass: Boolean, mesh: Boolean) {
-        if (bypass && mesh) {
-            startService(Intent(this, TunnelService::class.java).setAction(TunnelService.ACTION_START))
-        } else {
-            sendModes(bypass, mesh)
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // Группы «Настроек приложения»: заголовок раскрывает и сворачивает.
-    // ---------------------------------------------------------------------
-
-    private val groups = listOf(
-        Triple(R.id.grpTrafficHead, R.id.grpTrafficBody, R.id.grpTrafficChev),
-        Triple(R.id.grpLookHead, R.id.grpLookBody, R.id.grpLookChev),
-        Triple(R.id.grpLaunchHead, R.id.grpLaunchBody, R.id.grpLaunchChev),
-        Triple(R.id.grpMoreHead, R.id.grpMoreBody, R.id.grpMoreChev),
-    )
-
-    private fun setupGroups() {
-        for ((head, body, chev) in groups) {
-            findViewById<View>(head).setOnClickListener {
-                val b = findViewById<View>(body)
-                val open = b.visibility != View.VISIBLE
-                android.transition.TransitionManager.beginDelayedTransition(
-                    b.parent as android.view.ViewGroup,
-                    android.transition.AutoTransition().setDuration(220)
-                )
-                b.visibility = if (open) View.VISIBLE else View.GONE
-                findViewById<View>(chev).animate().rotation(if (open) 90f else 0f).setDuration(220).start()
-            }
-        }
-    }
-
-    private fun collapseGroups() {
-        for ((_, body, chev) in groups) {
-            findViewById<View>(body).visibility = View.GONE
-            findViewById<View>(chev).rotation = 0f
-        }
-        (flipper.getChildAt(APP) as? ScrollView)?.scrollTo(0, 0)
-    }
-
-    /** Тест скорости идёт секунд двадцать, поэтому в отдельном потоке. */
-    private fun runSpeedTest() {
-        if (TunnelService.state != "connected") {
-            Toast.makeText(this, R.string.need_connected, Toast.LENGTH_SHORT).show()
-            return
-        }
-        speedButton.isEnabled = false
-        speedButton.setText(R.string.speedtest_running)
-        Thread {
-            val out = try {
-                TunnelService.speedTest()
-            } catch (e: Exception) {
-                """{"error":"${e.message}"}"""
-            }
-            runOnUiThread {
-                speedButton.isEnabled = true
-                speedButton.setText(R.string.speedtest)
-                showSpeed(out)
-            }
-        }.start()
-    }
-
-    /**
-     * Показывает результат замера под состоянием и убирает его через десять
-     * секунд: сразу после теста цифры интересны, а через минуту они уже
-     * неправда — связь меняется.
-     */
-    private fun showSpeed(json: String) {
-        val o = try {
-            JSONObject(json)
-        } catch (e: Exception) {
-            JSONObject()
-        }
-        val err = o.optString("error")
-        if (err.isNotBlank()) {
-            Toast.makeText(this, err, Toast.LENGTH_LONG).show()
-            return
-        }
-        tileDown.text = getString(R.string.speed_mbps, o.optDouble("downMbps", 0.0))
-        tileUp.text = getString(R.string.speed_mbps, o.optDouble("upMbps", 0.0))
-        rowSpeed.visibility = View.VISIBLE
-        rowSpeed.removeCallbacks(hideSpeed)
-        rowSpeed.postDelayed(hideSpeed, 10_000)
-    }
-
-    // INVISIBLE, а не GONE: место под плитками остаётся занятым, и экран не
-    // дёргается при каждом появлении результата.
-    private val hideSpeed = Runnable { rowSpeed.visibility = View.INVISIBLE }
-
-    private val SELFCHECK_STEP_NAMES = listOf("dns", "port", "key", "forward", "dns_tunnel", "sites", "external_ip")
-
-    private fun selfCheckStepLabelRes(name: String): Int = when (name) {
-        "dns" -> R.string.selfcheck_step_dns
-        "port" -> R.string.selfcheck_step_port
-        "key" -> R.string.selfcheck_step_key
-        "forward" -> R.string.selfcheck_step_forward
-        "dns_tunnel" -> R.string.selfcheck_step_dns_tunnel
-        "sites" -> R.string.selfcheck_step_sites
-        else -> R.string.selfcheck_step_external_ip
-    }
-
-    /**
-     * Текст причины по коду шага. Именование ресурса ("sc_" + шаг + "_" + код)
-     * зеркалит то же самое в JS-словаре на компьютере — так у обеих сторон
-     * общая логика без необходимости заводить общий Go-код специально ради
-     * текста. Ресурса нет (обычно для "успешных" кодов вроде "resolved") —
-     * значит вся нужная информация уже в detail, его и показываем как есть.
-     */
-    private fun selfCheckCodeText(name: String, code: String, detail: String): String {
-        val resId = resources.getIdentifier("sc_${name}_$code", "string", packageName)
-        if (resId != 0) {
-            return try { getString(resId, detail) } catch (e: Exception) { getString(resId) }
-        }
-        return detail.ifBlank { code }
-    }
-
-    /** steps=null — все семь «в ожидании», как до первого запуска. */
-    private fun renderSelfCheckSteps(steps: List<JSONObject>?) {
-        selfCheckSteps.removeAllViews()
-        val byName = HashMap<String, JSONObject>()
-        steps?.forEach { byName[it.optString("name")] = it }
-
-        for (name in SELFCHECK_STEP_NAMES) {
-            val s = byName[name]
-            val mark: String
-            val colorRes: Int
-            when {
-                s == null -> { mark = "…"; colorRes = R.color.dim }
-                s.optBoolean("skipped") -> { mark = "–"; colorRes = R.color.dim }
-                s.optBoolean("ok") -> { mark = "✓"; colorRes = R.color.ok }
-                else -> { mark = "✗"; colorRes = R.color.err }
-            }
-            val label = getString(selfCheckStepLabelRes(name))
-            val why = if (s != null && !s.optBoolean("skipped")) {
-                selfCheckCodeText(name, s.optString("code"), s.optString("detail"))
-            } else ""
-
-            val row = LinearLayout(this)
-            row.orientation = LinearLayout.HORIZONTAL
-            row.setPadding(0, 8, 0, 8)
-
-            val markView = TextView(this)
-            markView.text = mark
-            markView.minEms = 2
-            markView.setTextColor(tc(colorRes))
-
-            val textView = TextView(this)
-            textView.text = if (why.isNotBlank()) "$label — $why" else label
-            textView.setTextColor(tc(R.color.text))
-            textView.textSize = 13.5f
-
-            row.addView(markView)
-            row.addView(textView)
-            selfCheckSteps.addView(row)
-        }
-    }
-
-    private fun runSelfCheck() {
-        selfCheckStartButton.isEnabled = false
-        selfCheckStartButton.setText(R.string.selfcheck_running)
-        renderSelfCheckSteps(null)
-        val ctx = applicationContext
-        Thread {
-            val result = try {
-                TunnelService.selfCheck(ctx)
-            } catch (e: Exception) {
-                """{"error":"${e.message}"}"""
-            }
-            val steps = try {
-                val arr = JSONObject(result).optJSONArray("steps")
-                if (arr == null) null else (0 until arr.length()).map { arr.getJSONObject(it) }
-            } catch (e: Exception) {
-                null
-            }
-            runOnUiThread {
-                selfCheckStartButton.isEnabled = true
-                selfCheckStartButton.setText(R.string.selfcheck_start)
-                renderSelfCheckSteps(steps)
-            }
-        }.start()
-    }
-
-    /** Задержка до сервера. Цвет важнее числа: зелёный, жёлтый, красный. */
-    private fun showPing(ms: Long) {
-        if (ms <= 0) {
-            pingView.text = ""
-            return
-        }
-        pingView.text = "$ms мс"
-        pingView.setTextColor(
-            tc(
-                when {
-                    ms < 100 -> R.color.ok
-                    ms < 250 -> R.color.warn
-                    else -> R.color.err
-                }
-            )
-        )
     }
 
     private fun askNotificationPermission() {
@@ -2048,172 +214,67 @@ class MainActivity : AppCompatActivity() {
         if (!granted) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    private fun refresh() {
-        val state = TunnelService.state
-
-        stateView.setText(
-            when (state) {
-                "connected" -> R.string.state_connected
-                "connecting" -> R.string.state_connecting
-                "reconnecting" -> R.string.state_reconnecting
-                "error" -> R.string.state_error
-                else -> R.string.state_stopped
-            }
+    private fun launchScanner() {
+        scanLauncher.launch(
+            ScanOptions()
+                .setOrientationLocked(true)
+                .setBeepEnabled(false)
+                .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                // Подсказка zxing не учитывает системные отступы — без неё.
+                .setPrompt("")
         )
-        // Цвет круга — то же соглашение, что на компьютере: зелёный работает,
-        // жёлтый в процессе, красный сломалось.
-        val bg: Int
-        val tint: Int
-        when (state) {
-            "connected" -> { bg = R.drawable.bg_power_on; tint = R.color.ok }
-            "connecting", "reconnecting" -> { bg = R.drawable.bg_power_busy; tint = R.color.warn }
-            "error" -> { bg = R.drawable.bg_power_bad; tint = R.color.err }
-            else -> { bg = R.drawable.bg_power_off; tint = R.color.dim }
-        }
-        power.setBackgroundResource(bg)
-        val color = tc(tint)
-        powerIcon.setColorFilter(color)
-        powerCap.setTextColor(color)
-        powerCap.setText(if (state == "stopped") R.string.start else R.string.stop)
-
-        // Туннель держится только ради сети устройств — большая кнопка
-        // выглядит выключенной: обход блокировок и правда выключен.
-        val running = state != "stopped" && state != "error"
-        if (state == "connected" && !TunnelService.bypassOn) {
-            power.setBackgroundResource(R.drawable.bg_power_off)
-            powerIcon.setColorFilter(tc(R.color.dim))
-            powerCap.setTextColor(tc(R.color.dim))
-            powerCap.setText(R.string.start)
-            stateView.setText(R.string.state_mesh_only)
-        }
-        renderMeshButton(running)
-
-        if (state == "error" && TunnelService.detail.isNotBlank()) {
-            errorView.text = TunnelService.detail
-            errorView.visibility = if (TunnelService.detail == dismissedError) View.GONE else View.VISIBLE
-            detailView.text = ""
-        } else {
-            errorView.visibility = View.GONE
-            detailView.text = TunnelService.detail
-        }
-
-        keyStateView.setText(if (settings.hasKey) R.string.key_saved else R.string.key_missing)
-        appsSummary.text = appsSummaryText(settings.active())
-
-        showStats(state)
-        renderDevices()
-
-        showLog(synchronized(TunnelService.log) { TunnelService.log.toList() })
     }
 
-    // Строки журнала, показанные в последний раз: по ним видно, сколько старых
-    // строк срезано сверху, чтобы не сдвинуть место, которое сейчас читают.
-    private var shownLog: List<String> = emptyList()
-
-    // Следить ли за новыми строками. Помним отдельно: пока журнал скрыт, его
-    // высота нулевая и по прокрутке не понять, был ли человек внизу.
-    private var logFollow = true
-
-    // Вниз прокручиваем, только если пользователь и так внизу: отмотал вверх
-    // почитать — новые строки не должны выдёргивать его обратно.
-    private fun showLog(lines: List<String>) {
-        if (lines == shownLog) return
-        val atBottom = logFollow
-        // Якорь — первая видимая строка: её смещение в тексте и сдвиг в пикселях.
-        var anchor = -1
-        var shift = 0
-        val layout = logView.layout
-        if (!atBottom && layout != null) {
-            val line = layout.getLineForVertical(logScroll.scrollY)
-            anchor = layout.getLineStart(line) - droppedChars(shownLog, lines)
-            shift = logScroll.scrollY - layout.getLineTop(line)
-        }
-        shownLog = lines
-        logView.text = lines.joinToString("\n")
-        logScroll.post {
-            val l = logView.layout
-            when {
-                atBottom || l == null -> logScroll.fullScroll(View.FOCUS_DOWN)
-                anchor >= 0 -> logScroll.scrollTo(0, l.getLineTop(l.getLineForOffset(anchor)) + shift)
-                // Читаемые строки уже срезаны — остаёмся в самом верху.
-                else -> logScroll.scrollTo(0, 0)
-            }
+    private fun openExternal(url: String) {
+        if (!url.startsWith("https://") && !url.startsWith("http://")) return
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (_: Exception) {
         }
     }
 
-    // Сколько символов срезано в начале: старый журнал — это новый без
-    // нескольких первых строк и без свежего хвоста. Не совпало — очищен целиком.
-    private fun droppedChars(old: List<String>, new: List<String>): Int {
-        for (k in old.indices) {
-            val rest = old.size - k
-            if (rest <= new.size && old.subList(k, old.size) == new.subList(0, rest))
-                return old.subList(0, k).sumOf { it.length + 1 }
+    // Мост для страницы: только то, чего WebView не умеет сам.
+    inner class Bridge {
+        @JavascriptInterface
+        fun readClipboard(): String {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            return cm?.primaryClip?.takeIf { it.itemCount > 0 }
+                ?.getItemAt(0)?.coerceToText(this@MainActivity)?.toString().orEmpty()
         }
-        return Int.MAX_VALUE / 2
+
+        @JavascriptInterface
+        fun writeClipboard(text: String): Boolean = try {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("ssh_tunnel", text))
+            true
+        } catch (_: Exception) {
+            false
+        }
+
+        @JavascriptInterface
+        fun saveFile(name: String, text: String) = runOnUiThread {
+            pendingSave = text
+            saveFile.launch(name)
+        }
+
+        @JavascriptInterface
+        fun scanQR() = runOnUiThread {
+            val granted = ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+            if (granted) launchScanner() else cameraPermission.launch(Manifest.permission.CAMERA)
+        }
+
+        @JavascriptInterface
+        fun openExternal(url: String) = runOnUiThread { this@MainActivity.openExternal(url) }
+
+        /** Страница ядра своим экраном (Книга, приложения): путь с параметрами. */
+        @JavascriptInterface
+        fun openPage(url: String) = runOnUiThread {
+            startActivity(Intent(this@MainActivity, WebPageActivity::class.java)
+                .putExtra(WebPageActivity.EXTRA_URL, url))
+        }
+
+        @JavascriptInterface
+        fun close() = runOnUiThread { moveTaskToBack(true) }
     }
-
-    private fun appsSummaryText(p: Settings.Profile): String = when (p.filterMode) {
-        "only" -> getString(R.string.mode_only) + ", " +
-            getString(R.string.apps_chosen, p.filterApps.size)
-        "except" -> getString(R.string.mode_except) + ", " +
-            getString(R.string.apps_chosen, p.filterApps.size)
-        else -> getString(R.string.mode_all)
-    }
-
-    private fun showStats(state: String) {
-        val o = try {
-            JSONObject(TunnelService.statsJson)
-        } catch (e: Exception) {
-            JSONObject()
-        }
-        val running = state != "stopped"
-        tileConns.text = if (running) o.optLong("total").toString() else "—"
-        tileLinks.text = if (running) "${o.optInt("healthy")} / ${o.optInt("links")}" else "—"
-        renderLinkBars(if (running) o.optInt("healthy") else 0, if (running) o.optInt("links") else 0)
-        // Сессия — с текущего подключения (её считает ядро и обнуляет при
-        // каждом новом старте), «всего» — копится на телефоне между сеансами,
-        // см. Settings.adBlockTotal и TunnelService.poll. Сама строка блокировки
-        // рекламы теперь на отдельном экране (AdBlockActivity), здесь только
-        // сводка в её карточке на экране настроек.
-        if (settings.adBlockEnabled) {
-            adBlockSummary.text = if (running) {
-                getString(R.string.ad_block_enabled) + " · ${o.optInt("adsBlocked")} (" +
-                    getString(R.string.tile_blocked) + ": ${settings.adBlockTotal})"
-            } else {
-                getString(R.string.ad_block_enabled) + " · " + getString(R.string.tile_blocked) + ": ${settings.adBlockTotal}"
-            }
-        } else {
-            adBlockSummary.text = getString(R.string.ad_block_off)
-        }
-
-        showPing(if (state == "connected") o.optLong("pingMs") else 0L)
-        if (!running) {
-            rowSpeed.visibility = View.INVISIBLE
-            rowSpeed.removeCallbacks(hideSpeed)
-        }
-    }
-
-    /** Каналы SSH ещё и столбиками: живые зелёные, упавшие серые. */
-    private fun renderLinkBars(healthy: Int, total: Int) {
-        val n = total.coerceIn(0, 16)
-        val sb = android.text.SpannableStringBuilder()
-        for (k in 0 until n) {
-            val start = sb.length
-            sb.append("▮")
-            sb.setSpan(
-                android.text.style.ForegroundColorSpan(if (k < healthy) tc(R.color.ok) else tc(R.color.line)),
-                start, sb.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-        linkBars.text = sb
-    }
-}
-
-/** Небольшой помощник: слушатель изменения текста без лишних методов интерфейса. */
-private fun EditText.addOnTextChanged(onChanged: () -> Unit) {
-    addTextChangedListener(object : android.text.TextWatcher {
-        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-        override fun afterTextChanged(s: android.text.Editable?) = onChanged()
-    })
 }

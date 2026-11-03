@@ -71,6 +71,13 @@ func (t *Tunnel) dialRoute(route core.Route, target string) (net.Conn, error) {
 	return nil, errBlocked
 }
 
+// DialApp — соединение от имени самой программы (дополнительные приложения:
+// SSH, «Файлы устройства»): путь выбирает ядро, как для любой программы.
+func (t *Tunnel) DialApp(target string) (net.Conn, error) {
+	route, _ := t.decide("", target)
+	return t.dialRoute(route, target)
+}
+
 var (
 	errMeshNotReady = errors.New("сеть устройств ещё не подключилась")
 	errBlocked      = errors.New("сеть устройств выключена")
@@ -370,4 +377,12 @@ type udpRelay interface {
 	Open(func(data []byte, fromHost string, fromPort uint16)) uint32
 	Close(sessionID uint32)
 	Send(sessionID uint32, host string, port uint16, data []byte) error
+}
+
+// DialSelf — соединение самой программы (календарь к Nextcloud и т. п.):
+// куда вести — решает ядро, как для любой программы (имя .mesh — в сеть
+// устройств, домашний адрес — напрямую).
+func (t *Tunnel) DialSelf(target string) (net.Conn, error) {
+	route, _ := t.decide("", target)
+	return t.dialRoute(route, target)
 }

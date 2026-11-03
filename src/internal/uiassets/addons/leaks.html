@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проверка утечек</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../pages.css">
+<style>
+  body{background:transparent}
+  .wrap{padding:4px 14px 16px;display:flex;flex-direction:column;gap:10px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .verdict{font-weight:600;font-size:15px}
+  .kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;font-size:13px}
+  .kv .k{color:var(--dim)}
+  .bad{color:var(--err)}.ok{color:var(--ok)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row"><button class="btn primary" id="go"></button><span class="hint" id="when"></span></div>
+  <div id="out"></div>
+</div>
+<script src="../pages.js"></script>
+<script>
+/* Проверка утечек: ядро (/api/diag/leaks) смотрит, что видят сайты, чей DNS
+   отвечает, нет ли IPv6 мимо туннеля. «Исправить» — тот же /api/config, что
+   и в настройках. */
+$('go').textContent = L('Проверить сейчас', 'Check now');
+const who = i => i && i.ip ? `${i.ip}${i.country ? ' · ' + i.country : ''}${i.isp ? ' · ' + i.isp : ''}` : '—';
+
+async function applyFix(f, note){
+  const cfg = await api('/api/config');
+  let body;
+  if(f.field.startsWith('profile.')){
+    const k = f.field.slice(8);
+    const p = (cfg.profiles || []).find(x => x.id === cfg.activeProfile) || (cfg.profiles || [])[0];
+    if(!p) return;
+    p[k] = f.value;
+    body = {profiles: cfg.profiles};
+  } else body = {[f.field]: f.value};
+  const r = await api('/api/config', body);
+  note.textContent = r.error || L('Готово. Проверь ещё раз.', 'Done. Check again.');
+}
+
+function render(r){
+  if(!r){ $('out').innerHTML = `<div class="hint">${esc(L('Ещё не проверяли.', 'Not checked yet.'))}</div>`; return; }
+  $('when').textContent = new Date(r.time).toLocaleString();
+  const mark = bad => bad ? `<span class="bad">${esc(L('утечка', 'leak'))}</span>` : `<span class="ok">${esc(L('нормально', 'fine'))}</span>`;
+  const fixes = (r.fixes || []).map((f, i) => `<button class="btn primary" data-fix="${i}">${esc(L('Исправить: ', 'Fix: ') + f.text)}</button>`).join('');
+  $('out').innerHTML = `<div class="card"><div class="verdict ${r.leak ? 'bad' : ''}">${esc(r.summary)}</div>
+      ${fixes ? `<div class="row" style="margin-top:8px">${fixes}<span class="hint" data-n></span></div>` : ''}</div>
+    <div class="card kv">
+      <span class="k">${esc(L('Сайты видят', 'Sites see'))}</span><span>${esc(who(r.seen))} ${r.active ? mark(r.ipLeak) : ''}</span>
+      <span class="k">${esc(L('Адрес сервера', 'Server address'))}</span><span>${esc(who(r.server))}</span>
+      <span class="k">${esc(L('Без VPN', 'Without VPN'))}</span><span>${esc(who(r.direct))}</span>
+      <span class="k">DNS</span><span>${esc((r.dns || []).map(who).join('; ') || '—')} ${r.active ? mark(r.dnsLeak) : ''}</span>
+      <span class="k">IPv6</span><span>${esc(r.ipv6 || L('нет', 'none'))} ${r.active ? mark(r.ipv6Leak) : ''}</span>
+    </div>
+    <div class="card"><b>WebRTC</b><div class="hint">${esc(r.webrtc
+      ? L('Браузер может выдавать адрес через WebRTC — проверь на странице своей панели.', 'The browser may leak the address via WebRTC — check on your panel page.')
+      : L('Проверка WebRTC — на странице панели сервера; у этого сервера панели нет.', 'The WebRTC check is a page on the server panel; this server has no panel.'))}</div>
+      ${r.webrtc ? `<div class="row" style="margin-top:8px"><button class="btn" id="rtc">${esc(L('Открыть в браузере', 'Open in browser'))}</button></div>` : ''}</div>`;
+  $('out').querySelectorAll('[data-fix]').forEach(b => b.onclick = () => {
+    b.disabled = true;
+    applyFix(r.fixes[+b.dataset.fix], $('out').querySelector('[data-n]'));
+  });
+  if($('rtc')) $('rtc').onclick = () => openExternal(r.webrtc);
+}
+
+$('go').onclick = async () => {
+  $('go').disabled = true;
+  $('out').innerHTML = `<div class="hint">${esc(L('Проверяю — до полуминуты…', 'Checking — up to half a minute…'))}</div>`;
+  const d = await api('/api/diag/leaks', {}).catch(() => ({}));
+  $('go').disabled = false;
+  render(d.report);
+};
+api('/api/diag/leaks').then(d => render(d.report));
+</script>
+</body>
+</html>

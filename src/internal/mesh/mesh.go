@@ -93,6 +93,7 @@ type Peer struct {
 	Host     string     `json:"host"`
 	IP       netip.Addr `json:"ip"`
 	Platform string     `json:"platform,omitempty"`
+	OS       string     `json:"os,omitempty"` // версия системы (новый meshd)
 	Via      string     `json:"via,omitempty"`
 	Online   bool       `json:"online"`
 	LastSeen int64      `json:"lastSeen,omitempty"`
@@ -191,6 +192,7 @@ type wirePeer struct {
 	Host     string `json:"host"`
 	IP       string `json:"ip"`
 	Platform string `json:"platform,omitempty"`
+	OS       string `json:"os,omitempty"`
 	Via      string `json:"via,omitempty"`
 	Online   bool   `json:"online"`
 	LastSeen int64  `json:"lastSeen,omitempty"`
@@ -428,7 +430,7 @@ func (c *Client) setPeers(list []wirePeer) {
 		self := ip == c.status.Self.IP
 		peers = append(peers, Peer{
 			Name: p.Name, Host: p.Host, IP: ip, Online: p.Online, LastSeen: p.LastSeen,
-			Platform: p.Platform, Via: p.Via, Self: self,
+			Platform: p.Platform, OS: p.OS, Via: p.Via, Self: self,
 		})
 		if self {
 			// Устройство могли переименовать в панели — имя берём из списка.
@@ -436,6 +438,18 @@ func (c *Client) setPeers(list []wirePeer) {
 		}
 	}
 	c.status.Peers = peers
+}
+
+// hostOf — имя устройства с адресом ip (без «.mesh»), "" — не знаем.
+func (c *Client) hostOf(ip string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, p := range c.status.Peers {
+		if p.IP.String() == ip {
+			return p.Host
+		}
+	}
+	return ""
 }
 
 // Status — копия текущего состояния.
@@ -597,6 +611,12 @@ func (c *Client) DialPeer(target string) (net.Conn, error) {
 	c.mu.Unlock()
 	if ip == self {
 		// Сам к себе — незачем гонять через сервер.
+		if h := service(port); h != nil {
+			c.mu.Lock()
+			me := Caller{IP: self.String(), Host: c.status.Self.Host}
+			c.mu.Unlock()
+			return localService(h, me), nil
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return c.LocalDial(ctx, port)
@@ -669,13 +689,20 @@ func (c *Client) incoming(m wire) {
 		send(conn, wire{Op: "accept", Net: c.cfg.Key, Device: c.cfg.DeviceID, Call: m.Call, OK: false, Error: text})
 		conn.Close()
 	}
-	if !c.cfg.AllowIncoming {
+	h := service(m.Port)
+	if h == nil && !c.cfg.AllowIncoming {
 		reject("устройство не принимает входящие соединения")
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	local, err := c.LocalDial(ctx, m.Port)
-	cancel()
+	var local net.Conn
+	var err error
+	if h != nil {
+		local = localService(h, Caller{IP: m.From, Host: m.FromHost})
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		local, err = c.LocalDial(ctx, m.Port)
+		cancel()
+	}
 	if err != nil {
 		reject(fmt.Sprintf("на устройстве ничего не слушает порт %d", m.Port))
 		return

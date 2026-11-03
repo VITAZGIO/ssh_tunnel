@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"sshtunnel/internal/app"
+	"sshtunnel/internal/calendar"
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/nativeui"
@@ -94,7 +95,13 @@ func main() {
 	}
 
 	// Книга и дополнительные приложения открываются отдельными окнами.
-	srv.Addons().SetOpener(nativeui.Opener("http://"+srv.Addr(), config.Dir()))
+	opener := nativeui.Opener("http://"+srv.Addr(), config.Dir())
+	srv.Addons().SetOpener(opener)
+	// Виджет календаря на рабочем столе — сразу, если человек его включил.
+	if opener != nil && srv.Addons().Active(calendar.ID) && calendar.WidgetWanted(config.Dir()) {
+		go opener(calendar.ID+"-widget", "Календарь",
+			"/addons/calendar.html?widget=1&solo=1&key="+calendar.ID+"-widget&t="+srv.Token())
+	}
 
 	err = nativeui.Run(nativeui.Options{
 		Title:    windowTitle,

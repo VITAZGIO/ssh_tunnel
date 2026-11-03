@@ -22,7 +22,7 @@ const L = (ru, en) => LANG === 'en' ? en : ru;
 const appName = m => (m.name && (m.name[LANG] || m.name.ru)) || m.id;
 const appHint = m => (m.hint && (m.hint[LANG] || m.hint.ru)) || '';
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const icon = (n, cls) => `<span class="mi ${cls || ''}" style="--i:url(icons/${esc(n)}.svg)"></span>`;
+const icon = (n, cls) => `<span class="mi ${cls || ''}" style="--i:url(/icons/${esc(n)}.svg)"></span>`;
 
 const api = (path, body) => fetch(path + (path.includes('?') ? '&' : '?') + 'lang=' + LANG, {
   method: body ? 'POST' : 'GET',

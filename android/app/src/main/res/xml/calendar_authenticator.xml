@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Свой аккаунт календаря (CalendarSync.kt): без него нет SyncAdapter. -->
+<account-authenticator xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accountType="io.github.vitazgio.sshtunnel.calendar"
+    android:icon="@mipmap/ic_launcher"
+    android:smallIcon="@mipmap/ic_launcher"
+    android:label="@string/calendar_account" />

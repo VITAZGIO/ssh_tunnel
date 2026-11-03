@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проверить сайт</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../pages.css">
+<style>
+  body{background:transparent}
+  .wrap{padding:4px 14px 16px;display:flex;flex-direction:column;gap:10px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  input,textarea{flex:1;min-width:120px;background:var(--card);border:1px solid var(--line);border-radius:8px;
+                 padding:8px 10px;color:var(--text);font:inherit}
+  textarea{width:100%;min-height:110px;resize:vertical}
+  .verdict{font-weight:600;font-size:15px}
+  .paths{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+  .step{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:13px}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:4px;background:var(--dim)}
+  .dot.ok{background:var(--ok)}.dot.bad{background:var(--err)}
+  .step .n{min-width:120px}.step .ms{color:var(--dim);margin-left:auto;white-space:nowrap}
+  .step .note{color:var(--dim);font-size:12px;word-break:break-all}
+  .hist button{display:block;width:100%;text-align:left;background:transparent;border:0;border-top:1px solid var(--line);
+               padding:7px 2px;cursor:pointer;color:var(--text)}
+  .hist .s{color:var(--dim);font-size:12.5px}
+  h3{margin:6px 0 2px;font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row">
+    <input id="site" placeholder="youtube.com" autocomplete="off" spellcheck="false">
+    <button class="btn primary" id="go"></button>
+  </div>
+  <div id="out"></div>
+  <div class="row">
+    <button class="tb" id="popBtn"></button>
+    <button class="tb" id="editBtn"></button>
+  </div>
+  <div id="popEdit" hidden class="card">
+    <div class="hint" id="popHint"></div>
+    <textarea id="popList" spellcheck="false"></textarea>
+    <div class="row" style="margin-top:8px"><button class="btn primary" id="popSave"></button></div>
+  </div>
+  <div id="popOut"></div>
+  <h3 id="histTitle"></h3>
+  <div class="hist" id="hist"></div>
+</div>
+<script src="../pages.js"></script>
+<script>
+/* Проверить сайт: два пути сразу (напрямую и через VPN), шаги DNS → TCP →
+   TLS → HTTP. Решает всё ядро (/api/diag/site); правило добавляется тем же
+   /api/config, что и в настройках. */
+const STEP = {dns: L('DNS', 'DNS'), tcp: L('Подключение', 'Connection'), tls: L('Защищённое соединение', 'Secure connection'), http: L('Ответ сайта', 'Site reply')};
+const KIND = {
+  dns_fail: L('имя не найдено', 'name not found'), dns_spoof: L('подмена DNS', 'DNS spoofed'),
+  tcp_reset: L('сброс соединения', 'connection reset'), tcp_timeout: L('нет ответа', 'no reply'),
+  tcp_refused: L('порт закрыт', 'port closed'), tls_reset: L('обрыв (DPI)', 'cut off (DPI)'),
+  tls_timeout: L('повисло (DPI)', 'hangs (DPI)'), tls_cert: L('чужой сертификат', 'foreign certificate'),
+  http_stub: L('заглушка провайдера', 'ISP block page'), http_error: L('ошибка сайта', 'site error'),
+  off: L('туннель выключен', 'tunnel is off'), other: L('ошибка', 'error'),
+};
+$('go').textContent = L('Проверить', 'Check');
+$('popBtn').innerHTML = icon('refresh') + '<span>' + L('Проверить популярные', 'Check popular') + '</span>';
+$('editBtn').textContent = L('Править список', 'Edit list');
+$('popHint').textContent = L('По одному адресу в строке.', 'One address per line.');
+$('popSave').textContent = L('Сохранить', 'Save');
+$('histTitle').textContent = L('Последние проверки', 'Recent checks');
+
+function pathCard(title, p){
+  const steps = (p.steps || []).map(s => `<div class="step"><span class="dot ${s.ok ? 'ok' : 'bad'}"></span>
+    <span class="n">${esc(STEP[s.id] || s.id)}${s.ok ? '' : ' — ' + esc(KIND[s.kind] || s.kind || '')}</span>
+    <span class="ms">${s.ms ? s.ms + ' ' + L('мс', 'ms') : ''}</span></div>
+    ${s.note ? `<div class="note">${esc(s.note)}</div>` : ''}`).join('');
+  return `<div class="card"><b>${esc(title)}</b> ${p.ok ? icon('check_circle') : icon('cancel')}${steps}</div>`;
+}
+
+function render(r){
+  let rule = '';
+  if(r.suggest === 'vpn') rule = `<button class="btn primary" data-rule="vpn">${esc(L('Пускать через VPN', 'Send via VPN'))}</button>`;
+  if(r.suggest === 'direct') rule = `<button class="btn primary" data-rule="direct">${esc(L('Пускать напрямую', 'Send directly'))}</button>`;
+  return `<div class="card"><div class="verdict">${esc(r.text)}</div>
+      <div class="hint">${esc(r.host || r.site)}</div>
+      ${rule ? `<div class="row" style="margin-top:8px">${rule}<span class="hint" data-note></span></div>` : ''}</div>
+    <div class="paths" style="margin-top:10px">${pathCard(L('Напрямую', 'Direct'), r.direct || {})}${pathCard(L('Через VPN', 'Via VPN'), r.vpn || {})}</div>`;
+}
+
+// addRule — то же, что правка списков в настройках: /api/config, активный
+// сервер, «всегда напрямую» / «всегда через сервер».
+async function addRule(host, how, note){
+  const cfg = await api('/api/config');
+  const p = (cfg.profiles || []).find(x => x.id === cfg.activeProfile) || (cfg.profiles || [])[0];
+  if(!p){ note.textContent = L('Нет сервера в настройках.', 'No server in settings.'); return; }
+  const add = how === 'vpn' ? 'tunnelHosts' : 'directHosts';
+  const del = how === 'vpn' ? 'directHosts' : 'tunnelHosts';
+  p[add] = [...new Set([...(p[add] || []), host])];
+  p[del] = (p[del] || []).filter(x => x !== host);
+  const r = await api('/api/config', {profiles: cfg.profiles});
+  note.textContent = r.error ? r.error : L('Правило добавлено.', 'Rule added.');
+}
+
+function bindRules(el, r){
+  el.querySelectorAll('[data-rule]').forEach(b => b.onclick = () => {
+    b.disabled = true;
+    addRule(r.host, b.dataset.rule, b.parentElement.querySelector('[data-note]')).catch(e => { b.disabled = false; });
+  });
+}
+
+async function check(site){
+  if(!site) return;
+  $('site').value = site;
+  $('go').disabled = true;
+  $('out').innerHTML = `<div class="hint">${esc(L('Проверяю…', 'Checking…'))}</div>`;
+  const r = await api('/api/diag/site', {site}).catch(() => ({error: L('Нет связи с программой.', 'No connection to the app.')}));
+  $('go').disabled = false;
+  if(r.error){ $('out').innerHTML = `<div class="card">${esc(r.error)}</div>`; return; }
+  $('out').innerHTML = render(r);
+  bindRules($('out'), r);
+  loadHistory();
+}
+
+async function loadHistory(){
+  const d = await api('/api/diag/site');
+  $('popList').value = (d.popular || []).join('\n');
+  const h = $('hist');
+  h.innerHTML = '';
+  for(const r of d.history || []){
+    const b = document.createElement('button');
+    b.innerHTML = `${esc(r.site)}<div class="s">${esc(r.text)}</div>`;
+    b.onclick = () => { $('out').innerHTML = render(r); bindRules($('out'), r); scrollTo(0, 0); };
+    h.appendChild(b);
+  }
+  if(!h.children.length) h.innerHTML = `<div class="hint">${esc(L('Пока ничего не проверяли.', 'Nothing checked yet.'))}</div>`;
+}
+
+$('go').onclick = () => check($('site').value.trim());
+$('site').onkeydown = e => { if(e.key === 'Enter') check($('site').value.trim()); };
+$('editBtn').onclick = () => { $('popEdit').hidden = !$('popEdit').hidden; };
+$('popSave').onclick = async () => {
+  await api('/api/diag/site/popular', {list: $('popList').value.split('\n')});
+  $('popEdit').hidden = true;
+};
+$('popBtn').onclick = async () => {
+  $('popBtn').disabled = true;
+  $('popOut').innerHTML = `<div class="hint">${esc(L('Проверяю список…', 'Checking the list…'))}</div>`;
+  const d = await api('/api/diag/site/popular', {check: true}).catch(() => ({results: []}));
+  $('popBtn').disabled = false;
+  $('popOut').innerHTML = '';
+  for(const r of d.results || []){
+    const c = document.createElement('div');
+    c.className = 'card';
+    c.style.marginBottom = '8px';
+    const ok = r.verdict === 'ok_both' || r.verdict === 'direct_ok_vpn_off';
+    c.innerHTML = `<div class="row">${icon(ok ? 'check_circle' : 'warning')}<b>${esc(r.site)}</b></div>
+      <div class="hint">${esc(r.text)}</div>`;
+    c.style.cursor = 'pointer';
+    c.onclick = () => { $('out').innerHTML = render(r); bindRules($('out'), r); scrollTo(0, 0); };
+    $('popOut').appendChild(c);
+  }
+};
+if(Q.get('site')) check(Q.get('site')); else loadHistory();
+</script>
+</body>
+</html>

@@ -501,6 +501,10 @@
                      border:0;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--text);font:inherit}
   #quickPanel button:hover{background:var(--card)}
   #quickPanel .mi{color:var(--accent)}
+  /* Телефон (WebView, мост SSHTunnelAndroid): чего на нём нет — не видно. */
+  body.android .desk-only{display:none!important}
+  body:not(.android) .android-only{display:none!important}
+  #meddleOffer:not([hidden]){display:block;margin:-4px auto 10px;font-size:12.5px;padding:6px 12px}
   /* Быстрый доступ — только на главном экране. */
   body[data-view]:not([data-view="viewMain"]) #quickBtn,
   body[data-view]:not([data-view="viewMain"]) #quickPanel{display:none}
@@ -677,6 +681,8 @@
   <div class="view on" id="viewMain">
     <div class="mainPage">
     <div class="err-box" id="error"></div>
+    <!-- Туннель не подключился — предложить «Кто трогает трафик». -->
+    <button type="button" class="btn" id="meddleOffer" hidden data-i18n="meddle_offer">Проверить, кто мешает</button>
 
     <!-- Кнопка со статусом занимают всё свободное место и центрируются в нём,
          плитки прижаты к низу окна. -->
@@ -823,6 +829,7 @@
     </div>
     <div class="srvTools">
       <button type="button" class="tb" id="pasteBtn" title="Вставить сервер из буфера обмена" data-i18n-title="paste_title"><svg viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="4"/><path d="M8 5H5v16h14V5h-3"/></svg><span data-i18n="paste_server">Вставить</span></button>
+      <button type="button" class="tb android-only" id="scanQrBtn"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg><span data-i18n="scan_qr">QR-код</span></button>
       <button type="button" class="tb" id="addServerBtn"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span data-i18n="new_server">Новый</span></button>
       <button type="button" class="tb" id="exportAllBtn"><svg viewBox="0 0 24 24"><path d="M12 15V4M7 9l5-5 5 5M5 20h14"/></svg><span data-i18n="export_all">Экспорт всех</span></button>
       <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)">?<span class="tip" data-i18n="paste_note">«Вставить» добавляет сервер (или сразу несколько) из текста или ссылки sshtunnel://, которые тебе прислали (или из панели сервера): скопируй и нажми кнопку. «Экспорт всех» кладёт в буфер все серверы вместе с ключами.</span></span>
@@ -849,7 +856,14 @@
              data-i18n-ph="host_ph"></div>
     <div class="field"><label for="user" data-i18n="user_label">Пользователь SSH</label>
       <input type="text" id="user" spellcheck="false"></div>
-    <div class="field">
+    <div class="field android-only">
+      <label data-i18n="key_label">Приватный ключ</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="hint" id="keyState" style="flex:1;margin:0"></span>
+        <button type="button" class="btn" id="keyPasteBtn" data-i18n="key_paste">Вставить ключ</button>
+      </div>
+    </div>
+    <div class="field desk-only">
       <div class="lbl-row">
         <label for="keyPath" data-i18n="key_label">Приватный ключ</label>
         <button class="qmark" id="keyHelpBtn" title="Как получить ключ">?</button>
@@ -857,7 +871,7 @@
       <input type="text" id="keyPath" spellcheck="false">
     </div>
 
-    <div class="help" id="keyHelp" hidden>
+    <div class="help desk-only" id="keyHelp" hidden>
       <p>Ключ создаётся на этом компьютере, а на сервер добавляется вручную —
         одной командой это больше не делается: пользователю туннеля запрещено
         выполнять команды, в том и смысл.</p>
@@ -920,14 +934,14 @@
         <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)">?<span class="tip" data-i18n="pool_note">Несколько параллельных каналов заметно поднимают скорость. 4 — разумное значение.</span></span></div>
         <input type="number" id="poolSize" min="1" max="16"></div>
     </div>
-    <div class="two">
+    <div class="two desk-only">
       <div class="field"><label for="socksPort">Порт SOCKS</label>
         <input type="number" id="socksPort" min="1" max="65535"></div>
       <div class="field"><label for="httpPort">Порт HTTP</label>
         <input type="number" id="httpPort" min="1" max="65535"></div>
     </div>
 
-    <button class="row-link" id="toAdvanced">
+    <button class="row-link desk-only" id="toAdvanced">
       <span class="t"><span data-i18n="adv_fine">Тонкая настройка соединения</span>
         <div class="v" id="advSummary">По умолчанию</div></span><span class="arr">›</span></button>
 
@@ -997,7 +1011,7 @@
         <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
       <div class="grpBody"><div><div class="grpIn">
       <span id="autoStartRow" hidden><input type="checkbox" id="autoStart"></span>
-      <div id="bootBlock" hidden>
+      <div id="bootBlock" class="desk-only" hidden>
         <label class="chk"><input type="checkbox" id="bootStart">
           <span class="lbl" data-i18n="boot_start">Запускать при старте системы</span>
           <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)">?<span class="tip" id="bootNote"></span></span></label>
@@ -1062,7 +1076,7 @@
         ретранслятор на сервере — ставится один раз, в мастере настройки VPS (кнопка «Настроить сервер по SSH»
         в этом же меню). Пока он не установлен, галочка ничего не меняет: UDP по-прежнему не проходит.</p>
     </div>
-      <div class="chk-row" id="autoPickRow" style="display:none">
+      <div class="chk-row desk-only" id="autoPickRow" style="display:none">
         <label class="chk"><input type="checkbox" id="autoPickFastest">
           <span class="lbl" data-i18n="auto_pick_fastest">Подключаться к самому быстрому серверу</span>
           <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)"
@@ -1080,7 +1094,7 @@
             с нуля, щелчок переключает, крестик удаляет. Удобно настроить профиль для другого человека и
             отдать ему экспортом.</span></span></label>
       </div>
-      <div class="chk-row" id="hotspotRow" hidden>
+      <div class="chk-row desk-only" id="hotspotRow" hidden>
         <label class="chk"><input type="checkbox" id="hotspotVpn">
           <span class="lbl" data-i18n="hotspot_vpn">Раздавать VPN на мобильную точку доступа</span>
           <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)"
@@ -1093,7 +1107,7 @@
         <label class="chk"><input type="checkbox" id="showServerPicker">
           <span class="lbl" data-i18n="show_picker">Показывать выбор сервера на главном экране</span></label>
       </div>
-        <label class="chk"><input type="checkbox" id="verbose">
+        <label class="chk desk-only"><input type="checkbox" id="verbose">
           <span class="lbl" data-i18n="verbose">Подробный журнал</span></label>
       </div></div></div>
     </div>
@@ -1166,7 +1180,7 @@
         </div>
         <div class="help" id="directHelp" hidden></div>
         <textarea id="directHosts" rows="8" spellcheck="false" data-i18n-ph="direct_ph"></textarea>
-        <div style="display:flex;gap:8px;align-items:center;margin-top:7px">
+        <div class="desk-only" style="display:flex;gap:8px;align-items:center;margin-top:7px">
           <button class="btn" id="scanNet" style="font-size:12.5px;padding:6px 12px"
             data-i18n="scan_net">Проверить сеть</button>
           <span class="hint" id="scanNote" style="margin:0"></span>
@@ -1260,8 +1274,8 @@
     </div>
 
     <div class="three" style="margin-bottom:14px">
-      <button class="btn wztab on" id="wzTabAndroid" data-i18n="wizard_android">Android</button>
-      <button class="btn wztab" id="wzTabVPS" data-i18n="wizard_vps">VPS</button>
+      <button class="btn wztab on desk-only" id="wzTabAndroid" data-i18n="wizard_android">Android</button>
+      <button class="btn wztab desk-only" id="wzTabVPS" data-i18n="wizard_vps">VPS</button>
       <button class="btn wztab" id="wzTabUser" data-i18n="wizard_user">Пользователь</button>
     </div>
 
@@ -1685,6 +1699,10 @@
 
 <script>
 const T = new URLSearchParams(location.search).get('t') || '';
+// Телефон: тот же экран в WebView; родное (буфер, файлы, камера, ссылки) —
+// через мост SSHTunnelAndroid (MainActivity), данные — через то же API.
+const ANDROID = !!window.SSHTunnelAndroid;
+if(ANDROID) document.body.classList.add('android');
 const $ = id => document.getElementById(id);
 /* raw=true — тело уходит как есть, без JSON.stringify: так отправляется
    вставленный человеком текст выгрузки настроек, который сервер разбирает
@@ -1727,6 +1745,10 @@ $('confirmCancelBtn').onclick = () => closeConfirm(false);
    вставляется вручную. null — человек передумал. */
 let pasteResolve = null;
 async function readClipboard(){
+  if(ANDROID){
+    const t = SSHTunnelAndroid.readClipboard();
+    if(t) return t;
+  }
   try {
     if(navigator.clipboard && navigator.clipboard.readText){
       const text = await navigator.clipboard.readText();
@@ -1755,6 +1777,9 @@ $('pasteCancelBtn').onclick = () => closePaste(false);
 let LANG = 'ru';
 const I18N = {
   ru: {
+    key_paste:'Вставить ключ', key_saved:'Ключ сохранён', key_missing:'Ключа нет — вставь его из буфера',
+    scan_qr:'QR-код', update_download_android:'Скачать и установить',
+    update_installing:'Скачано — открываю установщик',
     log:'Журнал', settings:'Настройки', back:'Назад', back_to_settings:'Назад в настройки',
     connect:'Подключить', disconnect:'Отключить', cancel:'Отмена',
     mesh_btn_on:'Сеть устройств: вкл', mesh_btn_off:'Сеть устройств: выкл',
@@ -2033,7 +2058,7 @@ const I18N = {
     wizard_title:'Мастер настройки', wizard_sub:'Подключить телефон или новый сервер',
     addons_title:'Дополнительные приложения', addons_sub:'Добавляешь сам, что нужно',
     book_title:'Книга', book_sub:'Справка: с чего начать, режимы, частые проблемы',
-    quick_title:'Быстрый доступ',
+    quick_title:'Быстрый доступ', meddle_offer:'Проверить, кто мешает',
     wizard_android:'Android', wizard_vps:'VPS', wizard_user:'Пользователь',
     wizard_user_intro:'Новый пользователь на сервере, к которому ты подключён.',
     wizard_user_note:'Работает, если в панели сервера твоему устройству включено «Может создавать пользователей». '+
@@ -2070,6 +2095,9 @@ const I18N = {
     paste_not_config:'в буфере не похоже на настройки ssh_tunnel',
   },
   en: {
+    key_paste:'Paste key', key_saved:'Key saved', key_missing:'No key — paste it from the clipboard',
+    scan_qr:'QR code', update_download_android:'Download and install',
+    update_installing:'Downloaded — opening the installer',
     log:'Log', settings:'Settings', back:'Back', back_to_settings:'Back to settings',
     connect:'Connect', disconnect:'Disconnect', cancel:'Cancel',
     mesh_btn_on:'Device network: on', mesh_btn_off:'Device network: off',
@@ -2345,7 +2373,7 @@ const I18N = {
     wizard_title:'Setup wizard', wizard_sub:'Connect a phone or a new server',
     addons_title:'More apps', addons_sub:'Add what you need yourself',
     book_title:'Book', book_sub:'Help: getting started, modes, common problems',
-    quick_title:'Quick access',
+    quick_title:'Quick access', meddle_offer:'Check who interferes',
     wizard_android:'Android', wizard_vps:'VPS', wizard_user:'User',
     wizard_user_intro:'A new user on the server you are connected to.',
     wizard_user_note:'Works if the server panel allows your device to create users. The password is the one set there. '+
@@ -2424,9 +2452,17 @@ let filterApps = [];
 // опрос затирал бы несохранённый выбор, как это было с полями настроек.
 let filterDirty = false;
 let appPaths = {};   // имя -> путь, только для показа в списке
+let appLabels = {};  // телефон: пакет -> название приложения
+// appIconURL — значок программы: на ПК по пути к файлу, на телефоне по пакету.
+function appIconURL(name, path){
+  if(ANDROID) return '/api/appicon?pkg=' + encodeURIComponent(name) + '&t=' + encodeURIComponent(T);
+  return path ? '/api/appicon?path=' + encodeURIComponent(path) + '&t=' + encodeURIComponent(T) : '';
+}
 let seenApps = [];
 
 function normApp(name){
+  // На телефоне в списке — имена пакетов (com.example.app), как есть.
+  if(ANDROID) return (name || '').trim();
   name = (name || '').trim().toLowerCase();
   if(!name) return '';
   const i = Math.max(name.lastIndexOf('\\'), name.lastIndexOf('/'));
@@ -2463,14 +2499,16 @@ function renderApps(){
 
     const icon = document.createElement('div');
     icon.className = 'appicon';
-    icon.textContent = (name[0] || '?').toUpperCase();
-    const path = appPaths[name];
-    if(path){
-      // Значок достаётся только на Windows (там же, где вообще есть путь к
-      // файлу) — если запроса не будет или он не удастся, буква на подложке
-      // просто останется на месте, ничего не сломается.
+    const label = appLabels[name] || name;
+    icon.textContent = (label[0] || '?').toUpperCase();
+    const path = ANDROID && label !== name ? name : appPaths[name];
+    const src = appIconURL(name, appPaths[name]);
+    if(src){
+      // Значок достаётся на Windows (по пути к файлу) и на телефоне (по
+      // пакету) — если запрос не удастся, буква на подложке останется на
+      // месте, ничего не сломается.
       const img = document.createElement('img');
-      img.src = '/api/appicon?path=' + encodeURIComponent(path) + '&t=' + encodeURIComponent(T);
+      img.src = src;
       img.onload = () => { icon.textContent = ''; icon.appendChild(img); };
       img.onerror = () => {};
     }
@@ -2478,7 +2516,7 @@ function renderApps(){
     const info = document.createElement('span');
     info.style.cssText = 'flex:1;min-width:0';
     const nm = document.createElement('div');
-    nm.className = 'nm'; nm.textContent = name;
+    nm.className = 'nm'; nm.textContent = label;
     info.appendChild(nm);
     if(path){
       const pt = document.createElement('div');
@@ -2645,6 +2683,8 @@ document.querySelectorAll('.infoq').forEach(el => {
 
 $('addApp').onclick = ev => {
   ev.stopPropagation();
+  // На телефоне выбирать файл и вписывать имя незачем — сразу список приложений.
+  if(ANDROID){ openProcessPicker(); return; }
   if(menuEl){ closeMenu(); return; }
   const r = $('addApp').getBoundingClientRect();
   menuEl = document.createElement('div');
@@ -2682,6 +2722,7 @@ async function openProcessPicker(){
   $('procList').innerHTML = '<div class="empty">Читаю список программ…</div>';
   const r = await api('/api/processes');
   procs = r.processes || [];
+  procs.forEach(p => { if(p.label) appLabels[p.name] = p.label; });
   renderProcs();
   $('procSearch').focus();
 }
@@ -2694,7 +2735,8 @@ function renderProcs(){
   const box = $('procList');
   box.innerHTML = '';
   const list = procs.filter(p =>
-    !q || p.name.toLowerCase().includes(q) || (p.path||'').toLowerCase().includes(q));
+    !q || p.name.toLowerCase().includes(q) || (p.path||'').toLowerCase().includes(q) ||
+    (p.label||'').toLowerCase().includes(q));
   if(list.length === 0){
     box.innerHTML = '<div class="empty">Ничего не нашлось.</div>';
     return;
@@ -2705,20 +2747,22 @@ function renderProcs(){
 
     const icon = document.createElement('div');
     icon.className = 'appicon';
-    icon.textContent = (p.name[0] || '?').toUpperCase();
-    if(p.path){
+    icon.textContent = ((p.label || p.name)[0] || '?').toUpperCase();
+    const src = appIconURL(p.name, p.path);
+    if(src){
       const img = document.createElement('img');
-      img.src = '/api/appicon?path=' + encodeURIComponent(p.path) + '&t=' + encodeURIComponent(T);
+      img.loading = 'lazy';
+      img.src = src;
       img.onload = () => { icon.textContent = ''; icon.appendChild(img); };
       img.onerror = () => {};
     }
     b.appendChild(icon);
 
     const info = document.createElement('div'); info.className = 'info';
-    const n = document.createElement('div'); n.className = 'n'; n.textContent = p.name;
+    const n = document.createElement('div'); n.className = 'n'; n.textContent = p.label || p.name;
     info.appendChild(n);
-    if(p.path){
-      const pa = document.createElement('div'); pa.className = 'p'; pa.textContent = p.path;
+    if(p.path || p.label){
+      const pa = document.createElement('div'); pa.className = 'p'; pa.textContent = p.path || p.name;
       info.appendChild(pa);
     }
     b.appendChild(info);
@@ -2946,6 +2990,7 @@ function renderCore(st){
   $('meshBtnCap').textContent = tr(st.mesh.want ? 'mesh_btn_on' : 'mesh_btn_off');
   const failed = t === 'error' ? st.tunnel : st.mesh.phase === 'error' ? st.mesh : null;
   showError(failed ? connErrorText(failed.errorKind, failed.error) : '');
+  $('meddleOffer').hidden = t !== 'error';
 }
 async function wantCore(body){
   showError('');
@@ -3326,7 +3371,7 @@ function showSpeed(v){
 // выполнился бы ни разу — обе галочки «Подключаться сразу при запуске»
 // остались бы видны одновременно (ровно так и было).
 let OS = null;
-function isWindows(){ return OS !== 'linux' && OS !== 'darwin'; }
+function isWindows(){ return OS !== 'linux' && OS !== 'darwin' && OS !== 'android'; }
 function keyfile(){ return isWindows() ? '$env:USERPROFILE\\.ssh\\id_ed25519' : '~/.ssh/id_ed25519'; }
 
 function cmdCreateKey(){
@@ -3630,6 +3675,7 @@ function renderXmode(){
 }
 renderXmode();
 function saveTextFile(name, text){
+  if(ANDROID){ SSHTunnelAndroid.saveFile(name, text); return; }
   const blob = new Blob([text], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -3866,6 +3912,7 @@ function renderDevRows(peers){
 setInterval(pollMesh, 3000);
 
 async function copyToClipboard(text){
+  if(ANDROID) return SSHTunnelAndroid.writeClipboard(text);
   try {
     await navigator.clipboard.writeText(text);
     return true;
@@ -4344,7 +4391,11 @@ function isServerExportDoc(doc){
 // raw — doc уже текст (ссылка sshtunnel://…): уходит как есть, разбирает её
 // сервер тем же share.Parse, что и файл.
 async function importProfileDoc(doc, raw){
-  const r = await api('/api/profile/import', doc, raw);
+  afterImport(await api('/api/profile/import', doc, raw));
+}
+// afterImport — ответ /api/profile/import; на телефоне его же присылает
+// сканер QR (MainActivity → androidImported).
+function afterImport(r){
   if(r.error){ showError(r.error, 'setError'); return; }
   showError('', 'setError');
   editingProfileId = r.profile.id;
@@ -4458,6 +4509,7 @@ function fillProfileForm(p){
   });
   PROFILE_CHECKS.forEach(f => { if($(f)) $(f).checked = !!p[f]; });
   $('meshDirect').checked = !p.meshDirectOff;
+  $('keyState').textContent = tr(p.keySaved ? 'key_saved' : 'key_missing');
   $('directHosts').value = (p.directHosts || []).join('\n');
   $('tunnelHosts').value = (p.tunnelHosts || []).join('\n');
   renderDomainsSummary();
@@ -4528,7 +4580,7 @@ function renderIssuedByPanel(p){
   }
   el.hidden = false;
   el.textContent = tr('issued_by_panel').replace('{name}', p.deviceName || p.name || '');
-  el.onclick = () => window.open(p.panel, '_blank', 'noopener');
+  el.onclick = () => openExternal(p.panel);
 }
 
 function fillGeneralForm(c){
@@ -4896,11 +4948,12 @@ $('updateDownloadBtn').onclick = async () => {
     $('updateOpenBtn').hidden = false;
     return;
   }
-  $('updateNote').textContent = tr('update_downloaded').replace('{path}', r.path);
+  $('updateNote').textContent = ANDROID ? tr('update_installing')
+    : tr('update_downloaded').replace('{path}', r.path);
 };
 
 $('updateOpenBtn').onclick = () => {
-  if(updateResult && updateResult.url) window.open(updateResult.url, '_blank');
+  if(updateResult && updateResult.url) openExternal(updateResult.url);
 };
 
 /* ---------- мастер настройки: Android + VPS ---------- */
@@ -4917,6 +4970,8 @@ function pageURL(file, extra){
 // openWindow — отдельное окно: нативное (ядро помнит место), иначе окно
 // браузера. false — не открылось.
 async function openWindow(key, title, url){
+  // Телефон: отдельных окон нет — страница открывается своим экраном.
+  if(ANDROID){ SSHTunnelAndroid.openPage(url); return true; }
   const r = await api('/api/window', {key, title, url}).catch(() => ({}));
   if(r && r.ok) return true;
   return !!window.open(url, 'sshtunnel_' + key, 'popup=yes,width=820,height=640');
@@ -4961,6 +5016,12 @@ document.addEventListener('click', ev => {
   if(!$('quickPanel').hidden && !$('quickPanel').contains(ev.target)) $('quickPanel').hidden = true;
 });
 $('toAddons').onclick = () => showAddons();
+// Не подключилось — «Кто трогает трафик» (добавляется по этому нажатию).
+$('meddleOffer').onclick = async () => {
+  if(!addonsState.added.some(e => e.id === 'meddlers')) await api('/api/addons', {op: 'add', id: 'meddlers'}).catch(() => {});
+  await loadAddons();
+  showAddons('meddlers');
+};
 // Книга на ПК — отдельным окном, листается страницами.
 $('toBook').onclick = () => openWindow('book', tr('book_title') + ' — ssh_tunnel',
   pageURL('book.html', {solo: '1', key: 'book'}));
@@ -4976,6 +5037,9 @@ window.addEventListener('message', ev => {
 loadAddons();
 
 $('toWizard').onclick = () => {
+  // На телефоне из мастера есть только «Пользователь» (QR для телефона и
+  // настройка VPS по SSH — дело компьютера).
+  if(ANDROID){ show('viewWizard'); $('wzTabUser').click(); return; }
   // Открытый ключ туннеля для этого сервера уже мог быть создан на экране
   // настроек — если да, подставляем его в поле VPS-скрипта, чтобы не
   // копировать вручную из другого места.
@@ -5069,6 +5133,50 @@ $('wzVpsBtn').onclick = async () => {
   const copied = await copyToClipboard(r.script);
   $('wzVpsNote').textContent = copied ? tr('wizard_vps_copied') : tr('copy_manually');
 };
+
+/* ---------- телефон: мост SSHTunnelAndroid ---------- */
+function openExternal(url){
+  if(ANDROID) SSHTunnelAndroid.openExternal(url);
+  else window.open(url, '_blank', 'noopener');
+}
+if(ANDROID){
+  $('updateDownloadBtn').dataset.i18n = 'update_download_android';
+  $('scanQrBtn').onclick = () => SSHTunnelAndroid.scanQR();
+  $('keyPasteBtn').onclick = async () => {
+    const text = await readClipboard();
+    if(!text) return;
+    const r = await api('/api/key', {id: editingProfileId, key: text});
+    if(r.error){ showError(r.error, 'setError'); return; }
+    showError('', 'setError');
+    applyDoc(r.config);
+    $('savedNote').textContent = tr('key_saved');
+    setTimeout(() => $('savedNote').textContent = '', 4000);
+  };
+  // Сервер из QR или ссылки sshtunnel:// (разобрал MainActivity через API).
+  window.androidImported = r => { show('viewServers'); afterImport(r); };
+  // Системная «Назад»: закрыть окно поверх или вернуться на экран выше.
+  // false — уже на главном, приложение уходит в фон.
+  window.androidBack = () => {
+    for(const id of ['confirmOverlay', 'pasteOverlay', 'procOverlay', 'qrOverlay']){
+      if($(id) && !$(id).hidden){
+        if(id === 'confirmOverlay') closeConfirm(false);
+        else if(id === 'pasteOverlay') closePaste(false);
+        else $(id).hidden = true;
+        return true;
+      }
+    }
+    if(menuEl){ closeMenu(); return true; }
+    if(!$('quickPanel').hidden){ $('quickPanel').hidden = true; return true; }
+    if(current === 'viewAddons'){ show('viewMain'); loadAddons(); return true; }
+    if(current !== 'viewMain'){
+      const back = $(current).querySelector('.head .ico');
+      if(back) back.click(); else show('viewMain');
+      return true;
+    }
+    if(mainAtDev){ scrollMainTo(0); return true; }
+    return false;
+  };
+}
 
 renderCityBtn();
 connectEvents();
