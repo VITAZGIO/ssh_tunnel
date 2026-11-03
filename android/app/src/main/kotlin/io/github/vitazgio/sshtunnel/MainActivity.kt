@@ -85,6 +85,35 @@ class MainActivity : AppCompatActivity(), AndroidApi.Screen {
         fileCallback = null
     }
 
+    // Выбор папки (зеркальные папки, addons/mirror.html → pickFolder): id
+    // ждёт ответа в pickWait страницы, мы зовём его обратно через
+    // window.sshtunnelPicked(id, path).
+    private var pendingPickId = ""
+    private val pickFolderLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        val id = pendingPickId
+        pendingPickId = ""
+        if (id.isEmpty()) return@registerForActivityResult
+        web.evaluateJavascript("sshtunnelPicked('$id', ${jsStringOrNull(uri?.let { folderPath(it) })})", null)
+    }
+
+    /** Путь на диске для дерева SAF — надёжно получается только для основной
+     * памяти (DocumentsContract id начинается с «primary:»); SD-карту и
+     * прочие тома ядро путём не примет — тогда null, впишут вручную. */
+    private fun folderPath(tree: Uri): String? {
+        val id = try {
+            android.provider.DocumentsContract.getTreeDocumentId(tree)
+        } catch (_: Exception) {
+            return null
+        }
+        val parts = id.split(":", limit = 2)
+        if (parts.size != 2 || parts[0] != "primary") return null
+        val root = android.os.Environment.getExternalStorageDirectory().absolutePath
+        return if (parts[1].isEmpty()) root else "$root/${parts[1]}"
+    }
+
+    private fun jsStringOrNull(s: String?): String =
+        if (s == null) "null" else org.json.JSONObject.quote(s)
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -288,5 +317,24 @@ class MainActivity : AppCompatActivity(), AndroidApi.Screen {
 
         @JavascriptInterface
         fun close() = runOnUiThread { moveTaskToBack(true) }
+
+        /** Зеркальные папки: «Обзор» зовёт сюда с id, ответ — асинхронно через
+         * sshtunnelPicked(id, path). Без «Доступ ко всем файлам» путь всё
+         * равно ядру ни к чему — вместо выбора сразу просим разрешение. */
+        @JavascriptInterface
+        fun pickFolder(id: String) = runOnUiThread {
+            if (!DeviceApps.hasAllFiles()) {
+                DeviceApps.requestAllFiles(this@MainActivity)
+                web.evaluateJavascript("sshtunnelPicked('$id', null)", null)
+                return@runOnUiThread
+            }
+            pendingPickId = id
+            try {
+                pickFolderLauncher.launch(null)
+            } catch (_: Exception) {
+                pendingPickId = ""
+                web.evaluateJavascript("sshtunnelPicked('$id', null)", null)
+            }
+        }
     }
 }

@@ -625,6 +625,13 @@ object AndroidApi : mobile.API {
             .put("url", r.releaseUrl).put("assetUrl", r.apkUrl)).toString()
     }
 
+    // Скачивание APK идёт в фоновом потоке: handle() — это один синхронный
+    // запрос страницы, и если ждать в нём весь файл, кнопка час висит на
+    // «скачиваю…» без единого признака жизни. Вместо этого отвечаем сразу
+    // («начал») и шлём прогресс отдельными событиями kind:"update" — как
+    // core/log/stats (см. emitLog выше), страница слушает их в /events.
+    @Volatile private var downloading = false
+
     /**
      * Скачивает APK сама программа (она исключена из VPN, идёт к GitHub
      * напрямую) и открывает системный установщик.
@@ -632,27 +639,56 @@ object AndroidApi : mobile.API {
     private fun updateDownload(): String {
         val u = lastUpdate ?: return err("сначала проверь обновления")
         if (u.apkUrl.isBlank()) return err("у релиза нет APK")
-        val dir = java.io.File(app.cacheDir, "updates").apply { mkdirs() }
-        dir.listFiles()?.forEach { it.delete() }
-        val file = java.io.File(dir, "ssh_tunnel-${u.latest}.apk")
-        val part = java.io.File(dir, file.name + ".part")
-        try {
-            val conn = java.net.URL(u.apkUrl).openConnection() as java.net.HttpURLConnection
-            conn.connectTimeout = 15000
-            conn.readTimeout = 30000
-            conn.instanceFollowRedirects = true
-            if (conn.responseCode != 200) throw Exception("HTTP ${conn.responseCode}")
-            val total = conn.contentLengthLong
-            var done = 0L
-            conn.inputStream.use { inp -> part.outputStream().use { out -> done = inp.copyTo(out, 64 * 1024) } }
-            if (total > 0 && done != total) throw Exception("оборвалось на $done из $total")
-            if (!part.renameTo(file)) throw Exception("не удалось сохранить файл")
-        } catch (e: Exception) {
-            part.delete()
-            return err(e.message ?: "не скачалось")
-        }
-        main.post { installApk(file) }
-        return JSONObject().put("ok", true).put("path", file.name).toString()
+        if (downloading) return JSONObject().put("ok", true).toString()
+        downloading = true
+        Thread({
+            val dir = java.io.File(app.cacheDir, "updates").apply { mkdirs() }
+            dir.listFiles()?.forEach { it.delete() }
+            val file = java.io.File(dir, "ssh_tunnel-${u.latest}.apk")
+            val part = java.io.File(dir, file.name + ".part")
+            try {
+                val conn = java.net.URL(u.apkUrl).openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 15000
+                conn.readTimeout = 30000
+                conn.instanceFollowRedirects = true
+                if (conn.responseCode != 200) throw Exception("HTTP ${conn.responseCode}")
+                val total = conn.contentLengthLong
+                var done = 0L
+                var lastEmit = 0L
+                conn.inputStream.use { inp ->
+                    part.outputStream().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        while (true) {
+                            val n = inp.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            done += n
+                            val now = System.currentTimeMillis()
+                            if (now - lastEmit >= 200) {
+                                lastEmit = now
+                                emitUpdateProgress(done, total, false, null)
+                            }
+                        }
+                    }
+                }
+                if (total > 0 && done != total) throw Exception("оборвалось на $done из $total")
+                if (!part.renameTo(file)) throw Exception("не удалось сохранить файл")
+                emitUpdateProgress(done, total, true, null)
+                main.post { installApk(file) }
+            } catch (e: Exception) {
+                part.delete()
+                emitUpdateProgress(0, 0, true, e.message ?: "не скачалось")
+            } finally {
+                downloading = false
+            }
+        }, "update-download").start()
+        return JSONObject().put("ok", true).toString()
+    }
+
+    private fun emitUpdateProgress(done: Long, total: Long, finished: Boolean, error: String?) {
+        val o = JSONObject().put("kind", "update").put("done", done).put("total", total).put("finished", finished)
+        if (error != null) o.put("error", error)
+        mobile.Mobile.emit(o.toString())
     }
 
     private fun installApk(file: java.io.File) {

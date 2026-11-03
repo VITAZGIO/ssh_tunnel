@@ -54,6 +54,7 @@
     <string name="clip_share">ssh_tunnel shared clipboard</string>
     <string name="clip_tile">Shared clipboard</string>
     <string name="clip_sent">Sent to devices: %1$d</string>
+    <string name="clip_sent_multi">Files sent: %1$d of %2$d</string>
     <string name="clip_too_big">Over 50 MB — use Device files</string>
     <string name="clip_empty">Nothing to send in the clipboard</string>
 </resources>

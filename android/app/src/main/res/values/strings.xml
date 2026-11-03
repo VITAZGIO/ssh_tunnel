@@ -55,6 +55,7 @@
     <string name="clip_share">Общий буфер ssh_tunnel</string>
     <string name="clip_tile">Общий буфер</string>
     <string name="clip_sent">Отправлено устройств: %1$d</string>
+    <string name="clip_sent_multi">Отправлено файлов: %1$d из %2$d</string>
     <string name="clip_too_big">Больше 50 МБ — передай через «Файлы устройства»</string>
     <string name="clip_empty">В буфере нечего отправить</string>
 </resources>
