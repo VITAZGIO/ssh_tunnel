@@ -16,6 +16,9 @@ type Entry struct {
 	Off bool `json:"off,omitempty"`
 	// Seen — первое открытие уже было, подсказку больше не показывать.
 	Seen bool `json:"seen,omitempty"`
+	// Win — галка «сразу в окне» (только ПК); nil — как задумано в каталоге
+	// (Manifest.Window).
+	Win *bool `json:"win,omitempty"`
 }
 
 type data struct {
@@ -120,6 +123,10 @@ func (s *Store) update(id string, f func(*Entry)) error {
 
 func (s *Store) SetStar(id string, on bool) error {
 	return s.update(id, func(e *Entry) { e.Star = on })
+}
+
+func (s *Store) SetWin(id string, on bool) error {
+	return s.update(id, func(e *Entry) { e.Win = &on })
 }
 
 func (s *Store) SetOn(id string, on bool) error {

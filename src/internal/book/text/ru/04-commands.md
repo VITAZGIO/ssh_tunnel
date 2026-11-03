@@ -22,7 +22,7 @@
   убрать, `rules mode only` — через туннель только программы из списка.
   `rules fakeip on|off` — подставные адреса в DNS режима VPN, `rules add realip
   .deepseek.com` — имени всегда настоящий адрес.
-- `ssh_tunnel.exe apps` — дополнительные приложения: `apps add calendar`,
+- `ssh_tunnel.exe apps` — плагины: `apps add calendar`,
   `apps remove …`, `apps star …`, `apps on …`, `apps off …`.
 - `ssh_tunnel.exe check` — самопроверка, `check site youtube.com` —
   проверить сайт (нужно приложение «Проверить сайт»).

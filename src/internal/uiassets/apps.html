@@ -59,7 +59,9 @@
   .first .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .view{display:none;flex:1;min-height:0;flex-direction:column}
   .view.on{display:flex}
-  html.android #winBtn{display:none}
+  html.android #winBtn,html.android #winChk{display:none}
+  #winChk{display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--dim);cursor:pointer;white-space:nowrap}
+  #winChk input{margin:0;width:13px;height:13px}
 </style>
 </head>
 <body>
@@ -110,6 +112,7 @@
       <button class="ico" id="backApp"></button>
       <span class="t" id="appTitle"></span>
       <button class="ico" id="helpBtn"></button>
+      <label id="winChk"><input type="checkbox" id="winAuto"><span></span></label>
       <button class="tb" id="winBtn"></button>
     </div>
     <div class="first card" id="first" hidden>
@@ -123,7 +126,7 @@
 </div>
 <script src="pages.js"></script>
 <script>
-/* Дополнительные приложения: что добавлено на этом устройстве, каталог и
+/* Плагины: что добавлено на этом устройстве, каталог и
    само приложение. Всё состояние — у ядра (/api/addons); страница рисует его
    и шлёт просьбы. */
 let ST = {catalog: [], added: [], windows: false};
@@ -131,6 +134,8 @@ let current = null; // id открытого приложения
 
 const manifest = id => ST.catalog.find(m => m.id === id);
 const entry = id => ST.added.find(e => e.id === id);
+// inWin — открывать ли сразу окном: галка человека, а без неё — как в каталоге.
+const inWin = id => { const e = entry(id), m = manifest(id); return e && e.win != null ? e.win : !!(m && m.window); };
 
 function show(v){ ['vList','vCat','vApp','vPerm'].forEach(x => $(x).classList.toggle('on', x === v)); }
 
@@ -149,10 +154,12 @@ function setIcons(){
   $('helpBtn').title = L('Справка в Книге', 'Help in the Book');
   $('winBtn').innerHTML = icon('open_in_new') + '<span>' + L('В окне', 'Window') + '</span>';
   $('winBtn').title = L('Открыть в отдельном окне', 'Open in a separate window');
-  $('listTitle').textContent = L('Дополнительные приложения', 'More apps');
+  $('winChk').lastChild.textContent = L('сразу в окне', 'open in window');
+  $('winChk').title = L('Галка — открывать отдельным окном сразу. Без галки — здесь.', 'Checked — open in a separate window right away. Unchecked — here.');
+  $('listTitle').textContent = L('Плагины', 'Plugins');
   $('catTitle').textContent = L('Каталог', 'Catalog');
   $('firstMore').textContent = L('Подробнее — в Книге', 'More in the Book');
-  document.title = L('Дополнительные приложения', 'More apps') + ' — ssh_tunnel';
+  document.title = L('Плагины', 'Plugins') + ' — ssh_tunnel';
 }
 
 async function load(){
@@ -247,11 +254,13 @@ async function openApp(id, here){
     alert(L('Приложение выключено — включи его на плитке.', 'The app is off — turn it on on its tile.'));
     return;
   }
-  if(m.window && !here && !SOLO && !ANDROID && await popOut(id)) return;
+  if(inWin(id) && !here && !SOLO && !ANDROID && await popOut(id)) return;
   current = id;
   $('appTitle').innerHTML = appIcon(m) + '<span>' + esc(appName(m)) + '</span>';
   $('helpBtn').hidden = !m.book;
   $('winBtn').hidden = SOLO || ANDROID;
+  $('winChk').hidden = ANDROID || !ST.windows;
+  $('winAuto').checked = inWin(id);
   $('backApp').hidden = SOLO && !Q.get('back');
   // Своё приложение — в песочнице: свой origin, без ключа программы в адресе.
   // Ключ приложения уже в пути страницы, им оно и ходит к API.
@@ -285,6 +294,7 @@ $('winBtn').onclick = async () => {
   const id = current;
   if(await popOut(id)){ $('appFrame').src = 'about:blank'; current = null; show('vList'); }
 };
+$('winAuto').onchange = () => { if(current) op('win', current, $('winAuto').checked); };
 $('backApp').onclick = () => {
   $('appFrame').src = 'about:blank';
   current = null;

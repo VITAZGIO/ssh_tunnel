@@ -7,7 +7,7 @@ the like.
 
 ## How to install
 
-1. “More apps” → “+” → **“From file”**, pick the archive.
+1. “Plugins” → “+” → **“From file”**, pick the archive.
 2. The app shows what it asks for: “see the devices of your network”,
    “change the rules” and so on. If you agree — “Install”.
 3. A tile appears marked **“not from catalog”**.

@@ -26,6 +26,6 @@ appears on the screen, the phone scans it with the camera.
 - **Main screen** — two buttons and the connection state (see "Main screen
   and modes").
 - **Settings** — servers, programs, device network, appearance.
-- **More apps** — optional tools you add yourself.
+- **Plugins** — optional tools you add yourself.
 - **Book** — this help. Search is at the top, source code is linked at the
   bottom.

@@ -40,7 +40,7 @@ type route struct {
 
 func (s *Server) routes() []route {
 	rs := s.coreRoutes()
-	// Дополнительные приложения и Книга — общие с Android (internal/uihost).
+	// Плагины и Книга — общие с Android (internal/uihost).
 	for _, r := range s.addons.Routes() {
 		rs = append(rs, route{r.Path, r.Methods, r.Desc, r.H})
 	}

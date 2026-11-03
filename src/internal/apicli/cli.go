@@ -582,7 +582,7 @@ func help(name string, w io.Writer) int {
   %[1]s rules mode all|only|except какие программы через туннель
   %[1]s rules add realip .deepseek.com  всегда настоящий адрес в DNS режима VPN
   %[1]s rules fakeip on|off        подставные адреса (fake-IP) в DNS режима VPN
-  %[1]s apps                       дополнительные приложения
+  %[1]s apps                       плагины
   %[1]s apps add|remove|star|unstar|on|off <id>
   %[1]s apps install app.zip [--yes]   своё приложение из файла
   %[1]s check                      самопроверка цепочки до сервера

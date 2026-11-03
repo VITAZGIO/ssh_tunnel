@@ -250,6 +250,6 @@ func (w *Watch) check() {
 	r := CheckLeaks(ctx, w.h, "ru")
 	w.st.update(func(d *storeData) { d.Leaks = &r })
 	if r.Leak {
-		w.h.Bus().Warnf("Проверка утечек: %s Подробнее — «Дополнительные приложения» → «Проверка утечек».", r.Summary)
+		w.h.Bus().Warnf("Проверка утечек: %s Подробнее — «Плагины» → «Проверка утечек».", r.Summary)
 	}
 }

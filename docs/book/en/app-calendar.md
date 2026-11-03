@@ -9,7 +9,7 @@ VPN service on the phone does not get put to sleep like DAVx5.
 
 1. In Nextcloud: avatar → Settings → Security → "Create new app password".
    Your normal password is not needed.
-2. "More apps" → "+" → "Calendar" → "Add", then open it.
+2. "Plugins" → "+" → "Calendar" → "Add", then open it.
 3. Address — e.g. `http://ubuntu.mesh:8080` (the home server on the device
    network), login and app password → "Connect". The password is stored
    encrypted (on Windows — by Windows itself), never in the settings.

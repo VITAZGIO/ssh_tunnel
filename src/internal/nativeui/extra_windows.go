@@ -19,7 +19,7 @@ import (
 // Rect — место и размер окна на экране (в пикселях экрана).
 type Rect struct{ X, Y, W, H int }
 
-// WindowOptions — отдельное окно (Книга, дополнительное приложение).
+// WindowOptions — отдельное окно (Книга, плагин).
 type WindowOptions struct {
 	Key   string // чьё окно: второе с тем же ключом не открывается, показывается первое
 	Title string

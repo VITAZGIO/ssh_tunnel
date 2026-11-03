@@ -36,9 +36,10 @@ func TestAddStarSurvivesRestart(t *testing.T) {
 	post(t, s, `{"op":"star","id":"sample","value":true}`)
 	post(t, s, `{"op":"on","id":"sample","value":false}`)
 	post(t, s, `{"op":"seen","id":"sample"}`)
+	post(t, s, `{"op":"win","id":"sample","value":false}`)
 
 	e, ok := New(dir).store.Get("sample")
-	if !ok || !e.Star || !e.Off || !e.Seen {
+	if !ok || !e.Star || !e.Off || !e.Seen || e.Win == nil || *e.Win {
 		t.Fatalf("после перезапуска: %+v, %v", e, ok)
 	}
 	post(t, s, `{"op":"remove","id":"sample"}`)

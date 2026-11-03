@@ -20,7 +20,7 @@
   (`index.html` — окно ПК; `apps.html`, `book.html` — общие с Android через
   `internal/uihost`). API — в `src/internal/webui` (таблица маршрутов в
   `api.go`, описание — `docs/API.md`).
-- **Дополнительные приложения** — `src/internal/addons` (каталог в
+- **Плагины** — `src/internal/addons` (каталог в
   `manifest.go`, страница — `uiassets/addons/<id>.html`, глава Книги —
   `docs/book/<язык>/app-<id>.md`). **Книга** — `docs/book/`, копия для сборки
   в `src/internal/book/text/` (`go generate ./internal/book`).

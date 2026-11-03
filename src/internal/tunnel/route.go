@@ -82,7 +82,7 @@ func (t *Tunnel) dialRoute(route core.Route, target string) (net.Conn, error) {
 	return nil, errBlocked
 }
 
-// DialApp — соединение от имени самой программы (дополнительные приложения:
+// DialApp — соединение от имени самой программы (плагины:
 // SSH, «Файлы устройства»): путь выбирает ядро, как для любой программы.
 func (t *Tunnel) DialApp(target string) (net.Conn, error) {
 	route, _ := t.decide("", target)

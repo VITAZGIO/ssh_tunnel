@@ -37,7 +37,7 @@ var eng = &Engine{}
 func Default() *Engine { return eng }
 
 // Init задаёт папку данных (там calendar.json и зашифрованный пароль).
-// Зовётся там же, где создаются дополнительные приложения (webui, uihost).
+// Зовётся там же, где создаются плагины (webui, uihost).
 func Init(dir string) {
 	eng.mu.Lock()
 	defer eng.mu.Unlock()

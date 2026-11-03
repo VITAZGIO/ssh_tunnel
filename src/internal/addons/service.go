@@ -64,7 +64,7 @@ func DataDir() string {
 // («/book.html?…»).
 type Opener func(key, title, url string) error
 
-// Service — дополнительные приложения этого устройства: хранилище, модули,
+// Service — плагины этого устройства: хранилище, модули,
 // API.
 type Service struct {
 	store *Store
@@ -174,7 +174,7 @@ type Route struct {
 // Routes — адреса API. Охрану (ключ) ставит тот, кто их подключает.
 func (s *Service) Routes() []Route {
 	rs := []Route{
-		{"/api/addons", "GET, POST", "Дополнительные приложения: каталог и добавленные на этом устройстве. POST {\"op\":\"add|remove|star|on|seen\",\"id\",\"value\":bool}.", s.handleAddons},
+		{"/api/addons", "GET, POST", "Плагины: каталог и добавленные на этом устройстве. POST {\"op\":\"add|remove|star|on|seen|win\",\"id\",\"value\":bool}.", s.handleAddons},
 		{"/api/addons/file", "POST", "Своё приложение из файла: тело — zip (manifest.json, HTML/JS/CSS, значок). ?dry=1 — только проверить и показать разрешения; без него — поставить.", s.handleFile},
 		{"/api/app/data", "GET, POST", "Данные своего приложения (его ключом): GET — всё, POST {\"key\",\"value\"} (null — удалить). С ключом программы — ?app=<id>.", s.handleAppData},
 		{"/api/window", "POST", "Открыть отдельное окно {\"key\",\"title\",\"url\"} (ПК). {\"ok\":false} — не умею, открывай сам.", s.handleWindow},
@@ -257,10 +257,12 @@ func (s *Service) handleAddons(w http.ResponseWriter, r *http.Request) {
 			err = s.store.SetStar(req.ID, req.Value)
 		case "on":
 			err = s.store.SetOn(req.ID, req.Value)
+		case "win":
+			err = s.store.SetWin(req.ID, req.Value)
 		case "seen":
 			err = s.store.SetSeen(req.ID)
 		default:
-			writeJSON(w, map[string]string{"error": "op: add, remove, star, on или seen"})
+			writeJSON(w, map[string]string{"error": "op: add, remove, star, on, seen или win"})
 			return
 		}
 		if err != nil {

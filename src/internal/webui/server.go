@@ -72,7 +72,7 @@ type Server struct {
 	// не в угаданном.
 	bootFlags []string
 
-	// addons — дополнительные приложения этого устройства (каталог, что
+	// addons — плагины этого устройства (каталог, что
 	// добавлено, модули ядра). Список хранится у ядра, а не в окне.
 	addons *addons.Service
 	// diag — диагностика (internal/diag): проверить сайт, кто трогает
@@ -158,7 +158,7 @@ func NewOpenLocalOn(a *App, addr string) (*Server, error) {
 // пользователя.
 func (s *Server) Token() string { return s.token }
 
-// Addons — дополнительные приложения: окну ПК нужно, чтобы научить их
+// Addons — плагины: окну ПК нужно, чтобы научить их
 // открывать отдельные окна (SetOpener) и помнить их место (Store).
 func (s *Server) Addons() *addons.Service { return s.addons }
 
@@ -888,7 +888,7 @@ func (s *Server) handleServerUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-// appNet — сеть устройств окна для дополнительных приложений.
+// appNet — сеть устройств окна для плагинов.
 type appNet struct{ a *app.App }
 
 func (n appNet) Mesh() *mesh.Client                          { return n.a.Mesh() }
