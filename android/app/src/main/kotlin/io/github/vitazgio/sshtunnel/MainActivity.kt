@@ -101,9 +101,14 @@ class MainActivity : AppCompatActivity(), AndroidApi.Screen {
 
         web = WebView(this)
         web.setBackgroundColor(Color.TRANSPARENT)
-        setContentView(web)
+        // WebView сам отступы не соблюдает: страница выше видимого и съезжает под
+        // строку состояния. Отступы под системные полосы — у рамки вокруг него.
+        val frame = android.widget.FrameLayout(this)
+        frame.addView(web, android.widget.FrameLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT))
+        setContentView(frame)
         // С Android 15 окно занимает весь экран — отступы под системные полосы.
-        ViewCompat.setOnApplyWindowInsetsListener(web) { v, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(frame) { v, insets ->
             val bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or
                     WindowInsetsCompat.Type.ime()
