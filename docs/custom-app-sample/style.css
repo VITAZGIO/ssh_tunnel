@@ -1,0 +1,3 @@
+body { font: 14px system-ui, sans-serif; margin: 16px; color: #ddd; background: #1b1d22; }
+@media (prefers-color-scheme: light) { body { color: #222; background: #fff; } }
+button { padding: 6px 12px; border-radius: 8px; border: 1px solid #888; background: transparent; color: inherit; cursor: pointer; }

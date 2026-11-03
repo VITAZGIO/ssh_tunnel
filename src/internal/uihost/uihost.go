@@ -58,6 +58,7 @@ func Start(dir string) (*Host, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", uiassets.Static())
 	mux.HandleFunc("/addons/", h.guard(h.svc.Page))
+	mux.HandleFunc("/custom/", h.svc.Files)
 	for _, rt := range h.svc.Routes() {
 		mux.HandleFunc(rt.Path, h.guard(rt.H))
 	}
@@ -66,7 +67,7 @@ func Start(dir string) (*Host, error) {
 	// подходящий путь, поэтому свои адреса выше остаются своими).
 	mux.HandleFunc("/api/", h.guard(h.platform))
 	mux.HandleFunc("/events", h.guard(h.events))
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: addons.CORS(mux), ReadHeaderTimeout: 10 * time.Second}
 	go srv.Serve(ln)
 	return h, nil
 }
@@ -157,6 +158,16 @@ func (h *Host) events(w http.ResponseWriter, r *http.Request) {
 
 func (h *Host) guard(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Своё приложение: свой ключ, только разрешённые адреса.
+		if addons.IsAppKey(addons.RequestToken(r)) {
+			r2, err := h.svc.Authorize(r)
+			if err != nil {
+				addons.DenyJSON(w, err)
+				return
+			}
+			next(w, r2)
+			return
+		}
 		if o := r.Header.Get("Origin"); o != "" {
 			if u, err := url.Parse(o); err != nil || u.Host != r.Host {
 				http.Error(w, "запрещено", http.StatusForbidden)

@@ -59,6 +59,7 @@ func (s *Server) coreRoutes() []route {
 		{"/api/bypass", "POST", "Круглая кнопка: {\"on\":bool}. Ждёт результата.", s.handleBypass},
 		{"/api/meshmode", "POST", "Кнопка «Сеть устройств»: {\"on\":bool}. Ждёт результата.", s.handleMeshMode},
 		{"/api/config", "GET, POST", "Настройки целиком (config.Config). POST сохраняет; правила применяются сразу.", s.handleConfig},
+		{"/api/rules", "GET, POST", "Правила активного сервера: filterMode, filterApps, directHosts (всегда напрямую), tunnelHosts (всегда через сервер). POST {\"op\":\"add|remove\",\"list\":\"direct|tunnel|apps\",\"value\"} или {\"filterMode\":\"all|only|except\"}.", s.handleRules},
 		{"/api/profile/add", "POST", "Новый сервер {\"name\",\"flag\"}; активным не становится.", s.handleProfileAdd},
 		{"/api/profile/remove", "POST", "Удалить сервер {\"id\"}.", s.handleProfileRemove},
 		{"/api/profile/select", "POST", "Сделать сервер активным {\"id\"}; включённое переподключается к нему.", s.handleProfileSelect},
@@ -91,14 +92,54 @@ func (s *Server) coreRoutes() []route {
 	}
 }
 
+// confirm — адреса, которыми можно что-то сломать или потерять: выключить
+// сеть устройств, удалить, остановить чужую программу, заменить настройки.
+// В самоописании у них поле confirm — что именно опасно; MCP пишет это в
+// описание инструмента («спроси человека»). Ключ — путь из таблицы.
+var confirm = map[string]string{
+	"/api/state":                   "выключение сети устройств (mesh:false) обрывает связь с другими устройствами",
+	"/api/stop":                    "выключает и туннель, и сеть устройств",
+	"/api/meshmode":                "выключение сети устройств обрывает связь с другими устройствами",
+	"/api/config":                  "заменяет настройки",
+	"/api/settings/import":         "заменяет все настройки",
+	"/api/profile/remove":          "удаляет сервер",
+	"/api/profile/import":          "добавляет сервер и переключается на него",
+	"/api/appprofiles/":            "применяет или удаляет профиль приложения",
+	"/api/serverusers":             "создаёт пользователя на сервере",
+	"/api/vpssetup/start":          "меняет настройки сервера (sshd)",
+	"/api/update/download":         "скачивает новую версию",
+	"/api/addons":                  "remove убирает приложение (у своего — вместе с данными)",
+	"/api/addons/file":             "ставит своё приложение с разрешениями",
+	"/api/diag/meddlers/try":       "останавливает чужую программу",
+	"/api/diag/meddlers/keep":      "отключает автозапуск чужой программы",
+	"/api/diag/meddlers/reconcile": "меняет настройки чужой программы",
+	"/api/calendar/delete":         "удаляет событие",
+	"/api/calendar/account":        "меняет или забывает аккаунт",
+	"/api/clipboard/delete":        "удаляет записи буфера",
+	"/api/mirror":                  "unserve/leave/resolve/restore меняют папки и файлы",
+	"/api/ssh":                     "delete удаляет сервер",
+	"/api/files/remote":            "put/op меняют файлы другого устройства",
+	"/api/files/shares":            "открывает или закрывает папки для других устройств",
+}
+
+// apiRoute — строка самоописания GET /api.
+type apiRoute struct {
+	route
+	Confirm string `json:"confirm,omitempty"`
+}
+
 func (s *Server) handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 	rs := s.routes()
 	sort.Slice(rs, func(i, j int) bool { return rs[i].Path < rs[j].Path })
+	out := make([]apiRoute, 0, len(rs))
+	for _, rt := range rs {
+		out = append(out, apiRoute{rt, confirm[rt.Path]})
+	}
 	writeJSON(w, map[string]any{
 		"api":     APIVersion,
 		"version": updater.Version,
 		"auth":    "Authorization: Bearer <token> | X-Token: <token> | ?t=<token>",
-		"routes":  rs,
+		"routes":  out,
 	})
 }
 

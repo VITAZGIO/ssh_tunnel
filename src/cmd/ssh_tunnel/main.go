@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"time"
 
+	"sshtunnel/internal/apicli"
 	"sshtunnel/internal/app"
 	"sshtunnel/internal/calendar"
 	"sshtunnel/internal/config"
@@ -27,6 +28,15 @@ import (
 const windowTitle = "ssh_tunnel"
 
 func main() {
+	// Команда работающей программе (`ssh_tunnel.exe tunnel off`, `… mcp`):
+	// окно не нужно, ответ — в консоль, из которой позвали.
+	if apicli.IsCommand(os.Args[1:]) {
+		if os.Args[1] != "mcp" {
+			apicli.AttachConsole()
+		}
+		os.Exit(apicli.Main("ssh_tunnel.exe", os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	}
+
 	// Единственный флаг — на случай, если окно почему-то не открывается:
 	// тогда программа печатает адрес, который можно открыть браузером.
 	noWindow := flag.Bool("nowindow", false, "не открывать окно, только напечатать адрес")

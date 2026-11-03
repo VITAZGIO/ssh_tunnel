@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"sshtunnel/internal/apicli"
 	"sshtunnel/internal/app"
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/events"
@@ -56,6 +57,11 @@ type Options struct {
 func Run(o Options) {
 	if o.Name == "" {
 		o.Name = "ssh_tunnel_linux"
+	}
+	// Команда работающей программе (`ssh_tunnel_linux state`, `… mcp`), а не
+	// запуск туннеля.
+	if apicli.IsCommand(os.Args[1:]) {
+		os.Exit(apicli.Main(o.Name, os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 	}
 	vpn := o.NetLayer != nil
 	cfg := config.Load()

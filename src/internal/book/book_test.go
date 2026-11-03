@@ -51,7 +51,7 @@ func TestChapters(t *testing.T) {
 	}
 	ru := Chapters("ru", []string{"app-sample", "app-missing"})
 	en := Chapters("en", []string{"app-sample"})
-	if got, want := ids(ru), "start,main,mesh,app-sample,problems"; got != want {
+	if got, want := ids(ru), "start,main,mesh,commands,own-apps,app-sample,problems"; got != want {
 		t.Fatalf("главы ru: %s, нужно %s", got, want)
 	}
 	if ids(en) != ids(ru) {
@@ -60,7 +60,7 @@ func TestChapters(t *testing.T) {
 	if ru[0].Title != "С чего начать" || en[0].Title != "Getting started" {
 		t.Fatalf("заголовки: %q, %q", ru[0].Title, en[0].Title)
 	}
-	if got := ids(Chapters("de", nil)); got != "start,main,mesh,problems" {
+	if got := ids(Chapters("de", nil)); got != "start,main,mesh,commands,own-apps,problems" {
 		t.Fatalf("неизвестный язык → русский без глав приложений: %s", got)
 	}
 }

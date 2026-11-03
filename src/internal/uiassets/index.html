@@ -1085,6 +1085,14 @@
             на следующий по отклику, об этом будет видно в журнале. Возврат на выбранный вручную
             сервер — кнопкой «Выбрать этот сервер» или при следующем подключении.</span></span></label>
       </div>
+      <div class="chk-row desk-only">
+        <label class="chk"><input type="checkbox" id="mcpEnabled">
+          <span class="lbl" data-i18n="mcp_on">Управление нейросетью (MCP)</span>
+          <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)"
+            >?<span class="tip" data-i18n="mcp_note">Нейросеть на этом компьютере (Claude Desktop, Claude Code)
+            сможет нажимать кнопки программы и менять правила через «ssh_tunnel.exe mcp». Только на этом
+            устройстве, наружу ничего не открывается. Как подключить — в Книге, глава «Команды и нейросеть».</span></span></label>
+      </div>
       <div class="chk-row">
         <label class="chk"><input type="checkbox" id="appProfilesOn">
           <span class="lbl" data-i18n="app_profiles_on">Профили приложения</span>
@@ -1944,6 +1952,8 @@ const I18N = {
     show_picker:'Показывать выбор сервера на главном экране',
     hotspot_vpn:'Раздавать VPN на мобильную точку доступа',
     hotspot_vpn_note:'Если этот компьютер раздаёт Wi-Fi (мобильная точка доступа Windows), при включённом обходе подключённые телефоны и ноутбуки ходят в интернет через сервер, как и сам компьютер. Галочка снята — им доступен только твой сервер (например, свой VPN на телефоне), остальной интернет — нет. Включи точку доступа до обхода.',
+    mcp_on:'Управление нейросетью (MCP)',
+    mcp_note:'Нейросеть на этом компьютере (Claude Desktop, Claude Code) сможет нажимать кнопки программы и менять правила через «ssh_tunnel.exe mcp». Только на этом устройстве, наружу ничего не открывается. Как подключить — в Книге, глава «Команды и нейросеть».',
     app_profiles_on:'Профили приложения', app_profile:'Профиль', app_profile_add:'Новый профиль',
     app_profiles_note:'Несколько полных наборов настроек — серверы, программы, галочки. Вверху настроек появится полоска «Профиль 1 +»: плюс создаёт новый профиль с нуля, щелчок переключает, крестик удаляет. Удобно настроить профиль для другого человека и отдать ему экспортом.',
     app_profile_del:'Удалить профиль «{n}» со всеми его настройками и серверами?',
@@ -2260,6 +2270,8 @@ const I18N = {
     verbose:'Verbose log', connect_on_launch:'Connect immediately on launch',
     show_picker:'Show server picker on the home screen',
     hotspot_vpn:'Share VPN over the mobile hotspot',
+    mcp_on:'Control by AI (MCP)',
+    mcp_note:'An AI on this computer (Claude Desktop, Claude Code) can press the app buttons and change rules via “ssh_tunnel.exe mcp”. This device only, nothing is opened to the network. How to connect — in the Book, chapter “Commands and AI”.',
     app_profiles_on:'App profiles', app_profile:'Profile', app_profile_add:'New profile',
     app_profiles_note:'Several complete sets of settings — servers, apps, checkboxes. A “Profile 1 +” strip appears at the top of settings: plus creates a new empty profile, a click switches, the cross deletes. Handy to set up a profile for someone else and hand it over by export.',
     app_profile_del:'Delete profile “{n}” with all its settings and servers?',
@@ -2442,7 +2454,7 @@ $('language').addEventListener('change', () => {
 const FIELDS = ['host','user','keyPath','sshPort','socksPort','httpPort','poolSize','meshName','meshKey',
                 'keepAliveSec','connectTimeoutSec','cipher','ipVersion'];
 const PROFILE_CHECKS = ['localViaTunnel', 'udpRelayEnabled', 'meshEnabled', 'meshIncoming', 'shareLan'];
-const CHECKS = ['verbose', 'adBlockEnabled'];
+const CHECKS = ['verbose', 'adBlockEnabled', 'mcpEnabled'];
 
 /* Правила фильтра живут отдельно от полей формы: они правятся на своём
    экране и сохраняются своей кнопкой. */

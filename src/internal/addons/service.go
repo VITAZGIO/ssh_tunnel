@@ -73,6 +73,8 @@ type Service struct {
 	running map[string]Module
 	opener  Opener
 	log     func(format string, args ...any)
+
+	dataMu sync.Mutex // data.json своих приложений
 }
 
 // New открывает хранилище в dir и запускает модули добавленных приложений.
@@ -80,6 +82,7 @@ func New(dir string) *Service {
 	regMu.Lock()
 	dataDir = dir
 	regMu.Unlock()
+	loadCustom(dir)
 	s := &Service{store: Open(dir), running: map[string]Module{}}
 	s.sync()
 	return s
@@ -172,6 +175,8 @@ type Route struct {
 func (s *Service) Routes() []Route {
 	rs := []Route{
 		{"/api/addons", "GET, POST", "Дополнительные приложения: каталог и добавленные на этом устройстве. POST {\"op\":\"add|remove|star|on|seen\",\"id\",\"value\":bool}.", s.handleAddons},
+		{"/api/addons/file", "POST", "Своё приложение из файла: тело — zip (manifest.json, HTML/JS/CSS, значок). ?dry=1 — только проверить и показать разрешения; без него — поставить.", s.handleFile},
+		{"/api/app/data", "GET, POST", "Данные своего приложения (его ключом): GET — всё, POST {\"key\",\"value\"} (null — удалить). С ключом программы — ?app=<id>.", s.handleAppData},
 		{"/api/window", "POST", "Открыть отдельное окно {\"key\",\"title\",\"url\"} (ПК). {\"ok\":false} — не умею, открывай сам.", s.handleWindow},
 	}
 	regMu.Lock()
@@ -245,6 +250,9 @@ func (s *Service) handleAddons(w http.ResponseWriter, r *http.Request) {
 			err = s.store.Add(req.ID)
 		case "remove":
 			err = s.store.Remove(req.ID)
+			if err == nil && isCustom(req.ID) {
+				err = uninstall(req.ID)
+			}
 		case "star":
 			err = s.store.SetStar(req.ID, req.Value)
 		case "on":

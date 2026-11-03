@@ -215,12 +215,14 @@ func (s *Server) Serve() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/addons/", s.guard(s.addons.Page))
+	// Файлы своих приложений: пропуск — ключ приложения в адресе.
+	mux.HandleFunc("/custom/", s.addons.Files)
 	for _, rt := range s.routes() {
 		mux.HandleFunc(rt.Path, s.guard(rt.h))
 	}
 
 	srv := &http.Server{
-		Handler:           mux,
+		Handler:           addons.CORS(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	s.writeDiscovery()
@@ -237,6 +239,16 @@ func (s *Server) Close() {
 // режиме, из локальной сети — и в любом случае без чужого Origin.
 func (s *Server) guard(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Своё приложение (ТЗ 8): свой ключ, только разрешённые адреса.
+		if addons.IsAppKey(addons.RequestToken(r)) {
+			r2, err := s.addons.Authorize(r)
+			if err != nil {
+				addons.DenyJSON(w, err)
+				return
+			}
+			next(w, r2)
+			return
+		}
 		if !s.allowed(r) {
 			http.Error(w, "запрещено", http.StatusForbidden)
 			return
