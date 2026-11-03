@@ -202,6 +202,17 @@
                 <data android:mimeType="video/*" />
                 <data android:mimeType="audio/*" />
             </intent-filter>
+            <!-- Несколько файлов за раз (галерея: выделил и «Поделиться») —
+                 без этого отдельного фильтра система даже не предлагает
+                 ssh_tunnel как получателя при множественном выборе. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="application/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
         </activity>
         <activity
             android:name=".ClipReadActivity"

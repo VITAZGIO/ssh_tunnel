@@ -33,6 +33,11 @@
   .ico:hover{background:var(--card2);color:var(--text)}
   .ico svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;
            stroke-linecap:round;stroke-linejoin:round}
+  /* Телефон: шапка (логотип, журнал, настройки) в полтора раза крупнее —
+     на маленьком экране мелкие иконки были едва заметны. */
+  body.android .brand svg{width:48px}
+  body.android .ico{width:48px;height:48px}
+  body.android .ico svg{width:26px;height:26px}
 
   .view{flex:1;overflow-y:auto;padding:0 16px 16px;display:none}
   .view.on{display:block}
@@ -505,6 +510,7 @@
   #loginView[hidden]{display:none}
   .loginBox{display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px}
   .loginBox input{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:9px 10px;color:var(--text);font:inherit}
+  .loginBox a{color:var(--accent)}
   #loginHow code{font-family:var(--mono);background:var(--card2);padding:2px 5px;border-radius:5px;word-break:break-all}
   /* Телефон (WebView, мост SSHTunnelAndroid): чего на нём нет — не видно. */
   body.android .desk-only{display:none!important}
@@ -3254,7 +3260,27 @@ function connectEvents(){
       renderLinkBars(s.healthy, s.links);
       showPing(s.pingMs);
     }
+    if(e.kind === 'update') return onUpdateProgress(e);
   };
+}
+
+// onUpdateProgress — скачивание APK на телефоне идёт в фоне (AndroidApi),
+// эти события — единственный признак жизни, пока оно не кончится.
+function onUpdateProgress(e){
+  if(e.error){
+    $('updateDownloadBtn').disabled = false;
+    $('updateNote').textContent = tr('update_download_failed');
+    $('updateOpenBtn').hidden = false;
+    return;
+  }
+  if(e.finished){
+    $('updateDownloadBtn').disabled = false;
+    $('updateNote').textContent = tr('update_installing');
+    return;
+  }
+  const pct = e.total > 0 ? Math.floor(e.done / e.total * 100) + '%'
+    : Math.floor(e.done / (1024 * 1024)) + ' МБ';
+  $('updateNote').textContent = tr('update_downloading') + ' ' + pct;
 }
 
 // Каналы SSH ещё и столбиками: живые зелёные, упавшие серые.
@@ -5083,14 +5109,19 @@ $('updateDownloadBtn').onclick = async () => {
   $('updateDownloadBtn').disabled = true;
   $('updateNote').textContent = tr('update_downloading');
   const r = await api('/api/update/download', {});
-  $('updateDownloadBtn').disabled = false;
   if(r.error){
+    $('updateDownloadBtn').disabled = false;
     $('updateNote').textContent = tr('update_download_failed');
     $('updateOpenBtn').hidden = false;
     return;
   }
-  $('updateNote').textContent = ANDROID ? tr('update_installing')
-    : tr('update_downloaded').replace('{path}', r.path);
+  // ПК/Linux: ответ приходит, когда файл уже скачан и проверен — готово.
+  // Телефон: ответ значит только «начал», дальше — события kind:'update'
+  // (onUpdateProgress), иначе кнопка час висела бы на «скачиваю…» без признаков жизни.
+  if(!ANDROID){
+    $('updateDownloadBtn').disabled = false;
+    $('updateNote').textContent = tr('update_downloaded').replace('{path}', r.path);
+  }
 };
 
 $('updateInstallBtn').onclick = async () => {
@@ -5139,7 +5170,11 @@ async function openWindow(key, title, url){
   if(r && r.ok) return true;
   return !!window.open(url, 'sshtunnel_' + key, 'popup=yes,width=820,height=640');
 }
+// addonsReturnView — откуда открыли «Плагины» (главная или настройки),
+// чтобы «Назад» возвращал туда же, а не всегда на главную.
+let addonsReturnView = 'viewMain';
 function showAddons(open){
+  if(current !== 'viewAddons') addonsReturnView = current;
   $('addonsFrame').src = pageURL('apps.html', open ? {open} : {});
   show('viewAddons');
 }
@@ -5194,7 +5229,7 @@ window.addEventListener('message', ev => {
   if(ev.source !== $('addonsFrame').contentWindow || !ev.data) return;
   if(ev.data.sshtunnel === 'close'){
     $('addonsFrame').src = 'about:blank';
-    show('viewMain');
+    show(addonsReturnView);
     loadAddons();
   }
   if(ev.data.sshtunnel === 'changed') loadAddons();
@@ -5332,7 +5367,7 @@ if(ANDROID){
     }
     if(menuEl){ closeMenu(); return true; }
     if(!$('quickPanel').hidden){ $('quickPanel').hidden = true; return true; }
-    if(current === 'viewAddons'){ show('viewMain'); loadAddons(); return true; }
+    if(current === 'viewAddons'){ show(addonsReturnView); loadAddons(); return true; }
     if(current !== 'viewMain'){
       const back = $(current).querySelector('.head .ico');
       if(back) back.click(); else show('viewMain');

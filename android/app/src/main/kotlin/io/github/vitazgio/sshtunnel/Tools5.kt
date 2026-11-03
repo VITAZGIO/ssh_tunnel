@@ -69,7 +69,7 @@ object Tools5 : mobile.Phone {
                     .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
                     .build(),
                 object : ConnectivityManager.NetworkCallback() {
-                    override fun onAvailable(network: Network) = update()
+                    override fun onAvailable(network: Network) { update(); retrySend() }
                     override fun onLost(network: Network) = update()
                     override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = update()
                 },
@@ -167,17 +167,25 @@ object Tools5 : mobile.Phone {
     }
 
     /** Отправить всем устройствам; ответ — фраза для Toast. */
-    fun push(ctx: Context, kind: String, name: String, mime: String, data: ByteArray): String {
+    fun push(ctx: Context, kind: String, name: String, mime: String, data: ByteArray): String =
+        pushResult(ctx, kind, name, mime, data).second
+
+    /** То же, но вместе с тем, дошло ли хоть до одного устройства — строку
+     * для тоста разбирать на «успех/нет» ненадёжно (она уже переведена). */
+    private fun pushResult(ctx: Context, kind: String, name: String, mime: String, data: ByteArray): Pair<Boolean, String> {
         DeviceApps.init(ctx)
         val r = try {
             JSONObject(mobile.Mobile.clipPush(kind, name, mime, data))
         } catch (e: Exception) {
-            return e.message ?: "?"
+            return false to (e.message ?: "?")
         }
         return when {
-            r.optBoolean("tooBig") -> ctx.getString(R.string.clip_too_big)
-            r.has("error") -> r.optString("error")
-            else -> ctx.getString(R.string.clip_sent, r.optInt("sent"))
+            r.optBoolean("tooBig") -> false to ctx.getString(R.string.clip_too_big)
+            r.has("error") -> false to r.optString("error")
+            else -> {
+                val n = r.optInt("sent")
+                (n > 0) to ctx.getString(R.string.clip_sent, n)
+            }
         }
     }
 
@@ -233,10 +241,44 @@ object Tools5 : mobile.Phone {
         }.start()
     }
 
+    /** То же самое, но для нескольких файлов за раз (галерея: выделил
+     * несколько и «Поделиться» → ACTION_SEND_MULTIPLE). Каждый уходит своим
+     * вызовом clipPush по очереди — протокол его на пачку не рассчитан;
+     * итог — одно общее сообщение, а не тост на файл. */
+    fun sendClipMultiple(a: Activity, uris: List<Uri>) {
+        val ctx = a.applicationContext
+        Thread {
+            var ok = 0
+            var lastMsg = ""
+            for (uri in uris) {
+                val r = readUri(ctx, uri)
+                val (success, msg) = when {
+                    r == null -> false to ctx.getString(R.string.clip_empty)
+                    r.third.size > MAX -> false to ctx.getString(R.string.clip_too_big)
+                    else -> {
+                        val image = r.second == "image/png"
+                        pushResult(ctx, if (image) "image" else "file", r.first, r.second, r.third)
+                    }
+                }
+                lastMsg = msg
+                if (success) ok++
+            }
+            val msg = if (uris.size <= 1 || ok == 0) lastMsg
+                else ctx.getString(R.string.clip_sent_multi, ok, uris.size)
+            main.post { Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show() }
+        }.start()
+    }
+
     const val MAX = 50 * 1024 * 1024
 
-    /** Последний текст буфера, который уже ушёл или пришёл: его не шлём снова. */
+    /** Последний текст буфера, который реально ушёл (sent &gt; 0) или пришёл:
+     * его не шлём снова. Если отправка не удалась (нет сети — «0 устройств»),
+     * lastText остаётся прежним, и как только появится связь, текст уйдёт. */
     @Volatile private var lastText: String? = null
+
+    /** Кого видели последним в фокусе — чтобы повторить отправку, когда
+     * вернётся сеть, даже без повторного переключения на программу. */
+    @Volatile private var lastActivity: java.lang.ref.WeakReference<Activity>? = null
 
     /**
      * Буфер телефона → компьютеры без кнопок. Android (10+) даёт читать буфер
@@ -245,6 +287,7 @@ object Tools5 : mobile.Phone {
      * отправка выключена — ядро отвечает ошибкой, и молчим.
      */
     fun autoSend(a: Activity) {
+        lastActivity = java.lang.ref.WeakReference(a)
         val cb = a.getSystemService(ClipboardManager::class.java) ?: return
         val text = try {
             cb.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(a)?.toString()
@@ -252,8 +295,24 @@ object Tools5 : mobile.Phone {
             null
         }
         if (text.isNullOrEmpty() || text == lastText) return
-        lastText = text
-        val ctx = a.applicationContext
+        send(a.applicationContext, text)
+    }
+
+    /** Пытается заново отправить то, что в буфере, когда появилась сеть —
+     * без этого «0 устройств» офлайн так и оставалось висеть недошедшим. */
+    fun retrySend() {
+        val a = lastActivity?.get() ?: return
+        val cb = a.getSystemService(ClipboardManager::class.java) ?: return
+        val text = try {
+            cb.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(a)?.toString()
+        } catch (_: Exception) {
+            null
+        }
+        if (text.isNullOrEmpty() || text != lastText) return
+        send(a.applicationContext, text)
+    }
+
+    private fun send(ctx: Context, text: String) {
         Thread {
             DeviceApps.init(ctx)
             val r = try {
@@ -262,7 +321,12 @@ object Tools5 : mobile.Phone {
                 return@Thread
             }
             val n = r.optInt("sent")
-            if (n > 0) main.post { Toast.makeText(ctx, ctx.getString(R.string.clip_sent, n), Toast.LENGTH_SHORT).show() }
+            // Только при успехе считаем текст «уже отправленным» — иначе при
+            // восстановлении сети повторить будет нечего (см. retrySend).
+            if (n > 0) {
+                lastText = text
+                main.post { Toast.makeText(ctx, ctx.getString(R.string.clip_sent, n), Toast.LENGTH_SHORT).show() }
+            }
         }.start()
     }
 }
@@ -272,10 +336,17 @@ class ClipShareActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val i = intent
-        @Suppress("DEPRECATION")
-        val uri = if (Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-        else i.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
-        Tools5.sendClip(this, i.getCharSequenceExtra(Intent.EXTRA_TEXT), uri)
+        if (i.action == Intent.ACTION_SEND_MULTIPLE) {
+            @Suppress("DEPRECATION")
+            val uris = if (Build.VERSION.SDK_INT >= 33) i.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            else i.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+            if (!uris.isNullOrEmpty()) Tools5.sendClipMultiple(this, uris)
+        } else {
+            @Suppress("DEPRECATION")
+            val uri = if (Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            else i.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+            Tools5.sendClip(this, i.getCharSequenceExtra(Intent.EXTRA_TEXT), uri)
+        }
         finish()
     }
 }
