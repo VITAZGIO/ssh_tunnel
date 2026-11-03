@@ -333,4 +333,10 @@
     <string name="app_profile">Профиль %1$d</string>
     <string name="app_profile_del">Удалить «%1$s» со всеми его настройками и серверами?</string>
     <string name="app_profile_del_yes">Удалить</string>
+    <!-- Общий экран (AndroidApi) -->
+    <string name="api_not_on_phone">На телефоне этого нет</string>
+    <string name="vpn_permission_needed">Открой приложение, чтобы разрешить VPN</string>
+    <string name="vpn_permission_denied">Без разрешения на VPN туннель не включить</string>
+    <string name="applies_on_reconnect">подействует при следующем подключении</string>
+    <string name="key_bad">Это не приватный ключ: он начинается с «-----BEGIN»</string>
 </resources>

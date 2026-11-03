@@ -50,6 +50,14 @@ class TunnelService : VpnService(), Callbacks {
 
         var onUpdate: (() -> Unit)? = null
 
+        /** Общий экран (AndroidApi): состояние и строки журнала. */
+        @Volatile var onApiUpdate: (() -> Unit)? = null
+        @Volatile var onApiLog: ((String) -> Unit)? = null
+
+        /** Внешний адрес через туннель (JSON, см. mobile.Tunnel.CheckIP). */
+        fun checkIP(): String =
+            current?.tunnel?.checkIP() ?: """{"error":"туннель не запущен"}"""
+
         /** Работающая служба — через неё экран запускает тест скорости. */
         @Volatile private var current: TunnelService? = null
 
@@ -222,7 +230,7 @@ class TunnelService : VpnService(), Callbacks {
             }
             statsJson = try { tunnel.statsJSON() } catch (e: Exception) { "{}" }
             accumulateBlockedTotal()
-            onUpdate?.invoke()
+            fireUpdate()
             ticker.postDelayed(this, 1500)
         }
     }
@@ -258,7 +266,7 @@ class TunnelService : VpnService(), Callbacks {
                         else -> "обход блокировок выключен — сайты идут напрямую, сеть устройств работает"
                     }
                 )
-                onUpdate?.invoke()
+                fireUpdate()
                 return START_STICKY
             }
             // Выключенный туннель — поднимаем с выбранными режимами, как и
@@ -672,7 +680,8 @@ class TunnelService : VpnService(), Callbacks {
             log.addLast(line)
             while (log.size > 200) log.removeFirst()
         }
-        onUpdate?.invoke()
+        onApiLog?.invoke(line)
+        fireUpdate()
     }
 
     /**
@@ -687,10 +696,15 @@ class TunnelService : VpnService(), Callbacks {
         ""
     }
 
+    private fun fireUpdate() {
+        onUpdate?.invoke()
+        onApiUpdate?.invoke()
+    }
+
     private fun report(newState: String, newDetail: String) {
         state = newState
         detail = newDetail
-        onUpdate?.invoke()
+        fireUpdate()
         if (newState != "stopped") {
             notificationManager().notify(NOTIFICATION_ID, notification(describe(newState, newDetail)))
         }

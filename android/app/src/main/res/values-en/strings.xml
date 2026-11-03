@@ -331,4 +331,10 @@
     <string name="app_profile">Profile %1$d</string>
     <string name="app_profile_del">Delete “%1$s” with all its settings and servers?</string>
     <string name="app_profile_del_yes">Delete</string>
+    <!-- Shared screen (AndroidApi) -->
+    <string name="api_not_on_phone">Not available on the phone</string>
+    <string name="vpn_permission_needed">Open the app to allow the VPN</string>
+    <string name="vpn_permission_denied">The tunnel can't start without VPN permission</string>
+    <string name="applies_on_reconnect">takes effect on the next connection</string>
+    <string name="key_bad">This is not a private key: it starts with “-----BEGIN”</string>
 </resources>
