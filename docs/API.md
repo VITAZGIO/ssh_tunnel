@@ -156,3 +156,32 @@ URL=$(jq -r .url $A); TOK=$(jq -r .token $A)
 curl -s -H "Authorization: Bearer $TOK" $URL/api/state
 curl -s -H "Authorization: Bearer $TOK" -d '{"mesh":true}' $URL/api/state
 ```
+
+## Календарь
+
+Отвечает, только пока добавлено и включено приложение «Календарь» (иначе
+404). Пароль приложения Nextcloud в ответах не бывает никогда.
+
+- `GET /api/calendar` — аккаунт (`url`, `user`, `contacts`), `hasPassword`,
+  календари (`href`, `name`, `color`, `readOnly`, `shown`, `count`), `busy`,
+  `lastSync`, `lastError`, `conflict`, `widget`, `rev` (растёт на каждом
+  изменении данных).
+- `POST /api/calendar/account` — `{"url","user","password","contacts":bool}`:
+  проверить вход и сохранить (`password` пустой — прежний);
+  `{"forget":true}` — отключить и забыть скачанное.
+- `POST /api/calendar/sync` — сверить сейчас (ответ — после сверки).
+- `GET /api/calendar/events?from=…&to=…` — события видимых календарей,
+  повторы развёрнуты. `from`/`to` — дата `2026-11-01` или RFC 3339; `&all=1`
+  — и скрытых.
+- `POST /api/calendar/event` — `{"cal","href","title","start","end","allDay","location","description"}`:
+  без `href` — новое событие в календаре `cal`. Время — RFC 3339; у события
+  на весь день — полночь UTC, `end` — следующий день после последнего. Ответ
+  `{"ok":true,"href"}` или `{"error","conflict":true}` — событие изменили в
+  другом месте, показана версия сервера.
+- `POST /api/calendar/delete` — `{"href"}` (у повторяющегося — вся серия).
+- `POST /api/calendar/settings` — `{"cal","shown":bool}` или `{"widget":bool}`.
+
+```powershell
+Invoke-RestMethod "$($a.url)/api/calendar/events?from=2026-11-01&to=2026-11-08" -Headers $h |
+  Select-Object -Expand events | Format-Table start, title
+```

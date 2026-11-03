@@ -139,9 +139,41 @@ type Route struct {
 
 // Routes — адреса API. Охрану (ключ) ставит тот, кто их подключает.
 func (s *Service) Routes() []Route {
-	return []Route{
+	rs := []Route{
 		{"/api/addons", "GET, POST", "Дополнительные приложения: каталог и добавленные на этом устройстве. POST {\"op\":\"add|remove|star|on|seen\",\"id\",\"value\":bool}.", s.handleAddons},
 		{"/api/window", "POST", "Открыть отдельное окно {\"key\",\"title\",\"url\"} (ПК). {\"ok\":false} — не умею, открывай сам.", s.handleWindow},
+	}
+	regMu.Lock()
+	defer regMu.Unlock()
+	for _, ar := range appRoutes {
+		id, h := ar.id, ar.H
+		rt := ar.Route
+		rt.H = func(w http.ResponseWriter, r *http.Request) {
+			if !s.Active(id) {
+				http.Error(w, "приложение не добавлено или выключено", http.StatusNotFound)
+				return
+			}
+			h(w, r)
+		}
+		rs = append(rs, rt)
+	}
+	return rs
+}
+
+type appRoute struct {
+	id string
+	Route
+}
+
+var appRoutes []appRoute
+
+// RegisterRoutes — свои адреса API приложения id (зовётся из init пакета
+// приложения). Отвечают, только пока приложение работает (Active).
+func RegisterRoutes(id string, rs ...Route) {
+	regMu.Lock()
+	defer regMu.Unlock()
+	for _, r := range rs {
+		appRoutes = append(appRoutes, appRoute{id, r})
 	}
 }
 

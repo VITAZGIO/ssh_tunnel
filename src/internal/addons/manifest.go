@@ -59,6 +59,19 @@ var catalog = []Manifest{
 		Permissions: []string{},
 		Dev:         true,
 	},
+	{
+		ID:   "calendar",
+		Name: map[string]string{"ru": "Календарь", "en": "Calendar"},
+		Icon: "calendar_month",
+		Hint: map[string]string{
+			"ru": "Календари Nextcloud без DAVx5: сверка раз в 15 минут через сеть устройств. Нужны адрес Nextcloud, логин и пароль приложения. На телефоне события видны в системном календаре.",
+			"en": "Nextcloud calendars without DAVx5: synced every 15 minutes over the device network. Needs the Nextcloud address, login and an app password. On the phone events show up in the system calendar.",
+		},
+		Book:        "app-calendar",
+		Background:  true,
+		Page:        "addons/calendar.html",
+		Permissions: []string{},
+	},
 }
 
 // showDev — показывать ли образцы. В релизе версия проставлена сборкой.

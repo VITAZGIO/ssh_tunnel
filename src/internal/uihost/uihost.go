@@ -24,6 +24,7 @@ import (
 
 	"sshtunnel/internal/addons"
 	"sshtunnel/internal/book"
+	"sshtunnel/internal/calendar"
 	"sshtunnel/internal/uiassets"
 )
 
@@ -47,6 +48,9 @@ func Start(dir string) (*Host, error) {
 	}
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
+	// Календарь: данные — до запуска модулей приложений; как ходить к
+	// Nextcloud, задаёт ядро телефона (calendar.SetDial в android/core/mobile).
+	calendar.Init(dir)
 	h := &Host{ln: ln, token: hex.EncodeToString(b), svc: addons.New(dir),
 		subs: map[chan []byte]struct{}{}}
 

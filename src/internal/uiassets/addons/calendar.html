@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Календарь</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../pages.css">
+<style>
+  body{background:transparent}
+  .page{height:100%}
+  .bar{display:flex;align-items:center;gap:6px;padding:10px 14px;flex:none;flex-wrap:wrap}
+  .bar .t{font-weight:600;font-size:15px;flex:1;min-width:120px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{border:0;background:var(--card);padding:5px 10px;cursor:pointer;font-size:13px}
+  .seg button.on{background:var(--accent-muted);color:#fff}
+  .status{padding:0 14px 8px;font-size:12px;color:var(--dim)}
+  .status.err{color:var(--err)}
+  .status.warn{color:var(--warn)}
+  .body{padding:0 14px 16px}
+
+  /* Месяц. */
+  .month{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+  .wd{font-size:12px;color:var(--dim);text-align:center}
+  .day{background:var(--card);border:1px solid var(--line);border-radius:8px;min-height:78px;padding:4px;
+       cursor:pointer;overflow:hidden;display:flex;flex-direction:column;gap:2px}
+  .day.out{opacity:.45}
+  .day.today{border-color:var(--accent)}
+  .day .n{font-size:12px;color:var(--dim)}
+  .ev{font-size:12px;border-radius:5px;padding:1px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+      background:var(--card2);border-left:3px solid var(--c,var(--accent));cursor:pointer}
+  .more{font-size:11px;color:var(--dim)}
+
+  /* Неделя и список. */
+  .dayrow{margin-bottom:12px}
+  .dayrow h4{margin:0 0 6px;font-size:13px;color:var(--dim);font-weight:600}
+  .dayrow.today h4{color:var(--accent)}
+  .item{display:flex;gap:10px;align-items:baseline;background:var(--card);border:1px solid var(--line);
+        border-left:4px solid var(--c,var(--accent));border-radius:8px;padding:7px 10px;margin-bottom:5px;cursor:pointer}
+  .item .tm{font-size:12px;color:var(--dim);min-width:84px;font-variant-numeric:tabular-nums}
+  .item .ti{flex:1;min-width:0}
+  .item .lo{font-size:12px;color:var(--dim)}
+
+  /* Формы. */
+  .form{display:flex;flex-direction:column;gap:10px;max-width:520px}
+  .form label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--dim)}
+  .form label.ck{flex-direction:row;align-items:center;gap:8px;color:var(--text)}
+  input[type=text],input[type=password],input[type=url],input[type=date],input[type=time],select,textarea{
+    font:inherit;color:var(--text);background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:7px 9px}
+  textarea{min-height:70px;resize:vertical}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .row > *{flex:1;min-width:120px}
+  .btns{display:flex;gap:8px;flex-wrap:wrap}
+  .btn.danger{background:var(--err);color:#fff}
+  .cals{display:flex;flex-direction:column;gap:6px}
+  .cal{display:flex;align-items:center;gap:8px}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--c,var(--accent));flex:none}
+  .sec{margin:18px 0 8px;font-weight:600}
+
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9;padding:12px}
+  .modal .card{width:100%;max-width:460px;max-height:100%;overflow:auto}
+
+  /* Виджет на рабочем столе ПК и мини-вид. */
+  html.widget body{background:var(--bg)}
+  html.widget .wh{display:flex;align-items:center;gap:6px;padding:8px 10px;cursor:move;user-select:none}
+  html.widget .wh .t{flex:1;font-weight:600}
+  html.widget .body{padding:0 10px 10px}
+  html.widget .item{padding:5px 8px}
+  html.widget .item .tm{min-width:70px}
+</style>
+</head>
+<body>
+<div class="page" id="page"></div>
+<script src="../pages.js"></script>
+<script>
+// Свои значки — от страницы приложения на уровень выше (uiassets/icons).
+const ic = n => `<span class="mi" style="--i:url(../icons/${esc(n)}.svg)"></span>`;
+const WIDGET = Q.get('widget') === '1';
+if(WIDGET) document.documentElement.classList.add('widget');
+
+let st = null;           // GET /api/calendar
+let view = 'month';      // month | week | list | settings
+let cursor = startOfDay(new Date());
+let events = [];
+let platform = '';
+try { view = localStorage.getItem('cal:view') || 'month'; } catch(e) {}
+
+function startOfDay(d){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function addDays(d, n){ return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
+function ymd(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+const LOC = LANG === 'en' ? 'en-GB' : 'ru-RU';
+const hm = d => d.toLocaleTimeString(LOC, {hour:'2-digit', minute:'2-digit'});
+// Событие на весь день хранится как полночь UTC: дату берём по UTC.
+function evDay(e, end){
+  const t = new Date(end ? e.end : e.start);
+  if(e.allDay){ const d = new Date(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()); return end ? addDays(d, -1) : d; }
+  return startOfDay(end && t > new Date(e.start) ? new Date(t - 1) : t);
+}
+function onDay(e, day){ return evDay(e) <= day && evDay(e, true) >= day; }
+function timeText(e){
+  if(e.allDay) return L('весь день', 'all day');
+  return hm(new Date(e.start)) + '–' + hm(new Date(e.end));
+}
+
+async function load(){
+  st = await api('/api/calendar');
+  if(!platform){
+    try { platform = (await api('/api/addons')).platform || ''; } catch(e) {}
+  }
+  if(!st.account || !st.account.url) view = WIDGET ? 'none' : 'settings';
+  await loadEvents();
+  render();
+}
+
+function range(){
+  if(WIDGET) return [startOfDay(new Date()), addDays(startOfDay(new Date()), 8)];
+  if(view === 'week'){
+    const off = (cursor.getDay() + 6) % 7;
+    const a = addDays(cursor, -off);
+    return [a, addDays(a, 7)];
+  }
+  if(view === 'list') return [cursor, addDays(cursor, 60)];
+  const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+  const a = addDays(first, -((first.getDay() + 6) % 7));
+  return [a, addDays(a, 42)];
+}
+
+async function loadEvents(){
+  if(!st.account || !st.account.url){ events = []; return; }
+  const [a, b] = range();
+  const r = await api('/api/calendar/events?from=' + encodeURIComponent(a.toISOString()) + '&to=' + encodeURIComponent(b.toISOString()));
+  events = r.events || [];
+}
+
+function statusLine(){
+  if(!st.account || !st.account.url) return '';
+  if(st.conflict) return `<div class="status warn">${esc(st.conflict)}</div>`;
+  if(st.lastError) return `<div class="status err">${esc(st.lastError)}</div>`;
+  if(st.busy) return `<div class="status">${L('Сверяюсь с сервером…', 'Syncing…')}</div>`;
+  if(st.lastSync && !st.lastSync.startsWith('0001'))
+    return `<div class="status">${L('Сверено', 'Synced')} ${new Date(st.lastSync).toLocaleString(LOC, {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</div>`;
+  return '';
+}
+
+function title(){
+  if(view === 'week'){
+    const [a, b] = range();
+    return a.toLocaleDateString(LOC, {day:'numeric', month:'short'}) + ' – ' + addDays(b, -1).toLocaleDateString(LOC, {day:'numeric', month:'short', year:'numeric'});
+  }
+  if(view === 'list') return L('Ближайшие события', 'Upcoming');
+  if(view === 'settings') return L('Подключение', 'Connection');
+  const s = cursor.toLocaleDateString(LOC, {month:'long', year:'numeric'});
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function render(){
+  if(WIDGET) return renderWidget();
+  const seg = ['month', 'week', 'list'].map(v =>
+    `<button data-v="${v}" class="${view === v ? 'on' : ''}">${{month: L('Месяц','Month'), week: L('Неделя','Week'), list: L('Список','List')}[v]}</button>`).join('');
+  const nav = view === 'settings' ? '' :
+    `<button class="ico" id="prev">${ic('chevron_left')}</button><button class="tb" id="todayBtn">${L('Сегодня','Today')}</button><button class="ico" id="next">${ic('chevron_right')}</button>`;
+  $('page').innerHTML = `
+    <div class="bar">
+      ${EMBED ? '' : `<button class="ico" id="back" title="${L('Назад','Back')}">${ic('arrow_back')}</button>`}
+      <span class="t">${esc(title())}</span>
+      ${nav}
+      ${st.account && st.account.url ? `<span class="seg" id="seg">${seg}</span>
+      <button class="ico" id="add" title="${L('Новое событие','New event')}">${ic('add')}</button>
+      <button class="ico" id="sync" title="${L('Сверить сейчас','Sync now')}">${ic('sync')}</button>` : ''}
+      <button class="ico ${view === 'settings' ? 'on' : ''}" id="set" title="${L('Подключение','Connection')}">${ic('settings')}</button>
+      ${!ANDROID && !SOLO && !EMBED ? `<button class="ico" id="win" title="${L('В отдельном окне','Separate window')}">${ic('open_in_new')}</button>` : ''}
+      ${EMBED ? '' : `<button class="ico" id="help" title="${L('Книга','Book')}">${ic('help')}</button>`}
+    </div>
+    ${statusLine()}
+    <div class="body" id="body"></div>`;
+  // Внутри страницы приложений «назад», «в окне» и Книга — в её шапке.
+  if($('back')) $('back').onclick = closePage;
+  if($('help')) $('help').onclick = () => openBook('app-calendar');
+  $('set').onclick = () => { view = view === 'settings' ? 'month' : 'settings'; refresh(); };
+  if($('win')) $('win').onclick = () => openWindow('calendar', L('Календарь','Calendar'),
+    pageURL('addons/calendar.html', {solo: '1', key: 'calendar'})).then(ok => { if(ok) closePage(); });
+  if($('seg')) $('seg').onclick = ev => { const v = ev.target.dataset.v; if(v){ view = v; try{localStorage.setItem('cal:view', v);}catch(e){} refresh(); } };
+  if($('add')) $('add').onclick = () => editor(null, cursor);
+  if($('sync')) $('sync').onclick = syncNow;
+  if($('prev')){
+    $('prev').onclick = () => move(-1);
+    $('next').onclick = () => move(1);
+    $('todayBtn').onclick = () => { cursor = startOfDay(new Date()); refresh(); };
+  }
+  ({month: renderMonth, week: renderWeek, list: renderList, settings: renderSettings})[view]();
+}
+
+function move(n){
+  if(view === 'month') cursor = new Date(cursor.getFullYear(), cursor.getMonth() + n, 1);
+  else if(view === 'week') cursor = addDays(cursor, 7 * n);
+  else cursor = addDays(cursor, 30 * n);
+  refresh();
+}
+
+async function refresh(){ await loadEvents(); render(); }
+
+async function syncNow(){
+  st.busy = true; render();
+  const r = await api('/api/calendar/sync', {});
+  if(r.error){ st = await api('/api/calendar'); } else st = r;
+  await refresh();
+}
+
+function evChip(e){
+  return `<div class="ev" style="--c:${esc(e.color || '')}" data-k="${esc(key(e))}">${e.allDay ? '' : hm(new Date(e.start)) + ' '}${esc(e.title || L('(без названия)','(untitled)'))}</div>`;
+}
+const key = e => e.href + '|' + e.start;
+function byKey(k){ return events.find(e => key(e) === k); }
+function bindEvents(root){
+  root.querySelectorAll('[data-k]').forEach(el => el.onclick = ev => { ev.stopPropagation(); editor(byKey(el.dataset.k)); });
+}
+
+function renderMonth(){
+  const [a] = range();
+  const today = startOfDay(new Date());
+  let h = '';
+  for(let i = 0; i < 7; i++) h += `<div class="wd">${addDays(a, i).toLocaleDateString(LOC, {weekday:'short'})}</div>`;
+  for(let i = 0; i < 42; i++){
+    const d = addDays(a, i);
+    const day = events.filter(e => onDay(e, d));
+    h += `<div class="day ${d.getMonth() !== cursor.getMonth() ? 'out' : ''} ${+d === +today ? 'today' : ''}" data-d="${ymd(d)}">
+      <span class="n">${d.getDate()}</span>${day.slice(0, 3).map(evChip).join('')}
+      ${day.length > 3 ? `<span class="more">+${day.length - 3}</span>` : ''}</div>`;
+  }
+  $('body').innerHTML = `<div class="month">${h}</div>`;
+  $('body').querySelectorAll('[data-d]').forEach(el => el.onclick = () => {
+    const [y, m, dd] = el.dataset.d.split('-').map(Number);
+    cursor = new Date(y, m - 1, dd); view = 'week'; refresh();
+  });
+  bindEvents($('body'));
+}
+
+function dayList(a, n, skipEmpty){
+  const today = startOfDay(new Date());
+  let h = '';
+  for(let i = 0; i < n; i++){
+    const d = addDays(a, i);
+    const day = events.filter(e => onDay(e, d));
+    if(skipEmpty && !day.length) continue;
+    const name = d.toLocaleDateString(LOC, {weekday:'long', day:'numeric', month:'long'});
+    h += `<div class="dayrow ${+d === +today ? 'today' : ''}"><h4>${esc(name)}</h4>` +
+      (day.length ? day.map(e => `<div class="item" style="--c:${esc(e.color || '')}" data-k="${esc(key(e))}">
+        <span class="tm">${timeText(e)}</span><span class="ti">${esc(e.title || L('(без названия)','(untitled)'))}${e.recurring ? ' ↻' : ''}
+        ${e.location ? `<div class="lo">${esc(e.location)}</div>` : ''}</span></div>`).join('')
+        : `<div class="hint">${L('Нет событий', 'No events')}</div>`) + `</div>`;
+  }
+  return h || `<div class="empty">${L('Нет событий', 'No events')}</div>`;
+}
+
+function renderWeek(){ const [a] = range(); $('body').innerHTML = dayList(a, 7, false); bindEvents($('body')); }
+function renderList(){ $('body').innerHTML = dayList(cursor, 60, true); bindEvents($('body')); }
+
+function renderSettings(){
+  const acc = st.account || {};
+  const cals = (st.calendars || []).map(c => `<label class="cal ck"><input type="checkbox" data-cal="${esc(c.href)}" ${c.shown ? 'checked' : ''}>
+    <span class="dot" style="--c:${esc(c.color || '')}"></span>${esc(c.name)}${c.contacts ? ' — ' + L('контакты','contacts') : ''}
+    <span class="hint">${c.count}${c.readOnly ? ', ' + L('только чтение','read-only') : ''}</span></label>`).join('');
+  $('body').innerHTML = `<div class="form">
+    <div class="hint">${L('Адрес Nextcloud лучше брать в сети устройств (например http://ubuntu.mesh:8080): так он доступен и дома, и вне дома. Пароль — «пароль приложения» из настроек безопасности Nextcloud, хранится зашифрованным.',
+      'Use the Nextcloud address on the device network (e.g. http://ubuntu.mesh:8080) so it works at home and away. The password is a Nextcloud app password; it is stored encrypted.')}</div>
+    <label>${L('Адрес Nextcloud','Nextcloud address')}<input type="url" id="fUrl" value="${esc(acc.url || '')}" placeholder="http://ubuntu.mesh:8080"></label>
+    <label>${L('Логин','Login')}<input type="text" id="fUser" value="${esc(acc.user || '')}" autocomplete="username"></label>
+    <label>${L('Пароль приложения','App password')}<input type="password" id="fPass" placeholder="${st.hasPassword ? L('сохранён — оставь пустым','saved — leave empty') : ''}" autocomplete="new-password"></label>
+    <label class="ck"><input type="checkbox" id="fContacts" ${acc.contacts ? 'checked' : ''}>${L('Ещё и контакты (CardDAV)', 'Contacts too (CardDAV)')}</label>
+    <div class="btns"><button class="btn primary" id="fSave">${L('Подключить','Connect')}</button>
+      ${acc.url ? `<button class="btn danger" id="fForget">${L('Отключить','Disconnect')}</button>` : ''}</div>
+    <div class="status" id="fMsg"></div>
+    ${cals ? `<div class="sec">${L('Показывать','Show')}</div><div class="cals">${cals}</div>` : ''}
+    ${platform === 'windows' && acc.url ? `<div class="sec">${L('Виджет на рабочем столе','Desktop widget')}</div>
+      <label class="ck"><input type="checkbox" id="fWidget" ${st.widget ? 'checked' : ''}>${L('Показывать при запуске программы','Show when the program starts')}</label>
+      <div class="btns"><button class="btn" id="fWidgetOpen">${L('Открыть виджет','Open widget')}</button></div>` : ''}
+  </div>`;
+  $('fSave').onclick = async () => {
+    $('fMsg').className = 'status'; $('fMsg').textContent = L('Проверяю вход…', 'Checking login…');
+    const contacts = $('fContacts').checked;
+    const r = await api('/api/calendar/account', {url: $('fUrl').value.trim(), user: $('fUser').value.trim(), password: $('fPass').value, contacts});
+    if(r.error){ $('fMsg').className = 'status err'; $('fMsg').textContent = r.error; return; }
+    st = r;
+    // Телефон: свой аккаунт в системе, разрешения на календарь (и контакты).
+    if(ANDROID && window.SSHTunnelAndroid.calendarSetup) window.SSHTunnelAndroid.calendarSetup(contacts);
+    view = 'month'; refresh();
+  };
+  if($('fForget')) $('fForget').onclick = async () => {
+    if(!confirm(L('Отключить календарь? Скачанные события удалятся с этого устройства (на сервере останутся).',
+      'Disconnect? Downloaded events are removed from this device (they stay on the server).'))) return;
+    st = await api('/api/calendar/account', {forget: true});
+    if(ANDROID && window.SSHTunnelAndroid.calendarForget) window.SSHTunnelAndroid.calendarForget();
+    render();
+  };
+  $('body').querySelectorAll('[data-cal]').forEach(el => el.onchange = async () => {
+    st = await api('/api/calendar/settings', {cal: el.dataset.cal, shown: el.checked});
+  });
+  if($('fWidget')) $('fWidget').onchange = async () => {
+    st = await api('/api/calendar/settings', {widget: $('fWidget').checked});
+    if($('fWidget').checked) openWidget();
+  };
+  if($('fWidgetOpen')) $('fWidgetOpen').onclick = openWidget;
+}
+
+function openWidget(){
+  openWindow('calendar-widget', L('Календарь','Calendar'), pageURL('addons/calendar.html', {widget: '1', solo: '1', key: 'calendar-widget'}));
+}
+
+// ── редактор события ──────────────────────────────────────────────────────
+function editor(e, day){
+  const writable = (st.calendars || []).filter(c => !c.contacts && !c.readOnly);
+  const ro = e && e.readOnly;
+  if(!e && !writable.length){ alert(L('Нет календарей, в которые можно писать.', 'No writable calendars.')); return; }
+  const d0 = e ? new Date(e.start) : (() => { const d = new Date(day || new Date()); d.setHours(new Date().getHours() + 1, 0, 0, 0); return d; })();
+  const d1 = e ? new Date(e.end) : new Date(d0.getTime() + 3600e3);
+  const allDay = e ? e.allDay : false;
+  const sd = allDay ? evDay(e) : d0, ed = allDay ? evDay(e, true) : d1;
+  const t = d => String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  const m = document.createElement('div');
+  m.className = 'modal';
+  m.innerHTML = `<div class="card"><div class="form">
+    <label>${L('Название','Title')}<input type="text" id="eTitle" value="${esc(e ? e.title : '')}" ${ro ? 'disabled' : ''}></label>
+    ${e ? '' : `<label>${L('Календарь','Calendar')}<select id="eCal">${writable.map(c => `<option value="${esc(c.href)}">${esc(c.name)}</option>`).join('')}</select></label>`}
+    <label class="ck"><input type="checkbox" id="eAll" ${allDay ? 'checked' : ''} ${ro ? 'disabled' : ''}>${L('Весь день','All day')}</label>
+    <label>${L('Начало','Start')}<div class="row"><input type="date" id="eSD" value="${ymd(sd)}"><input type="time" id="eST" value="${t(d0)}"></div></label>
+    <label>${L('Конец','End')}<div class="row"><input type="date" id="eED" value="${ymd(ed)}"><input type="time" id="eET" value="${t(d1)}"></div></label>
+    <label>${L('Место','Location')}<input type="text" id="eLoc" value="${esc(e && e.location || '')}"></label>
+    <label>${L('Описание','Description')}<textarea id="eDesc">${esc(e && e.description || '')}</textarea></label>
+    ${e && e.recurring ? `<div class="hint">${L('Повторяющееся событие: правка и удаление меняют всю серию.', 'Recurring event: edit and delete change the whole series.')}</div>` : ''}
+    ${ro ? `<div class="hint">${L('Календарь только для чтения.','Read-only calendar.')}</div>` : ''}
+    <div class="status err" id="eMsg"></div>
+    <div class="btns">
+      ${ro ? '' : `<button class="btn primary" id="eSave">${L('Сохранить','Save')}</button>`}
+      ${e && !ro ? `<button class="btn danger" id="eDel">${L('Удалить','Delete')}</button>` : ''}
+      <button class="btn" id="eCancel">${L('Закрыть','Close')}</button>
+    </div></div></div>`;
+  document.body.appendChild(m);
+  const allBox = m.querySelector('#eAll');
+  const sync = () => { m.querySelector('#eST').hidden = m.querySelector('#eET').hidden = allBox.checked; };
+  allBox.onchange = sync; sync();
+  const close = () => m.remove();
+  m.querySelector('#eCancel').onclick = close;
+  m.onclick = ev => { if(ev.target === m) close(); };
+  if(m.querySelector('#eSave')) m.querySelector('#eSave').onclick = async () => {
+    const all = allBox.checked;
+    const at = (dd, tt) => { const [y, mo, d] = m.querySelector(dd).value.split('-').map(Number);
+      if(all) return new Date(Date.UTC(y, mo - 1, d));
+      const [h, mi] = (m.querySelector(tt).value || '00:00').split(':').map(Number); return new Date(y, mo - 1, d, h, mi); };
+    let start = at('#eSD', '#eST'), end = at('#eED', '#eET');
+    if(all) end = new Date(end.getTime() + 86400e3); // DTEND весь день — следующий день
+    const r = await api('/api/calendar/event', {
+      cal: e ? e.cal : m.querySelector('#eCal').value, href: e ? e.href : '',
+      title: m.querySelector('#eTitle').value, allDay: all,
+      start: start.toISOString(), end: end.toISOString(),
+      location: m.querySelector('#eLoc').value, description: m.querySelector('#eDesc').value});
+    if(r.error){ m.querySelector('#eMsg').textContent = r.error; if(r.conflict){ st = await api('/api/calendar'); await refresh(); } return; }
+    close(); st = await api('/api/calendar'); refresh();
+  };
+  if(m.querySelector('#eDel')) m.querySelector('#eDel').onclick = async () => {
+    if(!confirm(e.recurring ? L('Удалить всю серию повторов?', 'Delete the whole series?') : L('Удалить событие?', 'Delete the event?'))) return;
+    const r = await api('/api/calendar/delete', {href: e.href});
+    if(r.error){ m.querySelector('#eMsg').textContent = r.error; return; }
+    close(); st = await api('/api/calendar'); refresh();
+  };
+}
+
+// ── виджет ────────────────────────────────────────────────────────────────
+function renderWidget(){
+  const now = new Date();
+  $('page').innerHTML = `<div class="wh" id="wh">
+      <span class="t">${esc(now.toLocaleDateString(LOC, {weekday:'long', day:'numeric', month:'long'}))}</span>
+      <button class="ico" id="wOpen" title="${L('Открыть календарь','Open calendar')}">${ic('open_in_new')}</button>
+      <button class="ico" id="wSync" title="${L('Сверить сейчас','Sync now')}">${ic('sync')}</button>
+    </div>${statusLine()}
+    <div class="body" id="body">${st.account && st.account.url ? dayList(startOfDay(now), 8, true)
+      : `<div class="empty">${L('Календарь не подключён', 'Calendar not connected')}</div>`}</div>`;
+  // Окно без рамки таскается за заголовок (sshtunnelDrag даёт нативное окно ПК).
+  $('wh').onmousedown = ev => { if(ev.button === 0 && !ev.target.closest('button') && window.sshtunnelDrag) window.sshtunnelDrag(); };
+  $('wSync').onclick = async () => { await api('/api/calendar/sync', {}); load(); };
+  $('wOpen').onclick = () => openWindow('calendar', L('Календарь','Calendar'), pageURL('addons/calendar.html', {solo: '1', key: 'calendar'}));
+  bindEvents($('body'));
+}
+
+// Свежие данные: после сверки в фоне номер версии растёт.
+setInterval(async () => {
+  if(document.querySelector('.modal')) return;
+  try {
+    const s = await api('/api/calendar');
+    if(st && (s.rev !== st.rev || s.busy !== st.busy || s.lastSync !== st.lastSync)){
+      st = s;
+      if(view !== 'settings') await refresh();
+    }
+  } catch(e) {}
+}, WIDGET ? 60000 : 20000);
+// Виджет: смена дня в полночь.
+if(WIDGET) setInterval(render, 10 * 60000);
+
+load();
+</script>
+</body>
+</html>

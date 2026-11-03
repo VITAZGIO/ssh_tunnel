@@ -43,4 +43,8 @@
     <string name="applies_on_reconnect">подействует при следующем подключении</string>
     <string name="key_bad">Это не приватный ключ: он начинается с «-----BEGIN»</string>
     <string name="ui_failed">Экран не запустился. Туннель можно включить плиткой в шторке; переустановка приложения обычно помогает.</string>
+    <!-- Календарь (ТЗ 7): аккаунт и виджет. -->
+    <string name="calendar_account">Календарь ssh_tunnel</string>
+    <string name="calendar_widget_desc">Ближайшие события из Nextcloud</string>
+    <string name="calendar_widget_empty">Нет событий на неделе</string>
 </resources>

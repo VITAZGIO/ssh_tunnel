@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"sshtunnel/internal/addons"
+	"sshtunnel/internal/calendar"
 	"sshtunnel/internal/app"
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/core"
@@ -104,6 +105,12 @@ func NewOn(a *App, addr string) (*Server, error) {
 		return nil, fmt.Errorf("не могу занять адрес %s: %w", addr, err)
 	}
 	dg := newDiag(a)
+	// Календарь ходит к Nextcloud через ядро (сеть устройств); данные — до
+	// запуска модулей приложений.
+	calendar.Init(config.Dir())
+	if a != nil {
+		calendar.SetDial(a.DialSelf)
+	}
 	s := &Server{app: a, token: hex.EncodeToString(tok), ln: ln, bootFlags: []string{"-web"},
 		addons: addons.New(config.Dir()), diag: dg}
 	if dg != nil {
