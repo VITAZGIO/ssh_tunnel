@@ -35,7 +35,7 @@ func init() {
 				"ru": "Скопировал на ПК — вставил на телефоне. Текст, картинки и файлы до 50 МБ, только по сети устройств. С телефона — «Поделиться → ssh_tunnel» или плитка в шторке.",
 				"en": "Copy on the PC — paste on the phone. Text, images and files up to 50 MB, only over the device network. From the phone — Share → ssh_tunnel or the quick tile.",
 			},
-			Book: "app-clipboard", Page: "addons/clipboard.html", Background: true, Permissions: []string{},
+			Book: "app-clipboard", Page: "addons/clipboard.html", Background: true, Needs: []string{"mesh"}, Permissions: []string{},
 		},
 	)
 }

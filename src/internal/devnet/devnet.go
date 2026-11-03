@@ -1,4 +1,4 @@
-// Package devnet — сеть устройств для дополнительных приложений (Карта
+// Package devnet — сеть устройств для плагинов (Карта
 // сети, SSH, Файлы устройства). Приложения не знают, где живёт туннель:
 // в окне ПК (internal/app), в службе VPN-версии или в ядре Android
 // (android/core/mobile). Тот, у кого туннель, ставит сюда Provider.
@@ -97,3 +97,17 @@ func Dial(network, addr string) (net.Conn, error) {
 // Routed — есть ли туннель, который сам выбирает путь (иначе Dial —
 // обычное соединение).
 func Routed() bool { return get() != nil }
+
+// serverDialer — источник, который умеет соединяться с адресом на самом
+// сервере (через SSH-канал, как вход панели 127.0.0.1:47832).
+type serverDialer interface {
+	DialServer(network, addr string) (net.Conn, error)
+}
+
+// DialServer — соединение с адресом на сервере, к которому подключён туннель.
+func DialServer(network, addr string) (net.Conn, error) {
+	if sd, ok := get().(serverDialer); ok {
+		return sd.DialServer(network, addr)
+	}
+	return nil, ErrOff
+}

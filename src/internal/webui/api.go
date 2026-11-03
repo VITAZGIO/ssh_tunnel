@@ -40,7 +40,7 @@ type route struct {
 
 func (s *Server) routes() []route {
 	rs := s.coreRoutes()
-	// Дополнительные приложения и Книга — общие с Android (internal/uihost).
+	// Плагины и Книга — общие с Android (internal/uihost).
 	for _, r := range s.addons.Routes() {
 		rs = append(rs, route{r.Path, r.Methods, r.Desc, r.H})
 	}
@@ -83,11 +83,14 @@ func (s *Server) coreRoutes() []route {
 		{"/api/processes", "GET", "Запущенные программы (для правил по программам).", s.handleProcesses},
 		{"/api/appicon", "GET", "Значок программы по пути: ?path=… (PNG, Windows).", s.handleAppIcon},
 		{"/api/pickfile", "POST", "Системный диалог выбора программы (Windows).", s.handlePickFile},
+		{"/api/pickfolder", "POST", "Системный диалог выбора папки (Windows): {\"path\"}, отмена — пустой путь.", s.handlePickFolder},
 		{"/api/openterminal", "POST", "Открыть PowerShell (Windows).", s.handleOpenTerminal},
 		{"/api/genkey", "POST", "Создать SSH-ключ по пути и отдать открытую часть.", s.handleGenKey},
 		{"/api/bootstart", "GET, POST", "Запуск при старте системы: состояние; POST {\"on\":bool}.", s.handleBootStart},
 		{"/api/update/check", "GET", "Есть ли новая версия на GitHub.", s.handleUpdateCheck},
 		{"/api/update/download", "POST", "Скачать новую версию в «Загрузки».", s.handleUpdateDownload},
+		{"/api/uipass", "GET, POST", "Пароль входа в панель из сети (Linux): GET {lock,set}, POST {\"password\"} (\"\" — убрать). Действует при галке uiLock в настройках.", s.handleUIPass},
+		{"/api/update/install", "POST", "Обновиться: скачать, сверить сумму, поставить и перезапуститься (если canInstall).", s.handleUpdateInstall},
 		{"/api/adblock/update", "POST", "Скачать и применить списки блокировки рекламы {\"sources\"}.", s.handleAdBlockUpdate},
 	}
 }
@@ -108,6 +111,7 @@ var confirm = map[string]string{
 	"/api/serverusers":             "создаёт пользователя на сервере",
 	"/api/vpssetup/start":          "меняет настройки сервера (sshd)",
 	"/api/update/download":         "скачивает новую версию",
+	"/api/update/install":          "ставит новую версию и перезапускает программу",
 	"/api/addons":                  "remove убирает приложение (у своего — вместе с данными)",
 	"/api/addons/file":             "ставит своё приложение с разрешениями",
 	"/api/diag/meddlers/try":       "останавливает чужую программу",

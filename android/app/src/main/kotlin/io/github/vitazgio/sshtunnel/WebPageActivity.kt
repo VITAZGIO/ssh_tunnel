@@ -17,6 +17,8 @@ import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 
 // Общая страница интерфейса — та же, что в окне ПК (Книга, дополнительные
 // приложения): HTML и API отдаёт ядро (mobile.StartUI), здесь только WebView
@@ -47,6 +49,16 @@ class WebPageActivity : AppCompatActivity() {
         web.setBackgroundColor(Color.TRANSPARENT)
         // Фон рисует сама страница (theme.css) — тот же, что на ПК.
         setContentView(web)
+        // Окно на весь экран: отступы под системные полосы и клавиатуру — иначе
+        // шапка уходит под строку состояния, а клавиатура закрывает поле ввода.
+        ViewCompat.setOnApplyWindowInsetsListener(web) { v, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or
+                    WindowInsetsCompat.Type.ime()
+            )
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
         web.settings.allowFileAccess = false
@@ -132,6 +144,44 @@ class WebPageActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun requestAllFiles() = runOnUiThread { DeviceApps.requestAllFiles(this@WebPageActivity) }
+
+        // Зеркальные папки: выбрать папку системным окном; ответ — в
+        // window.sshtunnelPicked(id, путь) (пустой путь — отмена).
+        @JavascriptInterface
+        fun pickFolder(id: String) = runOnUiThread {
+            pickId = id
+            try {
+                pickTree.launch(null)
+            } catch (_: Exception) {
+                picked("")
+            }
+        }
+    }
+
+    private var pickId = ""
+    private val pickTree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        picked(uri?.let { treePath(it) } ?: "")
+    }
+
+    private fun picked(path: String) {
+        val id = org.json.JSONObject.quote(pickId)
+        val p = org.json.JSONObject.quote(path)
+        web.evaluateJavascript("window.sshtunnelPicked && window.sshtunnelPicked($id, $p)", null)
+    }
+
+    // treePath — папка из системного выбора как обычный путь: зеркальной
+    // папке нужен путь на диске (с доступом ко всем файлам), а не адрес
+    // content://. «primary:Docs/X» — внутренняя память, «1234-5678:X» — карта.
+    private fun treePath(uri: Uri): String {
+        val doc = try {
+            android.provider.DocumentsContract.getTreeDocumentId(uri)
+        } catch (_: Exception) {
+            return ""
+        }
+        val vol = doc.substringBefore(':')
+        val rel = doc.substringAfter(':', "")
+        val root = if (vol == "primary") "/storage/emulated/0" else "/storage/$vol"
+        return if (rel.isEmpty()) root else "$root/$rel"
     }
 
     private var calendarContacts = false

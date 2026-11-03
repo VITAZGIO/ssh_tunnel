@@ -30,6 +30,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"sshtunnel/internal/meshsvc"
 )
 
 // SelfServiceAddr — где слушает вход для создания пользователей.
@@ -134,6 +136,29 @@ func (s *Server) SelfServiceHandler() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"name": c.Name, "canCreate": c.CanCreate && c.CreatorHash != ""})
 	})
+	// Общая карта сети — только тем, кому в панели дано право заводить
+	// пользователей (это и есть «доверенный» клиент): все устройства его
+	// сети и прямые соединения между ними, как на схеме панели.
+	mux.HandleFunc("/v1/map", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{}
+		if !post(w, r, &req) {
+			return
+		}
+		c, ok := s.callerClient(r)
+		if !ok {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "этот сервер тебя не знает как клиента панели"})
+			return
+		}
+		if !c.CanCreate || c.CreatorHash == "" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "общая карта — только с правом создавать пользователей (включается в панели сервера)"})
+			return
+		}
+		if s.mesh == nil {
+			writeJSON(w, http.StatusOK, map[string]any{"devices": []MapDevice{}})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"devices": callerMap(s.mesh.State(r.Context()), c.Username)})
+	})
 	mux.HandleFunc("/v1/create", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Password   string `json:"password"`
@@ -205,4 +230,39 @@ func (s *Server) selfCreate(r *http.Request, password, name string, dt DeviceTyp
 		}
 	}
 	return c, nil
+}
+
+// MapDevice — устройство общей карты (/v1/map): только то, что нужно схеме.
+type MapDevice struct {
+	Name     string               `json:"name"`
+	Host     string               `json:"host"`
+	IP       string               `json:"ip"`
+	Platform string               `json:"platform,omitempty"`
+	Online   bool                 `json:"online"`
+	RTTMs    float64              `json:"rttMs,omitempty"`
+	Quality  string               `json:"quality,omitempty"`
+	LastSeen int64                `json:"lastSeen,omitempty"`
+	Direct   []meshsvc.DirectLink `json:"direct,omitempty"`
+}
+
+// callerMap — устройства той сети, где есть устройство пользователя user.
+func callerMap(st MeshState, user string) []MapDevice {
+	out := []MapDevice{}
+	for _, n := range st.Networks {
+		mine := false
+		for _, d := range n.Devices {
+			if d.User == user {
+				mine = true
+				break
+			}
+		}
+		if !mine {
+			continue
+		}
+		for _, d := range n.Devices {
+			out = append(out, MapDevice{Name: d.Display, Host: d.Host, IP: d.IP, Platform: d.Platform, Online: d.Online,
+				RTTMs: d.RTTMs, Quality: d.Quality, LastSeen: d.LastSeen, Direct: d.Direct})
+		}
+	}
+	return out
 }

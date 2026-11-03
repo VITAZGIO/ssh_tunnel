@@ -22,6 +22,7 @@ import (
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/nativeui"
 	"sshtunnel/internal/shutdown"
+	"sshtunnel/internal/updater"
 	"sshtunnel/internal/webui"
 )
 
@@ -53,6 +54,8 @@ func main() {
 		return
 	}
 
+	// Файл прошлой версии после обновления одной кнопкой (updater.Install).
+	updater.CleanOld()
 	cfg := config.Load()
 	// В окне этих переключателей нет: без них туннелем никто не пользуется сам
 	// собой, и человек видел бы «подключено» при неработающем интернете.
@@ -104,7 +107,7 @@ func main() {
 			"ssh_tunnel.exe -nowindow")
 	}
 
-	// Книга и дополнительные приложения открываются отдельными окнами.
+	// Книга и плагины открываются отдельными окнами.
 	opener := nativeui.Opener("http://"+srv.Addr(), config.Dir())
 	srv.Addons().SetOpener(opener)
 	// Виджет календаря на рабочем столе — сразу, если человек его включил.

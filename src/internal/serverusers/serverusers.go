@@ -25,9 +25,10 @@ const Addr = "127.0.0.1:47832"
 // Dial открывает соединение через туннель.
 type Dial func(network, addr string) (net.Conn, error)
 
-// Call вызывает вход: op — "whoami" или "create" (body — имя, тип, пароль).
+// Call вызывает вход: op — "whoami", "create" (body — имя, тип, пароль) или
+// "map" — общая карта сети (только с правом создавать пользователей).
 func Call(dial Dial, op string, body any) (map[string]any, error) {
-	if op != "whoami" && op != "create" {
+	if op != "whoami" && op != "create" && op != "map" {
 		return nil, errors.New("неизвестная операция")
 	}
 	client := &http.Client{

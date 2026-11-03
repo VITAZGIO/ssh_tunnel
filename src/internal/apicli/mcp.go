@@ -291,10 +291,10 @@ func friendlyTools() []Tool {
 			call: func(c *Client, a map[string]any) (string, error) {
 				return doJSON(c, "POST", "/api/rules", map[string]string{"op": "remove", "list": str(a, "list"), "value": str(a, "value")})
 			}},
-		{Name: "list_apps", Description: "Дополнительные приложения: каталог (catalog) и добавленные на этом устройстве (added: star — в быстром доступе, on — фоновое включено).",
+		{Name: "list_apps", Description: "Плагины: каталог (catalog) и добавленные на этом устройстве (added: star — в быстром доступе, on — фоновое включено).",
 			InputSchema: schema(map[string]any{}), Annotations: map[string]any{"readOnlyHint": true},
 			call: func(c *Client, _ map[string]any) (string, error) { return doJSON(c, "GET", "/api/addons", nil) }},
-		{Name: "app_action", Description: "Действие с дополнительным приложением: add — добавить из каталога, star/unstar — быстрый доступ, on/off — выключатель фонового. remove — убрать: " + confirmNote + "своё приложение удаляется вместе с данными.",
+		{Name: "app_action", Description: "Действие с плагином: add — добавить из каталога, star/unstar — быстрый доступ, on/off — выключатель фонового. remove — убрать: " + confirmNote + "своё приложение удаляется вместе с данными.",
 			InputSchema: schema(map[string]any{
 				"op": prop("string", "действие", "add", "remove", "star", "unstar", "on", "off"),
 				"id": prop("string", "id приложения из list_apps"),

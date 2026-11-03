@@ -484,7 +484,7 @@
   .langBtn svg{width:16px;height:auto;display:block}
   .navlist{border-top:1px solid var(--line);margin-bottom:24px}
 
-  /* ---------- дополнительные приложения ---------- */
+  /* ---------- плагины ---------- */
   .mi{display:inline-block;width:20px;height:20px;flex:none;background:currentColor;
       -webkit-mask:var(--i) center/contain no-repeat;mask:var(--i) center/contain no-repeat}
   #viewAddons{padding:0;overflow:hidden}
@@ -493,6 +493,10 @@
   /* Стрелка — справа сверху, прямо под кнопкой настроек. */
   #quickBtn{position:absolute;top:46px;right:14px;z-index:4}
   #quickBtn .mi{width:18px;height:18px}
+  /* Телефон: стрелка — в строке шапки, рядом с журналом (поверх она
+     наезжала на шапку и сдвигала её под строку состояния). */
+  #quickBtn.inbar{position:static}
+  body.android #quickPanel{top:52px}
   #quickPanel{position:absolute;top:84px;right:10px;z-index:6;background:var(--card2);
               border:1px solid var(--line);border-radius:12px;padding:6px;min-width:170px;
               box-shadow:0 8px 24px rgba(0,0,0,.35);animation:quickIn .16s ease-out}
@@ -501,6 +505,11 @@
                      border:0;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--text);font:inherit}
   #quickPanel button:hover{background:var(--card)}
   #quickPanel .mi{color:var(--accent)}
+  #loginView{position:fixed;inset:0;z-index:50;background:var(--bg);display:grid;place-items:center;padding:16px}
+  #loginView[hidden]{display:none}
+  .loginBox{display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px}
+  .loginBox input{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:9px 10px;color:var(--text);font:inherit}
+  #loginHow code{font-family:var(--mono);background:var(--card2);padding:2px 5px;border-radius:5px;word-break:break-all}
   /* Телефон (WebView, мост SSHTunnelAndroid): чего на нём нет — не видно. */
   body.android .desk-only{display:none!important}
   body:not(.android) .android-only{display:none!important}
@@ -677,6 +686,19 @@
   </button>
   <div id="quickPanel" hidden></div>
 
+  <!-- Вход по паролю (Linux, панель по локальной сети): пока не вошёл —
+       только это окно. -->
+  <div id="loginView" hidden>
+    <div class="card loginBox">
+      <b data-i18n="login_title">Вход в панель</b>
+      <input type="password" id="loginPass" autocomplete="current-password" data-i18n-placeholder="login_ph" placeholder="пароль">
+      <button class="btn primary" id="loginGo" data-i18n="login_go">Войти</button>
+      <span class="hint" id="loginNote"></span>
+      <a href="#" id="loginForgot" data-i18n="login_forgot">Забыли пароль?</a>
+      <div class="hint" id="loginHow" hidden></div>
+    </div>
+  </div>
+
   <!-- ГЛАВНЫЙ ЭКРАН -->
   <div class="view on" id="viewMain">
     <div class="mainPage">
@@ -789,7 +811,7 @@
         <span class="v" data-i18n="app_sub">Программы, сеть устройств, запуск, оформление</span></span><span class="arr">›</span></button>
       <button class="nav" id="toWizard"><span class="t"><span data-i18n="wizard_title">Мастер настройки</span>
         <span class="v" data-i18n="wizard_sub">Подключить телефон или новый сервер</span></span><span class="arr">›</span></button>
-      <button class="nav" id="toAddons"><span class="t"><span data-i18n="addons_title">Дополнительные приложения</span>
+      <button class="nav" id="toAddons"><span class="t"><span data-i18n="addons_title">Плагины</span>
         <span class="v" data-i18n="addons_sub">Добавляешь сам, что нужно</span></span><span class="arr">›</span></button>
       <button class="nav" id="toBook"><span class="t"><span data-i18n="book_title">Книга</span>
         <span class="v" data-i18n="book_sub">Справка: с чего начать, режимы, частые проблемы</span></span><span class="arr">›</span></button>
@@ -1093,6 +1115,20 @@
             сможет нажимать кнопки программы и менять правила через «ssh_tunnel.exe mcp». Только на этом
             устройстве, наружу ничего не открывается. Как подключить — в Книге, глава «Команды и нейросеть».</span></span></label>
       </div>
+      <div class="chk-row" id="uiLockRow" hidden>
+        <label class="chk"><input type="checkbox" id="uiLock">
+          <span class="lbl" data-i18n="ui_lock">Вход по паролю</span>
+          <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)"
+            >?<span class="tip" data-i18n="ui_lock_note">Панель, открытую по локальной сети, сначала спросит
+            пароль. Пока пароль не задан — не спрашивает. Забыл — на сервере под root:
+            «ssh_tunnel_linux -reset-password» и перезапуск службы.</span></span></label>
+      </div>
+      <div class="chk-row" id="uiPassRow" hidden>
+        <input type="password" id="uiPass" autocomplete="new-password" style="flex:1;min-width:0"
+          data-i18n-placeholder="ui_pass_ph" placeholder="новый пароль">
+        <button class="btn" type="button" id="uiPassSet" data-i18n="ui_pass_set">Задать пароль</button>
+      </div>
+      <span class="hint" id="uiPassNote" hidden style="display:block;margin:-2px 0 6px"></span>
       <div class="chk-row">
         <label class="chk"><input type="checkbox" id="appProfilesOn">
           <span class="lbl" data-i18n="app_profiles_on">Профили приложения</span>
@@ -1147,6 +1183,8 @@
           <button class="btn" id="updateCheckBtn" data-i18n="update_check">Проверить обновления</button>
         </div>
         <span class="hint" id="updateNote" style="display:block;margin-top:7px"></span>
+        <button class="btn primary" id="updateInstallBtn" hidden style="width:100%;margin-top:8px"
+          data-i18n="update_install">Обновить</button>
         <button class="btn" id="updateDownloadBtn" hidden style="width:100%;margin-top:8px"
           data-i18n="update_download">Скачать в «Загрузки»</button>
         <button class="btn" id="updateOpenBtn" hidden style="width:100%;margin-top:8px"
@@ -1739,6 +1777,48 @@ const api = (path, body, raw) => fetch(path, {
   headers: {'X-Token': T, 'Content-Type': 'application/json'},
   body: body ? (raw ? body : JSON.stringify(body)) : undefined
 }).then(r => r.json());
+// Вход по паролю (Linux, панель по локальной сети; webui/login.go).
+async function checkLogin(){
+  const r = await fetch('/api/login', {cache: 'no-store'}).then(x => x.json()).catch(() => null);
+  if(!r || !r.need) return;
+  $('loginView').hidden = false;
+  $('loginPass').focus();
+  const how = $('loginHow');
+  how.textContent = tr('login_how');
+  for(const line of [(r.exe || 'ssh_tunnel_linux') + ' -reset-password', r.unit ? 'systemctl restart ' + r.unit : '']){
+    if(!line) continue;
+    const c = document.createElement('code');
+    c.textContent = line;
+    how.append(document.createElement('br'), c);
+  }
+}
+function loginGo(){
+  fetch('/api/login', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({password: $('loginPass').value})}).then(x => x.json()).then(r => {
+    if(r.ok){ location.reload(); return; }
+    $('loginNote').textContent = r.error || '';
+  }).catch(() => {});
+}
+$('loginGo').onclick = loginGo;
+$('loginPass').onkeydown = ev => { if(ev.key === 'Enter') loginGo(); };
+$('loginForgot').onclick = ev => { ev.preventDefault(); $('loginHow').hidden = !$('loginHow').hidden; };
+checkLogin();
+
+// showUIPass — поле пароля видно только при галке «Вход по паролю».
+async function showUIPass(){
+  const on = OS === 'linux' && $('uiLock').checked;
+  $('uiPassRow').hidden = $('uiPassNote').hidden = !on;
+  if(!on) return;
+  const r = await api('/api/uipass').catch(() => ({}));
+  $('uiPassNote').textContent = r.set ? tr('ui_pass_isset') : tr('ui_pass_unset');
+}
+$('uiLock').addEventListener('change', showUIPass);
+$('uiPassSet').onclick = async () => {
+  const r = await api('/api/uipass', {password: $('uiPass').value}).catch(e => ({error: String(e)}));
+  $('uiPassNote').textContent = r.error || tr('ui_pass_saved');
+  if(!r.error) $('uiPass').value = '';
+};
+
 // apiWithin — тот же запрос, но ждём не дольше ms: кнопка не должна
 // зависать, даже если ответ задержался (сама операция идёт дальше, а итог
 // придёт событием состояния).
@@ -2080,6 +2160,13 @@ const I18N = {
     update_failed:'не получилось связаться с GitHub — проверь интернет',
     update_rate_limited:'GitHub временно ограничил число запросов, попробуй позже',
     update_download:'Скачать в «Загрузки»', update_downloading:'скачиваю…',
+    ui_lock:'Вход по паролю', ui_pass_ph:'новый пароль', ui_pass_set:'Задать пароль',
+    ui_pass_unset:'Пароль не задан — пока не спрашивается.', ui_pass_isset:'Пароль задан.', ui_pass_saved:'Пароль сохранён.',
+    ui_lock_note:'Панель, открытую по локальной сети, сначала спросит пароль. Пока пароль не задан — не спрашивает. Забыл — на сервере под root: «ssh_tunnel_linux -reset-password» и перезапуск службы.',
+    login_title:'Вход в панель', login_ph:'пароль', login_go:'Войти', login_forgot:'Забыли пароль?',
+    login_how:'На сервере в консоли под root выполни:',
+    update_install:'Обновить', update_installing_self:'скачиваю и проверяю…',
+    update_restarting:'ставлю новую версию и перезапускаюсь…',
     update_downloaded:'скачано: {path} — закрой программу и замени ею старый файл',
     update_download_failed:'скачать не вышло — открой страницу релиза и скачай вручную',
     update_open_release:'Открыть страницу релиза',
@@ -2090,9 +2177,9 @@ const I18N = {
     export_apps:'Экспортировать список', import_apps:'Импортировать список',
     apps_imported:'список программ импортирован',
     wizard_title:'Мастер настройки', wizard_sub:'Подключить телефон или новый сервер',
-    addons_title:'Дополнительные приложения', addons_sub:'Добавляешь сам, что нужно',
+    addons_title:'Плагины', addons_sub:'Добавляешь сам, что нужно',
     book_title:'Книга', book_sub:'Справка: с чего начать, режимы, частые проблемы',
-    quick_title:'Быстрый доступ', meddle_offer:'Проверить, кто мешает',
+    quick_title:'Быстрый доступ', quick_empty:'Пусто. Отметь звёздочкой нужные в «Плагинах»', meddle_offer:'Проверить, кто мешает',
     wizard_android:'Android', wizard_vps:'VPS', wizard_user:'Пользователь',
     wizard_user_intro:'Новый пользователь на сервере, к которому ты подключён.',
     wizard_user_note:'Работает, если в панели сервера твоему устройству включено «Может создавать пользователей». '+
@@ -2402,6 +2489,13 @@ const I18N = {
     update_failed:'could not reach GitHub — check your connection',
     update_rate_limited:'GitHub is rate-limiting requests, try again later',
     update_download:'Download to Downloads', update_downloading:'downloading…',
+    ui_lock:'Password sign-in', ui_pass_ph:'new password', ui_pass_set:'Set password',
+    ui_pass_unset:'No password set — not asked yet.', ui_pass_isset:'Password is set.', ui_pass_saved:'Password saved.',
+    ui_lock_note:'The panel opened over the local network asks for a password first. Until one is set, it does not ask. Forgot it — on the server as root: “ssh_tunnel_linux -reset-password” and restart the service.',
+    login_title:'Sign in', login_ph:'password', login_go:'Sign in', login_forgot:'Forgot the password?',
+    login_how:'On the server, in a root console, run:',
+    update_install:'Update', update_installing_self:'downloading and checking…',
+    update_restarting:'installing the new version and restarting…',
     update_downloaded:'saved to {path} — close the program and replace the old file with it',
     update_download_failed:'download failed — open the release page and grab it by hand',
     update_open_release:'Open the release page',
@@ -2412,9 +2506,9 @@ const I18N = {
     export_apps:'Export list', import_apps:'Import list',
     apps_imported:'app list imported',
     wizard_title:'Setup wizard', wizard_sub:'Connect a phone or a new server',
-    addons_title:'More apps', addons_sub:'Add what you need yourself',
+    addons_title:'Plugins', addons_sub:'Add what you need yourself',
     book_title:'Book', book_sub:'Help: getting started, modes, common problems',
-    quick_title:'Quick access', meddle_offer:'Check who interferes',
+    quick_title:'Quick access', quick_empty:'Empty. Star the ones you need in Plugins', meddle_offer:'Check who interferes',
     wizard_android:'Android', wizard_vps:'VPS', wizard_user:'User',
     wizard_user_intro:'A new user on the server you are connected to.',
     wizard_user_note:'Works if the server panel allows your device to create users. The password is the one set there. '+
@@ -2483,7 +2577,7 @@ $('language').addEventListener('change', () => {
 const FIELDS = ['host','user','keyPath','sshPort','socksPort','httpPort','poolSize','meshName','meshKey',
                 'keepAliveSec','connectTimeoutSec','cipher','ipVersion'];
 const PROFILE_CHECKS = ['localViaTunnel', 'udpRelayEnabled', 'meshEnabled', 'meshIncoming', 'shareLan'];
-const CHECKS = ['verbose', 'adBlockEnabled', 'mcpEnabled', 'fakeIP'];
+const CHECKS = ['verbose', 'adBlockEnabled', 'mcpEnabled', 'fakeIP', 'uiLock'];
 
 /* Правила фильтра живут отдельно от полей формы: они правятся на своём
    экране и сохраняются своей кнопкой. */
@@ -4886,6 +4980,8 @@ async function refresh(){
   if(st.version) $('appVersion').textContent = st.version === 'dev' ? tr('version_dev') : st.version;
   if(st.os && st.os !== OS){
     OS = st.os;
+    $('uiLockRow').hidden = OS !== 'linux';
+    showUIPass();
     // Галочка «Подключаться сразу при запуске» в верхней части настроек —
     // для Windows: и обычный запуск двойным щелчком, и запуск из автозагрузки
     // при входе в систему используют один и тот же exe, так что достаточно
@@ -4960,6 +5056,7 @@ $('updateCheckBtn').onclick = async () => {
   $('updateCheckBtn').disabled = true;
   $('updateNote').textContent = tr('update_checking');
   $('updateDownloadBtn').hidden = true;
+  $('updateInstallBtn').hidden = true;
   $('updateOpenBtn').hidden = true;
   const r = await api('/api/update/check', {});
   $('updateCheckBtn').disabled = false;
@@ -4971,6 +5068,8 @@ $('updateCheckBtn').onclick = async () => {
   updateResult = r.result;
   if(r.result.newer){
     $('updateNote').textContent = tr('update_available').replace('{v}', r.result.latest);
+    // Сама ставит (ПК, Linux) — главная кнопка «Обновить», «Загрузки» — запасная.
+    $('updateInstallBtn').hidden = !(r.canInstall && r.result.assetUrl);
     $('updateDownloadBtn').hidden = !r.result.assetUrl;
     $('updateOpenBtn').hidden = false;
   } else if(r.result.ahead){
@@ -4998,12 +5097,34 @@ $('updateDownloadBtn').onclick = async () => {
     : tr('update_downloaded').replace('{path}', r.path);
 };
 
+$('updateInstallBtn').onclick = async () => {
+  $('updateInstallBtn').disabled = true;
+  $('updateNote').textContent = tr('update_installing_self');
+  const r = await api('/api/update/install', {}).catch(e => ({error: String(e)}));
+  if(r.error){
+    $('updateInstallBtn').disabled = false;
+    $('updateNote').textContent = r.error;
+    return;
+  }
+  // Программа перезапускается. Окно ПК закроется само и откроется новое; в
+  // браузере (Linux) ждём, пока старая копия пропадёт и ответит новая, и
+  // открываем панель заново (у новой копии свой ключ адреса).
+  $('updateNote').textContent = tr('update_restarting');
+  const t0 = Date.now();
+  let down = false;
+  const wait = async () => {
+    try { await fetch('/', {cache: 'no-store'}); if(down){ location.href = '/'; return; } } catch(e) { down = true; }
+    if(Date.now() - t0 < 120000) setTimeout(wait, 1500);
+  };
+  setTimeout(wait, 1500);
+};
+
 $('updateOpenBtn').onclick = () => {
   if(updateResult && updateResult.url) openExternal(updateResult.url);
 };
 
 /* ---------- мастер настройки: Android + VPS ---------- */
-/* ---------- дополнительные приложения и Книга ---------- */
+/* ---------- плагины и Книга ---------- */
 /* Страницы общие с Android (apps.html, book.html); здесь — только как их
    показать в окне ПК. Список и звёздочки хранит ядро (/api/addons). */
 let addonsState = {catalog: [], added: [], windows: false};
@@ -5030,7 +5151,9 @@ const addonName = m => (m.name && (m.name[LANG] || m.name.ru)) || m.id;
 async function openQuick(id){
   $('quickPanel').hidden = true;
   const m = addonsState.catalog.find(x => x.id === id);
-  if(m && m.window &&
+  const e = addonsState.added.find(x => x.id === id);
+  const win = e && e.win != null ? e.win : !!(m && m.window);
+  if(m && win &&
      await openWindow(id, addonName(m) + ' — ssh_tunnel', pageURL('apps.html', {open: id, solo: '1', key: id}))) return;
   showAddons(id);
 }
@@ -5039,10 +5162,21 @@ async function loadAddons(){
   if(!r || !r.added) return;
   addonsState = r;
   const starred = r.added.filter(e => e.star && e.active);
-  $('quickBtn').hidden = !starred.length;
-  if(!starred.length) $('quickPanel').hidden = true;
+  // Кнопка видна всегда: пустой список — подсказка, где ставить звёздочки.
+  $('quickBtn').hidden = false;
   const p = $('quickPanel');
   p.innerHTML = '';
+  if(!starred.length){
+    const b = document.createElement('button');
+    const ic = document.createElement('span');
+    ic.className = 'mi';
+    ic.style.setProperty('--i', 'url(icons/star.svg)');
+    const nm = document.createElement('span');
+    nm.textContent = tr('quick_empty');
+    b.append(ic, nm);
+    b.onclick = () => { p.hidden = true; showAddons(); };
+    p.appendChild(b);
+  }
   for(const e of starred){
     const m = r.catalog.find(x => x.id === e.id);
     if(!m) continue;
@@ -5057,6 +5191,7 @@ async function loadAddons(){
     p.appendChild(b);
   }
 }
+if(ANDROID){ $('quickBtn').classList.add('inbar'); $('btnLog').before($('quickBtn')); }
 $('quickBtn').onclick = ev => { ev.stopPropagation(); $('quickPanel').hidden = !$('quickPanel').hidden; };
 document.addEventListener('click', ev => {
   if(!$('quickPanel').hidden && !$('quickPanel').contains(ev.target)) $('quickPanel').hidden = true;

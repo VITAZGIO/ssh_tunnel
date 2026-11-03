@@ -26,6 +26,17 @@ func (d devnetSrc) Mesh() *mesh.Client {
 	return c.Mesh()
 }
 
+// DialServer — адрес на самом сервере (вход панели) через SSH-канал.
+func (d devnetSrc) DialServer(network, addr string) (net.Conn, error) {
+	d.t.mu.Lock()
+	c := d.t.core
+	d.t.mu.Unlock()
+	if c == nil {
+		return nil, devnet.ErrOff
+	}
+	return c.Dial(network, addr)
+}
+
 func (d devnetSrc) Dial(network, addr string) (net.Conn, error) {
 	d.t.mu.Lock()
 	c := d.t.core

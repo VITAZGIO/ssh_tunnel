@@ -82,6 +82,11 @@ func (d *DirectList) Set(entries []string) {
 		names = append(names, e)
 		suffixes = append(suffixes, "."+e)
 	}
+	// Спутники известных сайтов (companions.go) — тем же правилом.
+	for _, c := range withCompanions(names)[len(names):] {
+		names = append(names, c)
+		suffixes = append(suffixes, "."+c)
+	}
 
 	d.mu.Lock()
 	d.ips, d.nets, d.names, d.suffixes = ips, nets, names, suffixes

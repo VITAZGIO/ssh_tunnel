@@ -22,7 +22,7 @@ In PowerShell (on Linux — `ssh_tunnel_linux` instead of `ssh_tunnel.exe`):
   `rules remove …` — remove, `rules mode only` — only listed programs go
   through the tunnel. `rules fakeip on|off` — fake addresses in VPN-mode DNS,
   `rules add realip .deepseek.com` — the name always gets its real address.
-- `ssh_tunnel.exe apps` — more apps: `apps add calendar`, `apps remove …`,
+- `ssh_tunnel.exe apps` — plugins: `apps add calendar`, `apps remove …`,
   `apps star …`, `apps on …`, `apps off …`.
 - `ssh_tunnel.exe check` — self-check, `check site youtube.com` — check a
   site (needs the Site check app).
@@ -61,3 +61,13 @@ it directly, nobody can connect to it over the network.
 Dangerous actions — turning the device network off, removing a server or an
 app, stopping another program, replacing settings — are marked “ask the
 human” for the AI. A good AI asks you first.
+
+## Panel password (Linux)
+
+The Linux panel opened to the local network (`-web-lan`) can ask for a password: App settings → Advanced → «Password sign-in», then «Set password». Until a password is set, it does not ask.
+
+Forgot it — on the server as root: `ssh_tunnel_vpn_linux -reset-password`, then `systemctl restart ssh_tunnel` (the sign-in screen shows the exact command).
+
+## Updates
+
+App settings → «Check for updates» → «Update»: the program downloads the new version, checks the checksum, installs it and restarts. Only on the button.

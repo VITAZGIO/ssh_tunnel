@@ -1,9 +1,12 @@
 package webui
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
+	"time"
 
 	"sshtunnel/internal/updater"
 )
@@ -21,7 +24,7 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"error": err.Error(), "code": code})
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true, "result": res})
+	writeJSON(w, map[string]any{"ok": true, "result": res, "canInstall": updater.CanInstall()})
 }
 
 // handleUpdateDownload скачивает файл новой версии в папку загрузок. Сама
@@ -48,4 +51,27 @@ func (s *Server) handleUpdateDownload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"ok": true, "path": path, "dir": filepath.Dir(path), "name": filepath.Base(path),
 	})
+}
+
+// handleUpdateInstall — «Обновить»: скачать, сверить, поставить и
+// перезапуститься (updater.Install). Ответ уходит до перезапуска; окно
+// само переподключится к новой копии.
+func (s *Server) handleUpdateInstall(w http.ResponseWriter, r *http.Request) {
+	if !updater.CanInstall() {
+		writeJSON(w, map[string]string{"error": "здесь обновиться самой программа не может — скачай в «Загрузки»"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	newFile, exe, err := updater.Prepare(ctx)
+	if err != nil {
+		writeJSON(w, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := updater.Install(newFile, exe, s.app.StopNow); err != nil {
+		os.Remove(newFile)
+		writeJSON(w, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }

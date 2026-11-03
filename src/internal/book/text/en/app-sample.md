@@ -1,9 +1,9 @@
 # Sample
 
-An empty app for testing the "More apps" framework. Released versions do not
+An empty app for testing the "Plugins" framework. Released versions do not
 have it.
 
-- Add: "More apps" → "+" → "Add".
+- Add: "Plugins" → "+" → "Add".
 - The star on the tile puts the app into quick access on the main screen (the
   arrow under the settings button).
 - The switch on the tile — for background apps: a switched-off app does not

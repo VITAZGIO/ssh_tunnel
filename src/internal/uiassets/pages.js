@@ -1,4 +1,4 @@
-/* Общее для страниц Книги и дополнительных приложений: ключ API, язык, тема,
+/* Общее для страниц Книги и плагинов: ключ API, язык, тема,
    отдельные окна, внешние ссылки. Страницы одни и те же на ПК, Linux и
    Android; где платформы различаются — решается здесь, по тому, что умеет
    окно (ответ /api/addons: windows) и есть ли мост Android. */
@@ -99,4 +99,24 @@ function openBook(chapter){
   const url = pageURL('book.html', chapter ? {ch: chapter, solo: '1', key: 'book'} : {solo: '1', key: 'book'});
   if(ANDROID){ location.href = pageURL('book.html', chapter ? {ch: chapter} : {}); return; }
   openWindow('book', L('Книга', 'Book') + ' — ssh_tunnel', url);
+}
+
+// Телефон: поле ввода под клавиатурой — прокрутить его на середину, когда
+// клавиатура уже выехала и окно стало ниже.
+if(ANDROID){
+  document.addEventListener('focusin', ev => {
+    const el = ev.target;
+    if(!el.matches || !el.matches('input,textarea,select,[contenteditable]')) return;
+    setTimeout(() => { try { el.scrollIntoView({block: 'center', behavior: 'smooth'}); } catch(e) {} }, 350);
+  });
+}
+
+// Ответ телефона на выбор папки приходит в верхнюю страницу; страница
+// приложения живёт во фрейме — передаём ей (своя страница фрейма его заменит).
+if(ANDROID && !window.sshtunnelPicked){
+  window.sshtunnelPicked = (id, path) => {
+    for(const f of document.querySelectorAll('iframe')){
+      try { if(f.contentWindow.sshtunnelPicked) f.contentWindow.sshtunnelPicked(id, path); } catch(e) {}
+    }
+  };
 }

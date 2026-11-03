@@ -18,6 +18,9 @@
   .step{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:13px}
   .dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:4px;background:var(--dim)}
   .dot.ok{background:var(--ok)}.dot.bad{background:var(--err)}
+  /* Итог видно издалека: зелёная или красная подложка карточки. */
+  .card.good{background:color-mix(in srgb,var(--ok) 16%,var(--card));border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+  .card.bad{background:color-mix(in srgb,var(--err) 16%,var(--card));border-color:color-mix(in srgb,var(--err) 45%,var(--line))}
   .step .n{min-width:120px}.step .ms{color:var(--dim);margin-left:auto;white-space:nowrap}
   .step .note{color:var(--dim);font-size:12px;word-break:break-all}
   .hist button{display:block;width:100%;text-align:left;background:transparent;border:0;border-top:1px solid var(--line);
@@ -72,7 +75,7 @@ function pathCard(title, p){
     <span class="n">${esc(STEP[s.id] || s.id)}${s.ok ? '' : ' — ' + esc(KIND[s.kind] || s.kind || '')}</span>
     <span class="ms">${s.ms ? s.ms + ' ' + L('мс', 'ms') : ''}</span></div>
     ${s.note ? `<div class="note">${esc(s.note)}</div>` : ''}`).join('');
-  return `<div class="card"><b>${esc(title)}</b> ${p.ok ? icon('check_circle') : icon('cancel')}${steps}</div>`;
+  return `<div class="card ${p.ok ? 'good' : 'bad'}"><b>${esc(title)}</b> ${p.ok ? icon('check_circle') : icon('cancel')}${steps}</div>`;
 }
 
 function render(r){
@@ -148,9 +151,9 @@ $('popBtn').onclick = async () => {
   $('popOut').innerHTML = '';
   for(const r of d.results || []){
     const c = document.createElement('div');
-    c.className = 'card';
-    c.style.marginBottom = '8px';
     const ok = r.verdict === 'ok_both' || r.verdict === 'direct_ok_vpn_off';
+    c.className = 'card ' + (ok ? 'good' : 'bad');
+    c.style.marginBottom = '8px';
     c.innerHTML = `<div class="row">${icon(ok ? 'check_circle' : 'warning')}<b>${esc(r.site)}</b></div>
       <div class="hint">${esc(r.text)}</div>`;
     c.style.cursor = 'pointer';

@@ -22,6 +22,10 @@
   .tile.na{cursor:default;opacity:.55}
   .tile.na:hover{border-color:var(--line)}
   .tile .why{font-size:12px;color:var(--dim)}
+  /* Без чего плагин не работает — значки в правом нижнем углу (как у Home Assistant). */
+  .tile .needs{position:absolute;right:9px;bottom:9px;display:flex;gap:5px;color:var(--dim)}
+  .tile .needs .mi{width:16px;height:16px}
+  .item .hint .mi{width:14px;height:14px;vertical-align:-2px}
 
   /* Выключатель фонового приложения. */
   .sw{position:relative;width:36px;height:20px;border-radius:10px;background:var(--line);
@@ -59,7 +63,9 @@
   .first .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .view{display:none;flex:1;min-height:0;flex-direction:column}
   .view.on{display:flex}
-  html.android #winBtn{display:none}
+  html.android #winBtn,html.android #winChk{display:none}
+  #winChk{display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--dim);cursor:pointer;white-space:nowrap}
+  #winChk input{margin:0;width:13px;height:13px}
 </style>
 </head>
 <body>
@@ -110,6 +116,7 @@
       <button class="ico" id="backApp"></button>
       <span class="t" id="appTitle"></span>
       <button class="ico" id="helpBtn"></button>
+      <label id="winChk"><input type="checkbox" id="winAuto"><span></span></label>
       <button class="tb" id="winBtn"></button>
     </div>
     <div class="first card" id="first" hidden>
@@ -123,7 +130,7 @@
 </div>
 <script src="pages.js"></script>
 <script>
-/* Дополнительные приложения: что добавлено на этом устройстве, каталог и
+/* Плагины: что добавлено на этом устройстве, каталог и
    само приложение. Всё состояние — у ядра (/api/addons); страница рисует его
    и шлёт просьбы. */
 let ST = {catalog: [], added: [], windows: false};
@@ -131,6 +138,8 @@ let current = null; // id открытого приложения
 
 const manifest = id => ST.catalog.find(m => m.id === id);
 const entry = id => ST.added.find(e => e.id === id);
+// inWin — открывать ли сразу окном: галка человека, а без неё — как в каталоге.
+const inWin = id => { const e = entry(id), m = manifest(id); return e && e.win != null ? e.win : !!(m && m.window); };
 
 function show(v){ ['vList','vCat','vApp','vPerm'].forEach(x => $(x).classList.toggle('on', x === v)); }
 
@@ -149,10 +158,12 @@ function setIcons(){
   $('helpBtn').title = L('Справка в Книге', 'Help in the Book');
   $('winBtn').innerHTML = icon('open_in_new') + '<span>' + L('В окне', 'Window') + '</span>';
   $('winBtn').title = L('Открыть в отдельном окне', 'Open in a separate window');
-  $('listTitle').textContent = L('Дополнительные приложения', 'More apps');
+  $('winChk').lastChild.textContent = L('сразу в окне', 'open in window');
+  $('winChk').title = L('Галка — открывать отдельным окном сразу. Без галки — здесь.', 'Checked — open in a separate window right away. Unchecked — here.');
+  $('listTitle').textContent = L('Плагины', 'Plugins');
   $('catTitle').textContent = L('Каталог', 'Catalog');
   $('firstMore').textContent = L('Подробнее — в Книге', 'More in the Book');
-  document.title = L('Дополнительные приложения', 'More apps') + ' — ssh_tunnel';
+  document.title = L('Плагины', 'Plugins') + ' — ssh_tunnel';
 }
 
 async function load(){
@@ -168,6 +179,15 @@ async function op(o, id, value){
   renderList();
   renderCatalog();
   changed();
+}
+
+// needsIcons — значки «нужна сеть устройств» / «нужен интернет».
+const NEEDS = {mesh: ['hub', L('Нужна сеть устройств', 'Needs the device network')],
+               internet: ['globe', L('Нужен интернет', 'Needs the internet')]};
+function needsIcons(m){
+  const list = (m.needs || []).filter(n => NEEDS[n]);
+  if(!list.length) return '';
+  return `<span class="needs">${list.map(n => `<span title="${esc(NEEDS[n][1])}">${icon(NEEDS[n][0])}</span>`).join('')}</span>`;
 }
 
 function renderList(){
@@ -194,6 +214,7 @@ function renderList(){
        <span class="nm">${esc(appName(m))}</span>
        ${m.custom ? `<span class="mark">${esc(L('не из каталога', 'not from catalog'))}</span>` : ''}
        ${m.unavailable ? `<span class="why">${esc(m.unavailable)}</span>` : ''}
+       ${needsIcons(m)}
        ${m.background && !m.unavailable ? `<span class="foot"><button class="sw${e.on ? ' on' : ''}" title="${esc(e.on ? L('Выключить', 'Turn off') : L('Включить', 'Turn on'))}"></button><span class="bg">${esc(L('в фоне', 'background'))}</span></span>` : ''}`;
     t.querySelector('.star').onclick = ev => { ev.stopPropagation(); op('star', e.id, !e.star); };
     t.querySelector('.more').onclick = ev => { ev.stopPropagation(); tileMenu(t, e.id); };
@@ -231,6 +252,7 @@ function renderCatalog(){
     it.innerHTML = `${icon(m.icon, 'ic')}
       <span class="tx"><span class="nm">${esc(appName(m))}</span>
         ${m.background ? `<span class="hint"> · ${esc(L('в фоне', 'background'))}</span>` : ''}
+        ${(m.needs || []).filter(n => NEEDS[n]).map(n => `<span class="hint" title="${esc(NEEDS[n][1])}"> ${icon(NEEDS[n][0])}</span>`).join('')}
         <div class="hint">${esc(m.unavailable || appHint(m))}</div></span>
       <button class="btn${has ? '' : ' primary'}"${has || m.unavailable ? ' disabled' : ''}>${esc(has ? L('Добавлено', 'Added') : L('Добавить', 'Add'))}</button>`;
     it.querySelector('button').onclick = () => op('add', m.id);
@@ -247,11 +269,13 @@ async function openApp(id, here){
     alert(L('Приложение выключено — включи его на плитке.', 'The app is off — turn it on on its tile.'));
     return;
   }
-  if(m.window && !here && !SOLO && !ANDROID && await popOut(id)) return;
+  if(inWin(id) && !here && !SOLO && !ANDROID && await popOut(id)) return;
   current = id;
   $('appTitle').innerHTML = appIcon(m) + '<span>' + esc(appName(m)) + '</span>';
   $('helpBtn').hidden = !m.book;
   $('winBtn').hidden = SOLO || ANDROID;
+  $('winChk').hidden = ANDROID || !ST.windows;
+  $('winAuto').checked = inWin(id);
   $('backApp').hidden = SOLO && !Q.get('back');
   // Своё приложение — в песочнице: свой origin, без ключа программы в адресе.
   // Ключ приложения уже в пути страницы, им оно и ходит к API.
@@ -285,6 +309,7 @@ $('winBtn').onclick = async () => {
   const id = current;
   if(await popOut(id)){ $('appFrame').src = 'about:blank'; current = null; show('vList'); }
 };
+$('winAuto').onchange = () => { if(current) op('win', current, $('winAuto').checked); };
 $('backApp').onclick = () => {
   $('appFrame').src = 'about:blank';
   current = null;

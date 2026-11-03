@@ -181,6 +181,15 @@ type Config struct {
 	// человека (для MeshStartMode "last").
 	LastMesh bool `json:"lastMesh,omitempty"`
 
+	// UILock — галка «Вход по паролю» (Дополнительно): вход в панель с
+	// другого устройства (браузер по локальной сети, Linux) только после
+	// пароля. Действует, когда пароль уже задан (UIPassHash); окну самой
+	// программы пароль не нужен. На телефоне — отпечаток или PIN телефона.
+	UILock bool `json:"uiLock,omitempty"`
+	// UIPassHash — bcrypt пароля входа; ставится только через /api/uipass,
+	// наружу (GET /api/config) не отдаётся.
+	UIPassHash string `json:"uiPassHash,omitempty"`
+
 	// Theme — оформление: "" (оригинал), "dark", "light", "console".
 	Theme string `json:"theme,omitempty"`
 	// Background — фон главного экрана: "" (ровный цвет), "code" (падающие

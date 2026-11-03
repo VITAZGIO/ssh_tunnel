@@ -66,13 +66,15 @@ type Server struct {
 	ln    net.Listener
 	// openLocal — пускать без токена тех, кто пришёл из локальной сети.
 	openLocal bool
+	// sess — сеансы гостей, вошедших по паролю (login.go).
+	sess sessions
 	// bootFlags — с какими флагами программа должна подняться при загрузке
 	// машины. Записываются в файл службы по галочке «Запускать при старте
 	// системы», чтобы после перезагрузки панель работала в том же режиме, а
 	// не в угаданном.
 	bootFlags []string
 
-	// addons — дополнительные приложения этого устройства (каталог, что
+	// addons — плагины этого устройства (каталог, что
 	// добавлено, модули ядра). Список хранится у ядра, а не в окне.
 	addons *addons.Service
 	// diag — диагностика (internal/diag): проверить сайт, кто трогает
@@ -158,7 +160,7 @@ func NewOpenLocalOn(a *App, addr string) (*Server, error) {
 // пользователя.
 func (s *Server) Token() string { return s.token }
 
-// Addons — дополнительные приложения: окну ПК нужно, чтобы научить их
+// Addons — плагины: окну ПК нужно, чтобы научить их
 // открывать отдельные окна (SetOpener) и помнить их место (Store).
 func (s *Server) Addons() *addons.Service { return s.addons }
 
@@ -215,6 +217,8 @@ func (s *Server) Serve() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/addons/", s.guard(s.addons.Page))
+	// Вход по паролю — без ключа: это сама дверь (login.go).
+	mux.HandleFunc("/api/login", s.handleLogin)
 	// Файлы своих приложений: пропуск — ключ приложения в адресе.
 	mux.HandleFunc("/custom/", s.addons.Files)
 	for _, rt := range s.routes() {
@@ -275,7 +279,11 @@ func (s *Server) allowed(r *http.Request) bool {
 	if subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) == 1 {
 		return true
 	}
-	return s.openLocal && isLocalClient(r.RemoteAddr)
+	if !s.openLocal || !isLocalClient(r.RemoteAddr) {
+		return false
+	}
+	// Гость из сети: с паролем входа — только после него (login.go).
+	return !s.lockOn() || s.sessionOK(r)
 }
 
 // sameOrigin сверяет Origin с адресом, по которому пришёл сам запрос. Так
@@ -480,7 +488,9 @@ func lanAddrs() []string {
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, s.app.Config())
+		c := s.app.Config()
+		c.UIPassHash = ""
+		writeJSON(w, c)
 		return
 	}
 	// Начинаем с текущих настроек, а не с пустой структуры: страница шлёт
@@ -496,12 +506,16 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	// Состояние кнопок запоминает само ядро (core.Machine), а страница
 	// могла прислать устаревшую копию.
 	cfg.LastRunning, cfg.LastMesh = last, lastMesh
+	// Пароль входа меняется только через /api/uipass.
+	cfg.UIPassHash = s.app.Config().UIPassHash
 	note, err := s.app.SetConfig(cfg)
 	if err != nil {
 		writeJSON(w, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true, "config": s.app.Config(), "note": note})
+	out := s.app.Config()
+	out.UIPassHash = ""
+	writeJSON(w, map[string]any{"ok": true, "config": out, "note": note})
 }
 
 // handleProfileAdd заводит новый сервер — как открыть вкладку «+» в браузере.
@@ -643,6 +657,23 @@ func (s *Server) handlePickFile(w http.ResponseWriter, r *http.Request) { Handle
 // рабочего стола нет).
 func HandlePickFile(w http.ResponseWriter, r *http.Request) {
 	path, err := filedialog.PickExecutable()
+	if errors.Is(err, filedialog.ErrCancelled) {
+		writeJSON(w, map[string]string{"path": ""})
+		return
+	}
+	if err != nil {
+		writeJSON(w, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, map[string]string{"path": path})
+}
+
+func (s *Server) handlePickFolder(w http.ResponseWriter, r *http.Request) { HandlePickFolder(w, r) }
+
+// HandlePickFolder — системный диалог выбора папки (зеркальные папки);
+// как HandlePickFile, открывается на рабочем столе пользователя.
+func HandlePickFolder(w http.ResponseWriter, r *http.Request) {
+	path, err := filedialog.PickFolder("Выбери папку")
 	if errors.Is(err, filedialog.ErrCancelled) {
 		writeJSON(w, map[string]string{"path": ""})
 		return
@@ -888,8 +919,11 @@ func (s *Server) handleServerUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-// appNet — сеть устройств окна для дополнительных приложений.
+// appNet — сеть устройств окна для плагинов.
 type appNet struct{ a *app.App }
 
 func (n appNet) Mesh() *mesh.Client                          { return n.a.Mesh() }
 func (n appNet) Dial(network, addr string) (net.Conn, error) { return n.a.DialApp(network, addr) }
+func (n appNet) DialServer(network, addr string) (net.Conn, error) {
+	return n.a.DialServer(network, addr)
+}

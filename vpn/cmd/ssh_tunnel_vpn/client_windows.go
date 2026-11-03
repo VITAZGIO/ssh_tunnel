@@ -50,6 +50,7 @@ func runClient(tray, noWindow bool) {
 		p: winsvc.NewProxy(dir, map[string]http.HandlerFunc{
 			// У службы нет рабочего стола — диалоги открывает окно.
 			"/api/pickfile":     webui.HandlePickFile,
+			"/api/pickfolder":   webui.HandlePickFolder,
 			"/api/openterminal": webui.HandleOpenTerminal,
 			"/api/bootstart":    webui.HandleBootStart,
 		}),

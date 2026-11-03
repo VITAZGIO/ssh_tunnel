@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="../theme.css">
 <link rel="stylesheet" href="../pages.css">
 <style>
+  #netSel{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 8px;color:var(--text);font:inherit}
   body{background:transparent}
   .wrap{display:flex;flex-direction:column;gap:10px;padding:12px 14px 16px}
   .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -30,6 +31,7 @@
 <div class="wrap">
   <div class="bar">
     <button class="btn primary" id="go"></button>
+    <select id="netSel" hidden></select>
     <div class="meter" id="meter" hidden><i id="bar"></i></div>
     <span class="hint" id="state"></span>
   </div>
@@ -59,6 +61,12 @@ function render(){
   const r = R || {hosts: []};
   $('go').innerHTML = icon('radar') + esc(r.running ? L('Ищу…', 'Scanning…') : L('Сканировать', 'Scan'));
   $('go').disabled = !!r.running;
+  // Несколько сетей (Wi-Fi, кабель, виртуальные) — можно выбрать, какую смотреть.
+  const nets = r.nets || [];
+  $('netSel').hidden = nets.length < 2;
+  $('netSel').disabled = !!r.running;
+  if(nets.length > 1) $('netSel').innerHTML = nets.map(n =>
+    `<option value="${esc(n.subnet)}"${n.subnet === r.subnet ? ' selected' : ''}>${esc(n.iface)} · ${esc(n.subnet)}</option>`).join('');
   $('meter').hidden = !r.running;
   $('bar').style.width = (r.total ? r.done * 100 / r.total : 0) + '%';
   $('state').textContent = r.error ? r.error
@@ -88,9 +96,10 @@ function render(){
 }
 
 async function poll(){ try { R = await api('/api/lanscan'); } catch(e) { R = {error: String(e), hosts: []}; } render(); }
-async function scan(){ try { R = await api('/api/lanscan', {}); } catch(e) { R = {error: String(e), hosts: []}; } render(); }
+async function scan(){ try { R = await api('/api/lanscan', {net: $('netSel').hidden ? '' : $('netSel').value}); } catch(e) { R = {error: String(e), hosts: []}; } render(); }
 
 $('go').onclick = scan;
+$('netSel').onchange = scan;
 render();
 // Открыли — сразу ищем, если ещё не идёт.
 api('/api/lanscan').then(r => { R = r; if(!r.running) scan(); else render(); });
