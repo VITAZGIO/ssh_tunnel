@@ -61,7 +61,8 @@ func OpenWindow(o WindowOptions) error {
 	go func() {
 		// Окно и его сообщения — на одном потоке ОС, как у главного.
 		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
+		// Поток не отпускаем: на нём остаются COM и WebView2 закрытого окна, и Go
+		// не должен запускать там другой код — горутина выходит, поток завершается.
 
 		w, h := 820, 640
 		if o.Widget {
@@ -162,7 +163,9 @@ func Opener(base, dataPath string) func(key, title, url string) error {
 			URL:      base + url,
 			Place:    pl.get(key),
 			OnClose:  func(r Rect) { pl.set(key, r) },
-			DataPath: dataPath,
+			// Своя папка данных — свой процесс браузера: с общей папкой закрытое
+			// отдельное окно (его WebView2 библиотека не закрывает) вешало главное.
+			DataPath: filepath.Join(dataPath, "windows"),
 			Widget:   strings.HasSuffix(key, "-widget"),
 		})
 	}
