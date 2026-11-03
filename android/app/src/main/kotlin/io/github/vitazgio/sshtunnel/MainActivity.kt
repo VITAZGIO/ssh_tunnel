@@ -162,6 +162,13 @@ class MainActivity : AppCompatActivity(), AndroidApi.Screen {
         AndroidApi.pushState()
     }
 
+    // Окно в фокусе — можно прочитать буфер: скопированное в другом приложении
+    // уходит на компьютеры само (плагин «Общий буфер», Tools5.autoSend).
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) Tools5.autoSend(this)
+    }
+
     override fun onPause() {
         if (AndroidApi.screen?.get() === this) AndroidApi.screen = null
         super.onPause()

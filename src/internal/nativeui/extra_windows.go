@@ -40,7 +40,16 @@ var (
 	extra   = map[string]uintptr{} // ключ → окно
 )
 
-var pGetWindowRect = user32.NewProc("GetWindowRect")
+var (
+	pGetWindowRect    = user32.NewProc("GetWindowRect")
+	pGetSystemMetrics = user32.NewProc("GetSystemMetrics")
+)
+
+const smCYFullScreen = 17
+
+// tallWindows — окна, которым по умолчанию нужна высота больше обычной, чтобы
+// пустая страница помещалась без прокрутки (ключ окна → высота).
+var tallWindows = map[string]int{"traffic": 960}
 
 // OpenWindow открывает отдельное окно со своей страницей. Каждое окно живёт
 // на своём потоке со своим циклом сообщений: оно не зависит от главного
@@ -65,12 +74,23 @@ func OpenWindow(o WindowOptions) error {
 		// не должен запускать там другой код — горутина выходит, поток завершается.
 
 		w, h := 820, 640
+		if th, ok := tallWindows[o.Key]; ok {
+			w, h = 840, th
+		}
 		if o.Widget {
 			w, h = 320, 420
+		}
+		// Не выше экрана (без панели задач).
+		if sh, _, _ := pGetSystemMetrics.Call(smCYFullScreen); sh > 0 && h > int(sh) {
+			h = int(sh)
 		}
 		if o.Place.W > 0 && o.Place.H > 0 {
 			w, h = o.Place.W, o.Place.H
 		}
+		// Окно сразу на своём месте: библиотека показывает его по центру экрана
+		// ещё до загрузки WebView2, и оно прыгало бы туда, где было (или к
+		// главному окну), только через пару секунд.
+		unhook := placeOnCreate(o.Place, w, h)
 		// Только одна попытка: при неудаче newView закрыл бы процессы WebView2
 		// с той же папкой данных — а это процессы главного окна.
 		view, why := tryView(webview2.WebViewOptions{
@@ -84,6 +104,7 @@ func OpenWindow(o WindowOptions) error {
 				Center: o.Place.W == 0,
 			},
 		})
+		unhook()
 		if view == nil {
 			if why == "" {
 				why = "WebView2 не создал окно"
@@ -138,8 +159,63 @@ func OpenWindow(o WindowOptions) error {
 }
 
 var (
-	pMonitorFromRect = user32.NewProc("MonitorFromRect")
+	pMonitorFromRect    = user32.NewProc("MonitorFromRect")
+	pSetWindowsHookEx   = user32.NewProc("SetWindowsHookExW")
+	pUnhookWindowsHook  = user32.NewProc("UnhookWindowsHookEx")
+	pCallNextHookEx     = user32.NewProc("CallNextHookEx")
+	pGetCurrentThreadID = kernel32.NewProc("GetCurrentThreadId")
 )
+
+// createStruct — CREATESTRUCTW: где и какого размера создаётся окно.
+type createStruct struct {
+	params, instance, menu, parent uintptr
+	cy, cx, y, x                   int32
+	style                          int32
+	name, class                    uintptr
+	exStyle                        uint32
+}
+
+// placeOnCreate — поставить следующее окно верхнего уровня этого потока сразу
+// туда, где ему место: запомненное место, если оно видно, иначе по центру
+// главного окна. Возвращает, чем снять перехват (звать на том же потоке).
+func placeOnCreate(p Rect, w, h int) func() {
+	x, y, ok := 0, 0, false
+	if p.W > 0 && p.H > 0 && onScreen(p) {
+		x, y, w, h, ok = p.X, p.Y, p.W, p.H, true
+	} else if u := active; u != nil && u.hwnd != 0 {
+		var r rect
+		pGetWindowRect.Call(u.hwnd, uintptr(unsafe.Pointer(&r)))
+		x = int(r.Left+r.Right)/2 - w/2
+		y = int(r.Top+r.Bottom)/2 - h/2
+		ok = onScreen(Rect{x, y, w, h})
+	}
+	if !ok {
+		return func() {}
+	}
+	const whCBT, hcbtCreateWnd = 5, 3
+	done := false
+	var hook uintptr
+	cb := windows.NewCallback(func(code, wp, lp uintptr) uintptr {
+		if code == hcbtCreateWnd && !done {
+			// CBT_CREATEWND: первым полем — указатель на CREATESTRUCTW.
+			cs := *(**createStruct)(unsafe.Pointer(lp))
+			if cs.parent == 0 {
+				done = true
+				cs.x, cs.y, cs.cx, cs.cy = int32(x), int32(y), int32(w), int32(h)
+			}
+		}
+		r, _, _ := pCallNextHookEx.Call(hook, code, wp, lp)
+		return r
+	})
+	tid, _, _ := pGetCurrentThreadID.Call()
+	hook, _, _ = pSetWindowsHookEx.Call(whCBT, cb, 0, tid)
+	return func() {
+		if hook != 0 {
+			pUnhookWindowsHook.Call(hook)
+			hook = 0
+		}
+	}
+}
 
 // onScreen — видно ли запомненное место хоть на одном мониторе (монитор
 // могли отключить — тогда окно открывается по центру).
@@ -161,11 +237,11 @@ func Opener(base, dataPath string) func(key, title, url string) error {
 	}
 	return func(key, title, url string) error {
 		return OpenWindow(WindowOptions{
-			Key:      key,
-			Title:    title,
-			URL:      base + url,
-			Place:    pl.get(key),
-			OnClose:  func(r Rect) { pl.set(key, r) },
+			Key:     key,
+			Title:   title,
+			URL:     base + url,
+			Place:   pl.get(key),
+			OnClose: func(r Rect) { pl.set(key, r) },
 			// Своя папка данных — свой процесс браузера: с общей папкой закрытое
 			// отдельное окно (его WebView2 библиотека не закрывает) вешало главное.
 			DataPath: filepath.Join(dataPath, "windows"),

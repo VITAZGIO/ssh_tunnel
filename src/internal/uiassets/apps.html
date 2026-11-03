@@ -22,6 +22,10 @@
   .tile.na{cursor:default;opacity:.55}
   .tile.na:hover{border-color:var(--line)}
   .tile .why{font-size:12px;color:var(--dim)}
+  /* Без чего плагин не работает — значки в правом нижнем углу (как у Home Assistant). */
+  .tile .needs{position:absolute;right:9px;bottom:9px;display:flex;gap:5px;color:var(--dim)}
+  .tile .needs .mi{width:16px;height:16px}
+  .item .hint .mi{width:14px;height:14px;vertical-align:-2px}
 
   /* Выключатель фонового приложения. */
   .sw{position:relative;width:36px;height:20px;border-radius:10px;background:var(--line);
@@ -177,6 +181,15 @@ async function op(o, id, value){
   changed();
 }
 
+// needsIcons — значки «нужна сеть устройств» / «нужен интернет».
+const NEEDS = {mesh: ['hub', L('Нужна сеть устройств', 'Needs the device network')],
+               internet: ['globe', L('Нужен интернет', 'Needs the internet')]};
+function needsIcons(m){
+  const list = (m.needs || []).filter(n => NEEDS[n]);
+  if(!list.length) return '';
+  return `<span class="needs">${list.map(n => `<span title="${esc(NEEDS[n][1])}">${icon(NEEDS[n][0])}</span>`).join('')}</span>`;
+}
+
 function renderList(){
   const g = $('grid');
   if(!ST.added.length){
@@ -201,6 +214,7 @@ function renderList(){
        <span class="nm">${esc(appName(m))}</span>
        ${m.custom ? `<span class="mark">${esc(L('не из каталога', 'not from catalog'))}</span>` : ''}
        ${m.unavailable ? `<span class="why">${esc(m.unavailable)}</span>` : ''}
+       ${needsIcons(m)}
        ${m.background && !m.unavailable ? `<span class="foot"><button class="sw${e.on ? ' on' : ''}" title="${esc(e.on ? L('Выключить', 'Turn off') : L('Включить', 'Turn on'))}"></button><span class="bg">${esc(L('в фоне', 'background'))}</span></span>` : ''}`;
     t.querySelector('.star').onclick = ev => { ev.stopPropagation(); op('star', e.id, !e.star); };
     t.querySelector('.more').onclick = ev => { ev.stopPropagation(); tileMenu(t, e.id); };
@@ -238,6 +252,7 @@ function renderCatalog(){
     it.innerHTML = `${icon(m.icon, 'ic')}
       <span class="tx"><span class="nm">${esc(appName(m))}</span>
         ${m.background ? `<span class="hint"> · ${esc(L('в фоне', 'background'))}</span>` : ''}
+        ${(m.needs || []).filter(n => NEEDS[n]).map(n => `<span class="hint" title="${esc(NEEDS[n][1])}"> ${icon(NEEDS[n][0])}</span>`).join('')}
         <div class="hint">${esc(m.unavailable || appHint(m))}</div></span>
       <button class="btn${has ? '' : ' primary'}"${has || m.unavailable ? ' disabled' : ''}>${esc(has ? L('Добавлено', 'Added') : L('Добавить', 'Add'))}</button>`;
     it.querySelector('button').onclick = () => op('add', m.id);

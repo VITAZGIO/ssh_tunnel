@@ -493,6 +493,10 @@
   /* Стрелка — справа сверху, прямо под кнопкой настроек. */
   #quickBtn{position:absolute;top:46px;right:14px;z-index:4}
   #quickBtn .mi{width:18px;height:18px}
+  /* Телефон: стрелка — в строке шапки, рядом с журналом (поверх она
+     наезжала на шапку и сдвигала её под строку состояния). */
+  #quickBtn.inbar{position:static}
+  body.android #quickPanel{top:52px}
   #quickPanel{position:absolute;top:84px;right:10px;z-index:6;background:var(--card2);
               border:1px solid var(--line);border-radius:12px;padding:6px;min-width:170px;
               box-shadow:0 8px 24px rgba(0,0,0,.35);animation:quickIn .16s ease-out}
@@ -5070,6 +5074,7 @@ async function loadAddons(){
     p.appendChild(b);
   }
 }
+if(ANDROID){ $('quickBtn').classList.add('inbar'); $('btnLog').before($('quickBtn')); }
 $('quickBtn').onclick = ev => { ev.stopPropagation(); $('quickPanel').hidden = !$('quickPanel').hidden; };
 document.addEventListener('click', ev => {
   if(!$('quickPanel').hidden && !$('quickPanel').contains(ev.target)) $('quickPanel').hidden = true;

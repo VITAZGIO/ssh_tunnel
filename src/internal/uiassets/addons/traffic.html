@@ -22,6 +22,7 @@
   svg.chart{display:block;width:100%;height:190px}
   svg.chart text{font-size:10px;fill:var(--dim);font-variant-numeric:tabular-nums}
   svg.chart .grid{stroke:var(--line);stroke-width:1}
+  .prog .why{display:block;color:var(--dim);font-size:11.5px;font-weight:400}
   .r-server{fill:var(--accent)} .r-direct{fill:var(--ok)} .r-mesh{fill:var(--warn)}
   .prog{display:grid;grid-template-columns:26px 1fr auto;gap:4px 10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
   .prog:last-child{border-bottom:0}
@@ -65,7 +66,7 @@ function human(b){
   if(b >= 1e9) return (b / 1e9).toFixed(b >= 1e10 ? 1 : 2) + L(' ГБ', ' GB');
   if(b >= 1e6) return (b / 1e6).toFixed(b >= 1e8 ? 0 : 1) + L(' МБ', ' MB');
   if(b >= 1e3) return Math.round(b / 1e3) + L(' КБ', ' KB');
-  return b + L(' Б', ' B');
+  return Math.round(b) + L(' Б', ' B');
 }
 
 function seg(id, items, cur, set){
@@ -78,20 +79,39 @@ function progName(n){
   if(n === 'ssh_tunnel') return L('ssh_tunnel (календарь, SSH, файлы)', 'ssh_tunnel (calendar, SSH, files)');
   return LABELS[n] || n;
 }
+// Что за системные программы — чтобы было понятно, кто «жрёт».
+const KNOWN = {
+  'svchost.exe': L('службы Windows: обновления, Microsoft Store, синхронизация, время', 'Windows services: updates, Microsoft Store, sync, time'),
+  'msedgewebview2.exe': L('встроенный браузер: окна программ, в т.ч. окна ssh_tunnel', 'built-in browser: app windows, incl. ssh_tunnel windows'),
+  'system': L('ядро Windows', 'Windows kernel'),
+  'lsass.exe': L('вход и сертификаты Windows', 'Windows sign-in and certificates'),
+  'backgroundtaskhost.exe': L('фоновые задачи приложений Windows', 'Windows app background tasks'),
+};
+
+// niceMax — верх шкалы: 1, 2 или 5 × 10ⁿ, не меньше 1 КБ (пустой график
+// не подписывается дробями байтов).
+function niceMax(v){
+  v = Math.max(v, 1000);
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  for(const m of [1, 2, 2.5, 5, 10]) if(v <= m * p) return m * p;
+  return 10 * p;
+}
 
 function drawChart(days){
-  // Ширина — настоящая, чтобы подписи не растягивались.
-  const W = Math.max(240, $('chart').clientWidth || 600), H = 190, top = 14, bot = 22, left = 4;
+  // Ширина — настоящая, чтобы подписи не растягивались. Подписи шкалы — слева,
+  // в своей колонке: столбики их не закрывают.
+  const W = Math.max(240, $('chart').clientWidth || 600), H = 190, top = 10, bot = 22, left = 58;
   $('chart').setAttribute('viewBox', `0 0 ${W} ${H}`);
-  const max = Math.max(1, ...days.map(d => d.server + d.direct + d.mesh));
-  const n = days.length, gap = n > 14 ? 2 : 6, bw = (W - left) / n - gap;
+  const max = niceMax(Math.max(0, ...days.map(d => d.server + d.direct + d.mesh)));
+  const n = Math.max(1, days.length), slot = (W - left) / n;
+  const gap = n > 14 ? 2 : 6, bw = Math.min(48, slot - gap);
   let s = '';
-  for(let i = 1; i <= 3; i++){
-    const y = top + (H - top - bot) * (1 - i / 3);
-    s += `<line class="grid" x1="0" x2="${W}" y1="${y}" y2="${y}"/><text x="${W - 2}" y="${y - 3}" text-anchor="end">${esc(human(max * i / 3))}</text>`;
+  for(let i = 0; i <= 4; i++){
+    const y = top + (H - top - bot) * (1 - i / 4);
+    s += `<line class="grid" x1="${left}" x2="${W}" y1="${y}" y2="${y}"/><text x="${left - 6}" y="${y + 3}" text-anchor="end">${esc(i ? human(max * i / 4) : '0')}</text>`;
   }
   days.forEach((d, i) => {
-    const x = left + i * (bw + gap);
+    const x = left + i * slot + (slot - bw) / 2;
     let y = H - bot;
     for(const k of COLORS){
       const h = (H - top - bot) * d[k] / max;
@@ -122,7 +142,7 @@ function render(){
     const w = k => (p.total ? p[k] * 100 / p.total : 0).toFixed(1);
     const ic = ANDROID && p.name && p.name !== 'ssh_tunnel' && !p.name.startsWith('uid:')
       ? `<img src="/api/appicon?pkg=${encodeURIComponent(p.name)}&t=${encodeURIComponent(T)}" alt="" onerror="this.remove()">` : icon('apps');
-    return `<div class="prog"><span class="ic">${ic}</span><span class="n" title="${esc(p.name)}">${esc(progName(p.name))}</span>
+    return `<div class="prog"><span class="ic">${ic}</span><span class="n" title="${esc(p.name)}">${esc(progName(p.name))}${KNOWN[(p.name || '').toLowerCase()] ? `<small class="why">${esc(KNOWN[p.name.toLowerCase()])}</small>` : ''}</span>
       <span class="s">${esc(human(p.total))}</span>
       <span class="line">${COLORS.map(k => `<i class="c-${k}" style="width:${w(k)}%" title="${esc(NAMES[k])}: ${esc(human(p[k]))}"></i>`).join('')}</span></div>`;
   }).join('') : `<div class="hint">${L('Пока ничего не прошло.', 'Nothing yet.')}</div>`;

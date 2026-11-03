@@ -146,13 +146,25 @@ function render(q){
 function layout(){
   const f = $('flow');
   if(!f) return;
+  // Читаемое место — первый абзац текущей страницы: после смены размера
+  // открываем страницу, где он теперь, а не страницу с тем же номером.
+  const anchor = f.dataset.step ? firstOnPage(f) : null;
   spread = f.clientWidth >= 860 ? 2 : 1;
   const gap = 56;
   const w = Math.floor((f.clientWidth - gap * (spread - 1)) / spread);
   f.style.columnWidth = w + 'px';
   f.dataset.step = w + gap;
   pages = Math.max(1, Math.round((f.scrollWidth + gap) / (w + gap)));
-  go(Math.min(page, pages - 1));
+  if(anchor){ f.scrollLeft = 0; go(pageOf(anchor)); } else go(Math.min(page, pages - 1));
+}
+
+// firstOnPage — первый блок текста, который начинается на открытой странице.
+function firstOnPage(f){
+  const left = f.getBoundingClientRect().left;
+  for(const el of f.querySelectorAll('h1,h2,h3,p,li,pre,table')){
+    if(el.getBoundingClientRect().left - left >= -2) return el;
+  }
+  return null;
 }
 
 function go(n){

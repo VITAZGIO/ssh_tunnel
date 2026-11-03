@@ -18,7 +18,7 @@ func init() {
 				"ru": "Адрес → «Проверить»: сразу два пути — напрямую и через VPN, по шагам. Итог одной фразой и кнопка правила.",
 				"en": "Address → \"Check\": two paths at once — direct and via VPN, step by step. A one-line verdict and a rule button.",
 			},
-			Book: "app-sitecheck", Page: "addons/sitecheck.html", Platforms: diagPlatforms, Permissions: []string{},
+			Book: "app-sitecheck", Page: "addons/sitecheck.html", Platforms: diagPlatforms, Needs: []string{"internet"}, Permissions: []string{},
 		},
 		Manifest{
 			ID:   "meddlers",
@@ -28,7 +28,7 @@ func init() {
 				"ru": "Ищет обходы DPI, чужие VPN, прокси, DNS, hosts и антивирусы. Останавливает только с твоего разрешения и сам возвращает, если не помогло.",
 				"en": "Finds DPI bypasses, other VPNs, proxies, DNS, hosts and antiviruses. Stops things only with your permission and restores them if it did not help.",
 			},
-			Book: "app-meddlers", Page: "addons/meddlers.html", Platforms: diagPlatforms, Permissions: []string{},
+			Book: "app-meddlers", Page: "addons/meddlers.html", Platforms: diagPlatforms, Needs: []string{"internet"}, Permissions: []string{},
 		},
 		Manifest{
 			ID:   "leaks",
@@ -38,7 +38,7 @@ func init() {
 				"ru": "Какой адрес видят сайты, чей DNS отвечает, нет ли IPv6 мимо туннеля. Молча проверяет при каждом подключении и пишет только при утечке.",
 				"en": "Which address sites see, whose DNS answers, whether IPv6 bypasses the tunnel. Checks silently on every connection, speaks up only on a leak.",
 			},
-			Book: "app-leaks", Page: "addons/leaks.html", Background: true, Platforms: diagPlatforms, Permissions: []string{},
+			Book: "app-leaks", Page: "addons/leaks.html", Background: true, Platforms: diagPlatforms, Needs: []string{"internet"}, Permissions: []string{},
 		},
 		Manifest{
 			ID:   "report",

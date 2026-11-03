@@ -170,3 +170,17 @@ func TestDirectListCleansPastedURLs(t *testing.T) {
 		t.Errorf("Names() = %q", got)
 	}
 }
+
+// TestCompanions — сайт в списке тянет за собой свои CDN: видео Rutube и
+// картинки Яндекса идут той же дорогой, что сам сайт.
+func TestCompanions(t *testing.T) {
+	d := NewDirectList([]string{"rutube.ru", "yandex.ru"})
+	for _, h := range []string{"rutube.ru", "video-1.rtbcdn.ru:443", "yastatic.net", "img.yandex.net"} {
+		if !d.Match(h) {
+			t.Errorf("%s должен идти как rutube.ru/yandex.ru", h)
+		}
+	}
+	if d.Match("google.com") {
+		t.Error("google.com в список не входил")
+	}
+}

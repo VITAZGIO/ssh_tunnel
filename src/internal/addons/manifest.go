@@ -36,6 +36,10 @@ type Manifest struct {
 	// Platforms — где работает (runtime.GOOS: windows, linux, android).
 	// Пусто — везде.
 	Platforms []string `json:"platforms,omitempty"`
+	// Needs — без чего приложение не работает: "mesh" — сеть устройств,
+	// "internet" — интернет. На плитке — значками, как у интеграций Home
+	// Assistant, чтобы сразу было видно, зачем включать.
+	Needs []string `json:"needs,omitempty"`
 	// Custom — своё приложение из файла (custom.go): на плитке пометка «не
 	// из каталога», значок — IconURL (файл из архива), а не Icon.
 	Custom  bool   `json:"custom,omitempty"`
@@ -74,6 +78,7 @@ var catalog = []Manifest{
 		Book:        "app-calendar",
 		Background:  true,
 		Page:        "addons/calendar.html",
+		Needs:       []string{"internet"},
 		Permissions: []string{},
 	},
 	// ТЗ 4: устройства сети (internal/netmap, internal/sshapp, internal/devfiles).
@@ -88,6 +93,7 @@ var catalog = []Manifest{
 		Book:        "app-netmap",
 		Window:      true,
 		Page:        "addons/netmap.html",
+		Needs:       []string{"mesh"},
 		Permissions: []string{},
 	},
 	{
@@ -100,6 +106,7 @@ var catalog = []Manifest{
 		},
 		Book:        "app-ssh",
 		Page:        "addons/ssh.html",
+		Needs:       []string{"mesh"},
 		Permissions: []string{},
 	},
 	{
@@ -113,6 +120,7 @@ var catalog = []Manifest{
 		Book:        "app-files",
 		Window:      true,
 		Page:        "addons/files.html",
+		Needs:       []string{"mesh"},
 		Permissions: []string{},
 	},
 	// ТЗ 6: зеркальные папки (internal/mirror).
@@ -127,6 +135,7 @@ var catalog = []Manifest{
 		Book:        "app-mirror",
 		Background:  true,
 		Page:        "addons/mirror.html",
+		Needs:       []string{"mesh"},
 		Permissions: []string{},
 	},
 }

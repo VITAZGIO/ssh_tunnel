@@ -131,6 +131,7 @@ object Tools5 : mobile.Phone {
         main.post {
             val cb = c.getSystemService(ClipboardManager::class.java) ?: return@post
             val clip = if (kind == "text") {
+                lastText = text
                 ClipData.newPlainText("ssh_tunnel", text)
             } else {
                 val uri = FileProvider.getUriForFile(c, c.packageName + ".files", File(path))
@@ -233,6 +234,37 @@ object Tools5 : mobile.Phone {
     }
 
     const val MAX = 50 * 1024 * 1024
+
+    /** Последний текст буфера, который уже ушёл или пришёл: его не шлём снова. */
+    @Volatile private var lastText: String? = null
+
+    /**
+     * Буфер телефона → компьютеры без кнопок. Android (10+) даёт читать буфер
+     * только программе на экране, поэтому скопированное в другом приложении
+     * уходит, как только открываешь ssh_tunnel. Плагин не добавлен или
+     * отправка выключена — ядро отвечает ошибкой, и молчим.
+     */
+    fun autoSend(a: Activity) {
+        val cb = a.getSystemService(ClipboardManager::class.java) ?: return
+        val text = try {
+            cb.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(a)?.toString()
+        } catch (_: Exception) {
+            null
+        }
+        if (text.isNullOrEmpty() || text == lastText) return
+        lastText = text
+        val ctx = a.applicationContext
+        Thread {
+            DeviceApps.init(ctx)
+            val r = try {
+                JSONObject(mobile.Mobile.clipPush("text", "", "", text.toByteArray()))
+            } catch (_: Exception) {
+                return@Thread
+            }
+            val n = r.optInt("sent")
+            if (n > 0) main.post { Toast.makeText(ctx, ctx.getString(R.string.clip_sent, n), Toast.LENGTH_SHORT).show() }
+        }.start()
+    }
 }
 
 /** «Поделиться → ssh_tunnel»: текст, картинка или файл — всем устройствам. Окна нет. */

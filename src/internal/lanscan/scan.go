@@ -49,6 +49,15 @@ type Result struct {
 	Started string `json:"started,omitempty"`
 	Took    int64  `json:"tookMs,omitempty"`
 	Hosts   []Host `json:"hosts"`
+	// Nets — все сети устройства (лучшая первой): какую сканировать, человек
+	// может выбрать сам.
+	Nets []Net `json:"nets,omitempty"`
+}
+
+// Net — сеть, которую можно сканировать.
+type Net struct {
+	Subnet string `json:"subnet"`
+	Iface  string `json:"iface"`
 }
 
 // Сколько адресов опрашивать разом: быстро, но без потопа.
@@ -118,9 +127,21 @@ func FindLAN() (LAN, error) {
 		}
 		return LAN{}, errNoLAN
 	}
-	ifs, err := net.Interfaces()
+	found, err := FindLANs()
 	if err != nil {
 		return LAN{}, err
+	}
+	if len(found) == 0 {
+		return LAN{}, errNoLAN
+	}
+	return found[0], nil
+}
+
+// interfaceLANs — сети с адаптеров (без VPN и петли), как их отдаёт система.
+func interfaceLANs() ([]LAN, error) {
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return nil, err
 	}
 	var found []LAN
 	for _, ifc := range ifs {
@@ -144,21 +165,63 @@ func FindLAN() (LAN, error) {
 			}
 		}
 	}
-	if len(found) == 0 {
-		return LAN{}, errNoLAN
+	return found, nil
+}
+
+// FindLANs — все локальные сети устройства, лучшая первой: та, через
+// которую идёт путь в интернет (её адрес система выбирает для внешнего
+// адреса; при включённом VPN это адрес туннеля — тогда не помогает), потом
+// настоящие адаптеры, в конце виртуальные (VirtualBox, VMware, Hyper-V):
+// их имя бывает обычным «Ethernet 2», а сеть внутри — пустая.
+func FindLANs() ([]LAN, error) {
+	srcMu.Lock()
+	f := lanSource
+	srcMu.Unlock()
+	if f != nil {
+		l, err := FindLAN()
+		if err != nil {
+			return nil, err
+		}
+		return []LAN{l}, nil
 	}
-	// Несколько — берём ту, через которую идёт путь в интернет мимо VPN
-	// (её адрес выбирает система для внешнего адреса), иначе первую.
+	found, err := interfaceLANs()
+	if err != nil {
+		return nil, err
+	}
+	if len(found) == 0 {
+		return nil, errNoLAN
+	}
+	var out netip.Addr
 	if c, err := net.Dial("udp4", "192.0.2.1:9"); err == nil {
 		la, _ := netip.ParseAddrPort(c.LocalAddr().String())
 		c.Close()
-		for _, l := range found {
-			if l.Prefix.Addr() == la.Addr() {
-				return l, nil
-			}
+		out = la.Addr()
+	}
+	rank := func(l LAN) int {
+		switch {
+		case l.Prefix.Addr() == out:
+			return 0
+		case virtualMAC(l.MAC):
+			return 2
+		}
+		return 1
+	}
+	sort.SliceStable(found, func(i, j int) bool { return rank(found[i]) < rank(found[j]) })
+	return found, nil
+}
+
+// virtualMAC — адаптер виртуальной машины (по производителю в MAC).
+func virtualMAC(mac net.HardwareAddr) bool {
+	if len(mac) < 3 {
+		return false
+	}
+	p := strings.ToUpper(mac[:3].String())
+	for _, v := range []string{"0A:00:27", "08:00:27", "00:50:56", "00:0C:29", "00:05:69", "00:1C:14", "00:15:5D", "00:1C:42", "00:03:FF"} {
+		if p == v {
+			return true
 		}
 	}
-	return found[0], nil
+	return false
 }
 
 // targets — адреса подсети без своего, сети и широковещательного.
@@ -244,24 +307,34 @@ func (s *Scanner) Get() Result {
 	return r
 }
 
-// Start — начать сканирование (идёт — ничего не делает).
-func (s *Scanner) Start() Result {
+// Start — начать сканирование (идёт — ничего не делает). want — подсеть
+// («192.168.1.0/24»), которую выбрал человек; "" — лучшая.
+func (s *Scanner) Start(want string) Result {
 	s.mu.Lock()
 	if s.res.Running {
 		s.mu.Unlock()
 		return s.Get()
 	}
-	lan, err := FindLAN()
+	lans, err := FindLANs()
 	if err != nil {
 		s.res = Result{Error: err.Error(), Hosts: []Host{}}
 		s.mu.Unlock()
 		return s.Get()
 	}
+	lan := lans[0]
+	var nets []Net
+	for _, l := range lans {
+		sub := l.Prefix.Masked().String()
+		nets = append(nets, Net{sub, l.Iface})
+		if sub == want {
+			lan = l
+		}
+	}
 	list := targets(lan.Prefix)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	s.stop = cancel
 	s.res = Result{Running: true, Subnet: lan.Prefix.Masked().String(), Iface: lan.Iface,
-		Total: len(list), Started: time.Now().Format(time.RFC3339), Hosts: []Host{}}
+		Total: len(list), Started: time.Now().Format(time.RFC3339), Hosts: []Host{}, Nets: nets}
 	s.mu.Unlock()
 	go s.run(ctx, lan, list)
 	return s.Get()
