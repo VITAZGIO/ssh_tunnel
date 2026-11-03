@@ -333,4 +333,8 @@
     <string name="app_profile">Профиль %1$d</string>
     <string name="app_profile_del">Удалить «%1$s» со всеми его настройками и серверами?</string>
     <string name="app_profile_del_yes">Удалить</string>
+    <!-- Календарь (ТЗ 7): аккаунт и виджет. -->
+    <string name="calendar_account">Календарь ssh_tunnel</string>
+    <string name="calendar_widget_desc">Ближайшие события из Nextcloud</string>
+    <string name="calendar_widget_empty">Нет событий на неделе</string>
 </resources>

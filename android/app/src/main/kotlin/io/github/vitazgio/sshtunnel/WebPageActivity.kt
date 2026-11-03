@@ -1,8 +1,10 @@
 package io.github.vitazgio.sshtunnel
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
@@ -86,6 +88,32 @@ class WebPageActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun openExternal(url: String) = runOnUiThread { this@WebPageActivity.openExternal(url) }
+
+        // Календарь подключён на странице: спросить разрешения и завести
+        // аккаунт в системе (CalendarSync).
+        @JavascriptInterface
+        fun calendarSetup(contacts: Boolean) = runOnUiThread { this@WebPageActivity.calendarSetup(contacts) }
+
+        @JavascriptInterface
+        fun calendarForget() = runOnUiThread { CalendarSync.forget(this@WebPageActivity) }
+    }
+
+    private var calendarContacts = false
+
+    private fun calendarSetup(contacts: Boolean) {
+        calendarContacts = contacts
+        val perms = mutableListOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
+        if (contacts) perms += listOf(Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS)
+        val need = perms.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (need.isEmpty()) CalendarSync.setup(this, contacts)
+        else requestPermissions(need.toTypedArray(), REQ_CALENDAR)
+    }
+
+    override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, res: IntArray) {
+        super.onRequestPermissionsResult(code, perms, res)
+        // Без разрешения на контакты календарь всё равно работает.
+        if (code == REQ_CALENDAR) CalendarSync.setup(this,
+            calendarContacts && checkSelfPermission(Manifest.permission.WRITE_CONTACTS) == PackageManager.PERMISSION_GRANTED)
     }
 
     companion object {
@@ -94,6 +122,7 @@ class WebPageActivity : AppCompatActivity() {
         const val EXTRA_CHAPTER = "chapter"
         const val PAGE_APPS = "apps.html"
         const val PAGE_BOOK = "book.html"
+        private const val REQ_CALENDAR = 71
 
         fun open(ctx: Context, page: String, app: String? = null) {
             ctx.startActivity(Intent(ctx, WebPageActivity::class.java)

@@ -371,3 +371,11 @@ type udpRelay interface {
 	Close(sessionID uint32)
 	Send(sessionID uint32, host string, port uint16, data []byte) error
 }
+
+// DialSelf — соединение самой программы (календарь к Nextcloud и т. п.):
+// куда вести — решает ядро, как для любой программы (имя .mesh — в сеть
+// устройств, домашний адрес — напрямую).
+func (t *Tunnel) DialSelf(target string) (net.Conn, error) {
+	route, _ := t.decide("", target)
+	return t.dialRoute(route, target)
+}

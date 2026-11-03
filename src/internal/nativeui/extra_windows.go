@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -28,6 +29,10 @@ type WindowOptions struct {
 	// OnClose — где окно было, когда его закрыли (запомнить на следующий раз).
 	OnClose  func(Rect)
 	DataPath string
+	// Widget — виджет на рабочем столе (widget_windows.go): без рамки, под
+	// всеми окнами, без значка в панели задач; место запоминается и после
+	// перетаскивания.
+	Widget bool
 }
 
 var (
@@ -59,6 +64,9 @@ func OpenWindow(o WindowOptions) error {
 		defer runtime.UnlockOSThread()
 
 		w, h := 820, 640
+		if o.Widget {
+			w, h = 320, 420
+		}
 		if o.Place.W > 0 && o.Place.H > 0 {
 			w, h = o.Place.W, o.Place.H
 		}
@@ -87,13 +95,20 @@ func OpenWindow(o WindowOptions) error {
 			pSetWindowPos.Call(hwnd, 0, uintptr(o.Place.X), uintptr(o.Place.Y),
 				uintptr(o.Place.W), uintptr(o.Place.H), swpNoZOrder)
 		}
-		(&ui{hwnd: hwnd}).themeTitleBar()
+		if o.Widget {
+			makeWidget(hwnd, view)
+		} else {
+			(&ui{hwnd: hwnd}).themeTitleBar()
+		}
 
 		// Перед закрытием запоминаем, где окно было; дальше закрытие идёт как
 		// обычно (библиотека разрушает окно и выходит из цикла этого потока).
 		var old uintptr
 		proc := windows.NewCallback(func(hw, msg, wp, lp uintptr) uintptr {
-			if msg == wmClose && o.OnClose != nil {
+			if o.Widget {
+				widgetMsg(msg, lp)
+			}
+			if (msg == wmClose || (o.Widget && msg == wmExitSizeMove)) && o.OnClose != nil {
 				var r rect
 				pGetWindowRect.Call(hw, uintptr(unsafe.Pointer(&r)))
 				o.OnClose(Rect{int(r.Left), int(r.Top), int(r.Right - r.Left), int(r.Bottom - r.Top)})
@@ -131,7 +146,8 @@ func onScreen(p Rect) bool {
 	return m != 0
 }
 
-// Opener — как программа открывает отдельные окна: base — адрес интерфейса
+// Opener — как программа открывает отдельные окна (ключ «…-widget» — виджет
+// на рабочем столе): base — адрес интерфейса
 // («http://127.0.0.1:порт»), к нему прибавляется путь страницы. Место и
 // размер каждого окна запоминаются в windows.json в папке настроек.
 func Opener(base, dataPath string) func(key, title, url string) error {
@@ -147,6 +163,7 @@ func Opener(base, dataPath string) func(key, title, url string) error {
 			Place:    pl.get(key),
 			OnClose:  func(r Rect) { pl.set(key, r) },
 			DataPath: dataPath,
+			Widget:   strings.HasSuffix(key, "-widget"),
 		})
 	}
 }
