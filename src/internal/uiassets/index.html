@@ -504,6 +504,7 @@
   /* Телефон (WebView, мост SSHTunnelAndroid): чего на нём нет — не видно. */
   body.android .desk-only{display:none!important}
   body:not(.android) .android-only{display:none!important}
+  #meddleOffer:not([hidden]){display:block;margin:-4px auto 10px;font-size:12.5px;padding:6px 12px}
   /* Быстрый доступ — только на главном экране. */
   body[data-view]:not([data-view="viewMain"]) #quickBtn,
   body[data-view]:not([data-view="viewMain"]) #quickPanel{display:none}
@@ -680,6 +681,8 @@
   <div class="view on" id="viewMain">
     <div class="mainPage">
     <div class="err-box" id="error"></div>
+    <!-- Туннель не подключился — предложить «Кто трогает трафик». -->
+    <button type="button" class="btn" id="meddleOffer" hidden data-i18n="meddle_offer">Проверить, кто мешает</button>
 
     <!-- Кнопка со статусом занимают всё свободное место и центрируются в нём,
          плитки прижаты к низу окна. -->
@@ -2055,7 +2058,7 @@ const I18N = {
     wizard_title:'Мастер настройки', wizard_sub:'Подключить телефон или новый сервер',
     addons_title:'Дополнительные приложения', addons_sub:'Добавляешь сам, что нужно',
     book_title:'Книга', book_sub:'Справка: с чего начать, режимы, частые проблемы',
-    quick_title:'Быстрый доступ',
+    quick_title:'Быстрый доступ', meddle_offer:'Проверить, кто мешает',
     wizard_android:'Android', wizard_vps:'VPS', wizard_user:'Пользователь',
     wizard_user_intro:'Новый пользователь на сервере, к которому ты подключён.',
     wizard_user_note:'Работает, если в панели сервера твоему устройству включено «Может создавать пользователей». '+
@@ -2370,7 +2373,7 @@ const I18N = {
     wizard_title:'Setup wizard', wizard_sub:'Connect a phone or a new server',
     addons_title:'More apps', addons_sub:'Add what you need yourself',
     book_title:'Book', book_sub:'Help: getting started, modes, common problems',
-    quick_title:'Quick access',
+    quick_title:'Quick access', meddle_offer:'Check who interferes',
     wizard_android:'Android', wizard_vps:'VPS', wizard_user:'User',
     wizard_user_intro:'A new user on the server you are connected to.',
     wizard_user_note:'Works if the server panel allows your device to create users. The password is the one set there. '+
@@ -2987,6 +2990,7 @@ function renderCore(st){
   $('meshBtnCap').textContent = tr(st.mesh.want ? 'mesh_btn_on' : 'mesh_btn_off');
   const failed = t === 'error' ? st.tunnel : st.mesh.phase === 'error' ? st.mesh : null;
   showError(failed ? connErrorText(failed.errorKind, failed.error) : '');
+  $('meddleOffer').hidden = t !== 'error';
 }
 async function wantCore(body){
   showError('');
@@ -5012,6 +5016,12 @@ document.addEventListener('click', ev => {
   if(!$('quickPanel').hidden && !$('quickPanel').contains(ev.target)) $('quickPanel').hidden = true;
 });
 $('toAddons').onclick = () => showAddons();
+// Не подключилось — «Кто трогает трафик» (добавляется по этому нажатию).
+$('meddleOffer').onclick = async () => {
+  if(!addonsState.added.some(e => e.id === 'meddlers')) await api('/api/addons', {op: 'add', id: 'meddlers'}).catch(() => {});
+  await loadAddons();
+  showAddons('meddlers');
+};
 // Книга на ПК — отдельным окном, листается страницами.
 $('toBook').onclick = () => openWindow('book', tr('book_title') + ' — ssh_tunnel',
   pageURL('book.html', {solo: '1', key: 'book'}));

@@ -43,6 +43,7 @@ import (
 	"sshtunnel/internal/app"
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/core"
+	"sshtunnel/internal/diag"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/filedialog"
 	"sshtunnel/internal/procinfo"
@@ -68,6 +69,9 @@ type Server struct {
 	// addons — дополнительные приложения этого устройства (каталог, что
 	// добавлено, модули ядра). Список хранится у ядра, а не в окне.
 	addons *addons.Service
+	// diag — диагностика (internal/diag): проверить сайт, кто трогает
+	// трафик, утечки, отчёт.
+	diag *diag.Service
 
 	// vpsSetup — идёт ли сейчас настройка VPS. Мастер занимает минуту-две и
 	// трогает sshd на сервере; запускать второй одновременно с первым — верный
@@ -99,8 +103,12 @@ func NewOn(a *App, addr string) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("не могу занять адрес %s: %w", addr, err)
 	}
+	dg := newDiag(a)
 	s := &Server{app: a, token: hex.EncodeToString(tok), ln: ln, bootFlags: []string{"-web"},
-		addons: addons.New(config.Dir())}
+		addons: addons.New(config.Dir()), diag: dg}
+	if dg != nil {
+		dg.SetActive(s.addons.Active)
+	}
 	if a != nil && a.Bus != nil {
 		s.addons.SetLog(a.Bus.Warnf)
 	}
