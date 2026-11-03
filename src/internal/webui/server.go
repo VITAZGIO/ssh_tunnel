@@ -51,6 +51,7 @@ import (
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/filedialog"
 	"sshtunnel/internal/mesh"
+	"sshtunnel/internal/mirror"
 	"sshtunnel/internal/procinfo"
 	"sshtunnel/internal/serverusers"
 	"sshtunnel/internal/sysproxy"
@@ -127,6 +128,7 @@ func NewOn(a *App, addr string) (*Server, error) {
 		devnet.Set(appNet{a})
 		if a.Bus != nil {
 			devfiles.SetLog(func(t string) { a.Bus.Infof("%s", t) })
+			mirror.SetNotify(func(t string) { a.Bus.Warnf("%s", t) })
 		}
 	}
 	// Порт 0 означает «любой свободный» — такой адрес в файл службы писать

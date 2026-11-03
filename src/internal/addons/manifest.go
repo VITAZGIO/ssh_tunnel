@@ -111,6 +111,20 @@ var catalog = []Manifest{
 		Page:        "addons/files.html",
 		Permissions: []string{},
 	},
+	// ТЗ 6: зеркальные папки (internal/mirror).
+	{
+		ID:   "mirror",
+		Name: map[string]string{"ru": "Зеркальные папки", "en": "Mirrored folders"},
+		Icon: "sync",
+		Hint: map[string]string{
+			"ru": "Одна папка на всех устройствах: сервер (всегда включённое устройство) раздаёт, остальные подключаются. Работает по сети устройств и без туннеля. Конфликты и удаления не теряют файлы: версии и корзина на сервере 30 дней.",
+			"en": "One folder on all devices: a server (an always-on device) shares it, the others connect. Works over the device network even without the tunnel. Conflicts and deletions never lose files: versions and trash are kept on the server for 30 days.",
+		},
+		Book:        "app-mirror",
+		Background:  true,
+		Page:        "addons/mirror.html",
+		Permissions: []string{},
+	},
 }
 
 // showDev — показывать ли образцы. В релизе версия проставлена сборкой.
