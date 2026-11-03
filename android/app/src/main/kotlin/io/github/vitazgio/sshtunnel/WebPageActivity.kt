@@ -12,7 +12,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
-import org.json.JSONArray
 
 // Общая страница интерфейса — та же, что в окне ПК (Книга, дополнительные
 // приложения): HTML и API отдаёт ядро (mobile.StartUI), здесь только WebView
@@ -55,6 +54,12 @@ class WebPageActivity : AppCompatActivity() {
                 if (web.canGoBack()) web.goBack() else finish()
             }
         })
+        // Готовый адрес страницы от главного экрана (Книга, приложение
+        // окном): путь ядра с параметрами.
+        intent.getStringExtra(EXTRA_URL)?.takeIf { it.startsWith("/") }?.let {
+            web.loadUrl(base + it)
+            return
+        }
         val s = Settings(this)
         val q = Uri.Builder()
             .appendQueryParameter("t", mobile.Mobile.uiToken())
@@ -89,6 +94,7 @@ class WebPageActivity : AppCompatActivity() {
     }
 
     companion object {
+        const val EXTRA_URL = "url"
         const val EXTRA_PAGE = "page"
         const val EXTRA_OPEN = "open"
         const val EXTRA_CHAPTER = "chapter"
@@ -99,16 +105,6 @@ class WebPageActivity : AppCompatActivity() {
             ctx.startActivity(Intent(ctx, WebPageActivity::class.java)
                 .putExtra(EXTRA_PAGE, page)
                 .apply { if (app != null) putExtra(EXTRA_OPEN, app) })
-        }
-
-        // starred — приложения со звёздочкой (id → название) для быстрого
-        // доступа на главном экране.
-        fun starred(ctx: Context, lang: String): List<Pair<String, String>> = try {
-            mobile.Mobile.startUI(ctx.filesDir.absolutePath)
-            val a = JSONArray(mobile.Mobile.starredJSON(lang))
-            (0 until a.length()).map { a.getJSONObject(it).let { o -> o.getString("id") to o.getString("name") } }
-        } catch (_: Exception) {
-            emptyList()
         }
     }
 }
