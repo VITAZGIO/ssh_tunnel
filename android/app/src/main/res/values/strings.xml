@@ -333,4 +333,8 @@
     <string name="app_profile">Профиль %1$d</string>
     <string name="app_profile_del">Удалить «%1$s» со всеми его настройками и серверами?</string>
     <string name="app_profile_del_yes">Удалить</string>
+    <!-- Файлы устройства: уведомление только во время передачи. -->
+    <string name="files_transfer_channel">Передача файлов</string>
+    <string name="files_transfer_title">Файлы устройства</string>
+    <string name="files_transfer_many">Передач: %1$d</string>
 </resources>

@@ -752,13 +752,20 @@ func (p *p2p) handleStream(peerIP string, conn quic.Connection, str quic.Stream)
 		reply(streamOK)
 		return
 	}
-	if !p.c.cfg.AllowIncoming {
+	h := service(port)
+	if h == nil && !p.c.cfg.AllowIncoming {
 		reply(streamRefused)
 		return
 	}
-	ctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
-	local, err := p.c.LocalDial(ctx, port)
-	cancel()
+	var local net.Conn
+	var err error
+	if h != nil {
+		local = localService(h, Caller{IP: peerIP, Host: p.c.hostOf(peerIP)})
+	} else {
+		ctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
+		local, err = p.c.LocalDial(ctx, port)
+		cancel()
+	}
 	if err != nil {
 		reply(streamNoListen)
 		return

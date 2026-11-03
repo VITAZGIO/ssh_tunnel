@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-//go:embed *.html *.css *.js *.svg icons/*.svg addons/*.html
+//go:embed *.html *.css *.js *.svg icons/*.svg addons/*.html vendor/*
 var files embed.FS
 
 // FS — все файлы интерфейса.

@@ -23,6 +23,12 @@
     <!-- Скачанное обновление открывается сразу в установщике: без этого
          разрешения Android даже не предложит разрешить установку. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- «Файлы устройства»: другие устройства сети смотрят папки, которые
+         владелец сам отметил (Фото, Загрузки…). Ядро на Go работает с путями,
+         поэтому нужен «Доступ ко всем файлам», а не SAF; спрашивается по
+         кнопке в приложении. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application

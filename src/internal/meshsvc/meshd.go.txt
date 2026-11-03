@@ -160,6 +160,7 @@ type peer struct {
 	Online   bool   `json:"online"`
 	LastSeen int64  `json:"lastSeen,omitempty"`
 	Platform string `json:"platform,omitempty"`
+	OS       string `json:"os,omitempty"`
 	Via      string `json:"via,omitempty"`
 }
 
@@ -428,7 +429,7 @@ func (s *server) peersLocked(n *network, me *device) []peer {
 			continue
 		}
 		p := peer{Name: d.displayName(), Host: d.Host, IP: d.IP, Online: d.ctrl != nil,
-			Platform: d.Platform, Via: d.Via}
+			Platform: d.Platform, OS: d.OS, Via: d.Via}
 		if !d.LastSeen.IsZero() {
 			p.LastSeen = d.LastSeen.Unix()
 		}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"sshtunnel/internal/addons"
+	_ "sshtunnel/internal/addons/devapps"
 	"sshtunnel/internal/book"
 	"sshtunnel/internal/uiassets"
 )

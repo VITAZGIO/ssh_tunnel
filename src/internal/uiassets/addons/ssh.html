@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+<title>SSH</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../pages.css">
+<link rel="stylesheet" href="../vendor/xterm.css">
+<style>
+  body{background:transparent}
+  .box{padding:0 14px 16px;display:flex;flex-direction:column;gap:10px}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-top:10px}
+  .bar .sp{flex:1}
+  .srv{display:flex;gap:12px;align-items:center}
+  .srv .mi{width:26px;height:26px;color:var(--accent)}
+  .srv .tx{flex:1;min-width:0}
+  .srv .n{font-weight:600}
+  .srv .a{color:var(--dim);font-family:var(--mono);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .srv .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .btn{display:inline-flex;align-items:center;gap:6px}
+  .btn .mi{width:18px;height:18px}
+  form.card{display:grid;gap:10px}
+  label{display:grid;gap:4px;font-size:13px;color:var(--dim)}
+  input,select{font:inherit;color:var(--text);background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  .row2{display:grid;grid-template-columns:1fr 110px;gap:10px}
+  .pub{font-family:var(--mono);font-size:12px;word-break:break-all;color:var(--dim)}
+  .msg{font-size:13px}
+  .msg.err{color:var(--err)}
+  .msg.ok{color:var(--ok)}
+
+  /* Встроенный терминал. */
+  #termView{position:fixed;inset:0;display:flex;flex-direction:column;background:#000;z-index:10}
+  #termHead{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--card);border-bottom:1px solid var(--line)}
+  #termHead .t{flex:1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #term{flex:1;min-height:0;padding:4px}
+  #keys{display:flex;gap:4px;padding:6px;background:var(--card);border-top:1px solid var(--line);overflow-x:auto}
+  #keys button{flex:none;min-width:44px;height:38px;border-radius:8px;border:1px solid var(--line);background:var(--card2);
+               color:var(--text);font:600 13px/1 var(--mono);cursor:pointer;display:grid;place-items:center}
+  #keys button.on{background:var(--accent-muted);border-color:var(--accent)}
+  #keys .mi{width:20px;height:20px}
+</style>
+</head>
+<body>
+<div class="box" id="main">
+  <div class="bar">
+    <button class="btn primary" id="addBtn"></button>
+    <span class="sp"></span>
+    <button class="btn" id="keyBtn"></button>
+  </div>
+  <div class="card" id="keyBox" hidden>
+    <div class="hint" id="keyHint"></div>
+    <div class="pub" id="pub"></div>
+    <div class="bar"><button class="btn" id="copyPub"></button></div>
+  </div>
+  <form class="card" id="form" hidden autocomplete="off">
+    <label><span id="lName"></span><input id="fName" maxlength="64"></label>
+    <label><span id="lAddr"></span>
+      <select id="fPick"></select>
+      <input id="fHost" maxlength="255" hidden>
+    </label>
+    <div class="row2">
+      <label><span id="lUser"></span><input id="fUser" maxlength="64" autocapitalize="off" spellcheck="false"></label>
+      <label><span id="lPort"></span><input id="fPort" type="number" min="1" max="65535" value="22"></label>
+    </div>
+    <div class="bar"><button class="btn primary" id="fSave" type="submit"></button>
+      <button class="btn" id="fCancel" type="button"></button></div>
+    <div class="msg" id="fMsg"></div>
+  </form>
+  <div id="list"></div>
+  <div class="msg" id="msg"></div>
+</div>
+
+<div id="termView" hidden>
+  <div id="termHead">
+    <button class="ico" id="termBack"></button>
+    <span class="t" id="termTitle"></span>
+  </div>
+  <div id="term"></div>
+  <div id="keys"></div>
+</div>
+
+<script src="../pages.js"></script>
+<script src="../vendor/xterm.js"></script>
+<script src="../vendor/addon-fit.js"></script>
+<script>
+/* SSH: список серверов этого устройства (у ядра, /api/ssh), анкета, вход по
+   ключу программы. ПК — внешний терминал (/api/ssh/open), телефон и ПК без
+   терминала — встроенный (xterm.js, /api/ssh/term). */
+let ST = {servers: [], external: false}, DEVS = [], EDIT = null;
+const set = (id, t) => $(id).textContent = t;
+
+$('addBtn').innerHTML = icon('add') + L('Добавить сервер', 'Add server');
+$('keyBtn').innerHTML = icon('key') + L('Ключ', 'Key');
+$('copyPub').innerHTML = icon('content_copy') + L('Скопировать', 'Copy');
+set('keyHint', L('Открытый ключ программы на этом устройстве. Его ставит кнопка «Установить ключ»; можно и вручную — в ~/.ssh/authorized_keys на сервере. Закрытая часть хранится зашифрованной и не показывается.',
+  'Public key of the app on this device. «Install key» puts it on a server; you can also add it to ~/.ssh/authorized_keys yourself. The private part is stored encrypted and never shown.'));
+set('lName', L('Имя', 'Name')); set('lAddr', L('Адрес', 'Address'));
+set('lUser', L('Логин', 'Login')); set('lPort', L('Порт', 'Port'));
+set('fSave', L('Сохранить', 'Save')); set('fCancel', L('Отмена', 'Cancel'));
+$('termBack').innerHTML = icon('arrow_back');
+
+function msg(t, cls){ const m = $('msg'); m.textContent = t || ''; m.className = 'msg ' + (cls || ''); }
+
+async function load(){
+  ST = await api('/api/ssh');
+  if(ST.error){ msg(ST.error, 'err'); return; }
+  set('pub', ST.pub || ST.keyError || '');
+  render();
+}
+
+function render(){
+  const box = $('list');
+  box.innerHTML = '';
+  if(!ST.servers.length){
+    box.innerHTML = `<div class="empty">${esc(L('Серверов пока нет. Добавь первый — адрес можно выбрать из сети устройств.', 'No servers yet. Add one — you can pick the address from your device network.'))}</div>`;
+    return;
+  }
+  for(const s of ST.servers){
+    const c = document.createElement('div');
+    c.className = 'card srv';
+    c.style.marginBottom = '8px';
+    c.innerHTML = `${icon('dns')}<div class="tx"><div class="n">${esc(s.name)}</div>
+      <div class="a">${esc(s.user)}@${esc(s.host)}${s.port !== 22 ? ':' + s.port : ''}</div></div>
+      <div class="acts">
+        <button class="btn primary" data-a="open">${icon('terminal')}${L('Открыть', 'Open')}</button>
+        <button class="btn" data-a="install">${icon('key')}${L('Установить ключ', 'Install key')}</button>
+        <button class="ico" data-a="edit" title="${L('Изменить', 'Edit')}">${icon('edit')}</button>
+        <button class="ico" data-a="del" title="${L('Удалить', 'Delete')}">${icon('delete')}</button>
+      </div>`;
+    c.querySelectorAll('[data-a]').forEach(b => b.onclick = () => action(b.dataset.a, s));
+    box.appendChild(c);
+  }
+}
+
+async function action(a, s){
+  msg('');
+  if(a === 'edit') return openForm(s);
+  if(a === 'del'){
+    if(!confirm(L(`Удалить «${s.name}» из списка? На сервере ничего не меняется.`, `Remove «${s.name}» from the list? Nothing changes on the server.`))) return;
+    ST = await api('/api/ssh', {op: 'delete', id: s.id}); render(); return;
+  }
+  if(a === 'install'){
+    const pw = prompt(L(`Пароль ${s.user}@${s.host} — один раз, чтобы записать ключ. Программа его не сохраняет.`,
+                        `Password for ${s.user}@${s.host} — once, to write the key. The app does not store it.`));
+    if(!pw) return;
+    msg(L('Ставлю ключ…', 'Installing the key…'));
+    const r = await api('/api/ssh/install', {id: s.id, password: pw});
+    return result(r, s, L('Ключ установлен, вход по нему проверен.', 'Key installed and sign-in checked.'));
+  }
+  if(a === 'open'){
+    if(ST.external && !ANDROID){
+      msg(L('Открываю терминал…', 'Opening a terminal…'));
+      const r = await api('/api/ssh/open', {id: s.id});
+      if(r.builtin) return startTerm(s);
+      return result(r, s, L('Терминал открыт.', 'Terminal opened.'));
+    }
+    return startTerm(s);
+  }
+}
+
+// result — итог входа: ошибка (с «Забыть ключ сервера», если он сменился)
+// или успех и отпечаток нового ключа сервера.
+function result(r, s, okText){
+  if(r.error){
+    msg(r.error, 'err');
+    if(r.code === 'hostkey_changed' && confirm(L('Ключ сервера изменился. Если сервер переустанавливали — забыть старый ключ? Иначе это может быть подмена.',
+        'The server key has changed. If the server was reinstalled — forget the old key? Otherwise it may be an attack.'))){
+      api('/api/ssh', {op: 'forgethost', id: s.id}).then(() => msg(L('Старый ключ забыт, попробуй ещё раз.', 'Old key forgotten, try again.')));
+    }
+    return false;
+  }
+  msg(okText + (r.newHostKey ? ' ' + L('Ключ сервера запомнен: ', 'Server key remembered: ') + r.fingerprint : ''), 'ok');
+  load();
+  return true;
+}
+
+/* ---------- анкета ---------- */
+async function openForm(s, pre){
+  EDIT = s || null;
+  $('form').hidden = false;
+  $('fMsg').textContent = '';
+  $('fName').value = s ? s.name : (pre && pre.name) || '';
+  $('fUser').value = s ? s.user : 'root';
+  $('fPort').value = s ? s.port : 22;
+  try { DEVS = (await api('/api/ssh/devices')).devices || []; } catch(e) { DEVS = []; }
+  const pick = $('fPick');
+  pick.innerHTML = DEVS.map(d => `<option value="${esc(d.ip)}">${esc(d.name)} — ${esc(d.host)}.mesh${d.online ? '' : ' (' + L('не в сети', 'offline') + ')'}</option>`).join('') +
+    `<option value="">${L('Ввести вручную…', 'Enter manually…')}</option>`;
+  const host = s ? s.host : (pre && pre.host) || '';
+  const known = DEVS.some(d => d.ip === host);
+  pick.value = known ? host : (host || !DEVS.length ? '' : DEVS[0].ip);
+  $('fHost').value = known ? '' : host;
+  syncPick();
+  $('fName').focus();
+}
+function syncPick(){
+  const manual = $('fPick').value === '';
+  $('fHost').hidden = !manual;
+  $('fHost').placeholder = L('имя или IP, например 192.168.1.201', 'name or IP, e.g. 192.168.1.201');
+  if(!manual && !$('fName').value){
+    const d = DEVS.find(x => x.ip === $('fPick').value);
+    if(d) $('fName').value = d.name;
+  }
+}
+$('fPick').onchange = syncPick;
+$('fCancel').onclick = () => { $('form').hidden = true; };
+$('form').onsubmit = async ev => {
+  ev.preventDefault();
+  const host = $('fPick').value || $('fHost').value.trim();
+  const srv = {id: EDIT ? EDIT.id : '', name: $('fName').value.trim(), host,
+               user: $('fUser').value.trim(), port: parseInt($('fPort').value, 10) || 22};
+  const r = await api('/api/ssh', {op: 'save', server: srv});
+  if(r.error){ $('fMsg').textContent = r.error; $('fMsg').className = 'msg err'; return; }
+  ST = r; $('form').hidden = true; render();
+  if(!EDIT) msg(L('Сервер добавлен. Теперь «Установить ключ» — пароль понадобится один раз.', 'Server added. Now «Install key» — the password is needed once.'), 'ok');
+};
+$('addBtn').onclick = () => openForm(null);
+$('keyBtn').onclick = () => { $('keyBox').hidden = !$('keyBox').hidden; };
+$('copyPub').onclick = async () => {
+  try { await navigator.clipboard.writeText($('pub').textContent); msg(L('Скопировано.', 'Copied.'), 'ok'); }
+  catch(e) { const r = document.createRange(); r.selectNodeContents($('pub')); getSelection().removeAllRanges(); getSelection().addRange(r); }
+};
+
+/* ---------- встроенный терминал ---------- */
+let TERM = null, FIT = null, SID = '', ES = null, CTRL = false;
+
+const b64 = s => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+function send(data){
+  if(!SID) return;
+  if(CTRL && data.length === 1){
+    // Залипающий Ctrl с клавиатуры телефона: буква → управляющий код.
+    const c = data.toUpperCase().charCodeAt(0);
+    if(c >= 64 && c < 96) data = String.fromCharCode(c - 64);
+    setCtrl(false);
+  }
+  api('/api/ssh/term', {op: 'in', sid: SID, d: b64(data)});
+}
+function setCtrl(on){ CTRL = on; const k = document.querySelector('#keys [data-k="ctrl"]'); if(k) k.classList.toggle('on', on); }
+
+const KEYS = [
+  ['esc', 'Esc', '\x1b'], ['tab', '', '\t'], ['ctrl', 'Ctrl', null],
+  ['left', '', '\x1b[D'], ['up', '', '\x1b[A'], ['down', '', '\x1b[B'], ['right', '', '\x1b[C'],
+  ['cc', '^C', '\x03'], ['cd', '^D', '\x04'], ['bar', '|', '|'], ['tilde', '~', '~'], ['slash', '/', '/'], ['dash', '-', '-'],
+];
+const KEY_ICON = {tab: 'keyboard_tab', left: 'keyboard_arrow_left', up: 'keyboard_arrow_up', down: 'keyboard_arrow_down', right: 'keyboard_arrow_right'};
+$('keys').innerHTML = KEYS.map(([k, t]) => `<button data-k="${k}">${KEY_ICON[k] ? icon(KEY_ICON[k]) : esc(t)}</button>`).join('');
+$('keys').querySelectorAll('button').forEach(b => {
+  b.onmousedown = ev => ev.preventDefault(); // не забирать фокус у терминала
+  b.onclick = () => {
+    const k = KEYS.find(x => x[0] === b.dataset.k);
+    if(k[0] === 'ctrl'){ setCtrl(!CTRL); }
+    else { CTRL = false; send(k[2]); setCtrl(false); }
+    TERM && TERM.focus();
+  };
+});
+
+async function startTerm(s){
+  msg('');
+  $('main').hidden = true;
+  $('termView').hidden = false;
+  set('termTitle', s.name + ' — ' + s.user + '@' + s.host);
+  TERM = new Terminal({fontFamily: 'ui-monospace,"Cascadia Mono",Consolas,monospace', fontSize: ANDROID ? 13 : 14,
+                       cursorBlink: true, scrollback: 5000, theme: {background: '#000000'}});
+  FIT = new FitAddon.FitAddon();
+  TERM.loadAddon(FIT);
+  TERM.open($('term'));
+  FIT.fit();
+  TERM.writeln(L('Подключаюсь…', 'Connecting…'));
+  const r = await api('/api/ssh/term', {op: 'start', id: s.id, cols: TERM.cols, rows: TERM.rows});
+  if(r.error){
+    TERM.writeln('\r\n\x1b[31m' + r.error + '\x1b[0m');
+    result(r, s, '');
+    return;
+  }
+  if(r.newHostKey) TERM.writeln(L('Ключ сервера запомнен: ', 'Server key remembered: ') + r.fingerprint);
+  SID = r.sid;
+  TERM.onData(send);
+  TERM.focus();
+  ES = new EventSource('/api/ssh/term/out?sid=' + encodeURIComponent(SID) + '&t=' + encodeURIComponent(T));
+  ES.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if(m.d) TERM.write(unb64(m.d));
+    if(m.end){
+      TERM.writeln('\r\n\x1b[2m' + (m.error || L('Сеанс закончен.', 'Session ended.')) + '\x1b[0m');
+      ES.close(); ES = null; SID = '';
+    }
+  };
+}
+let resizeT = 0;
+window.addEventListener('resize', () => {
+  if(!TERM) return;
+  clearTimeout(resizeT);
+  resizeT = setTimeout(() => {
+    FIT.fit();
+    if(SID) api('/api/ssh/term', {op: 'resize', sid: SID, cols: TERM.cols, rows: TERM.rows});
+  }, 120);
+});
+function stopTerm(){
+  if(SID) api('/api/ssh/term', {op: 'close', sid: SID});
+  if(ES) ES.close();
+  ES = null; SID = '';
+  if(TERM) TERM.dispose();
+  TERM = null;
+  $('termView').hidden = true;
+  $('main').hidden = false;
+}
+$('termBack').onclick = stopTerm;
+window.addEventListener('pagehide', () => { if(SID) fetch('/api/ssh/term?t=' + encodeURIComponent(T), {method: 'POST', keepalive: true, headers: {'Content-Type': 'application/json'}, body: JSON.stringify({op: 'close', sid: SID})}); });
+
+load().then(() => {
+  // С карты сети: ?add=<адрес>&name=<имя> — сразу анкета или вход.
+  const add = Q.get('add');
+  if(!add) return;
+  const have = ST.servers.find(s => s.host === add);
+  if(have) msg(L(`«${have.name}» уже в списке — «Открыть».`, `«${have.name}» is already in the list — «Open».`), 'ok');
+  else openForm(null, {host: add, name: Q.get('name') || ''});
+}).catch(() => msg(L('Нет связи с программой.', 'No connection to the app.'), 'err'));
+</script>
+</body>
+</html>

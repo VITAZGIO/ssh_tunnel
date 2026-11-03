@@ -19,6 +19,7 @@ import (
 
 	"sshtunnel/android/core"
 	core2 "sshtunnel/internal/core"
+	"sshtunnel/internal/devnet"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/mesh"
 	"sshtunnel/internal/routing"
@@ -104,7 +105,13 @@ type Tunnel struct {
 //
 // Имя не New намеренно: в Java «new» — служебное слово, и связка Go с Java
 // переименовала бы функцию во что-то нечитаемое.
-func NewTunnel() *Tunnel { return &Tunnel{} }
+func NewTunnel() *Tunnel {
+	t := &Tunnel{}
+	// Туннель в процессе один (служба VPN): он и даёт сеть устройств
+	// дополнительным приложениям.
+	devnet.Set(devnetSrc{t})
+	return t
+}
 
 // SetCallbacks задаёт обратную связь. Вызывается до Configure.
 func (t *Tunnel) SetCallbacks(cb Callbacks) {

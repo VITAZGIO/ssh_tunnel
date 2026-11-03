@@ -7,10 +7,13 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONArray
 
@@ -22,11 +25,17 @@ class WebPageActivity : AppCompatActivity() {
 
     private lateinit var web: WebView
     private var base = ""
+    private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private val pickFiles = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        fileCallback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(r.resultCode, r.data))
+        fileCallback = null
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Look.apply(this)
+        DeviceApps.init(this)
         base = try {
             mobile.Mobile.startUI(filesDir.absolutePath)
         } catch (e: Exception) {
@@ -41,6 +50,22 @@ class WebPageActivity : AppCompatActivity() {
         web.settings.domStorageEnabled = true
         web.settings.allowFileAccess = false
         web.addJavascriptInterface(Bridge(), "SSHTunnelAndroid")
+        web.webChromeClient = object : WebChromeClient() {
+            // «Загрузить сюда» в Файлах устройства: системный выбор файлов.
+            override fun onShowFileChooser(
+                view: WebView, cb: ValueCallback<Array<Uri>>, params: FileChooserParams,
+            ): Boolean {
+                fileCallback?.onReceiveValue(null)
+                fileCallback = cb
+                try {
+                    pickFiles.launch(params.createIntent())
+                } catch (_: Exception) {
+                    fileCallback = null
+                    return false
+                }
+                return true
+            }
+        }
         web.webViewClient = object : WebViewClient() {
             // Свои страницы — здесь, всё остальное — в браузере телефона.
             override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
@@ -86,6 +111,12 @@ class WebPageActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun openExternal(url: String) = runOnUiThread { this@WebPageActivity.openExternal(url) }
+
+        @JavascriptInterface
+        fun hasAllFiles(): Boolean = DeviceApps.hasAllFiles()
+
+        @JavascriptInterface
+        fun requestAllFiles() = runOnUiThread { DeviceApps.requestAllFiles(this@WebPageActivity) }
     }
 
     companion object {

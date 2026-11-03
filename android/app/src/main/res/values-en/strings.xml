@@ -331,4 +331,7 @@
     <string name="app_profile">Profile %1$d</string>
     <string name="app_profile_del">Delete “%1$s” with all its settings and servers?</string>
     <string name="app_profile_del_yes">Delete</string>
+    <string name="files_transfer_channel">File transfers</string>
+    <string name="files_transfer_title">Device files</string>
+    <string name="files_transfer_many">Transfers: %1$d</string>
 </resources>

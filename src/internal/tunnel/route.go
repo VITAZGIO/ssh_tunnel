@@ -71,6 +71,13 @@ func (t *Tunnel) dialRoute(route core.Route, target string) (net.Conn, error) {
 	return nil, errBlocked
 }
 
+// DialApp — соединение от имени самой программы (дополнительные приложения:
+// SSH, «Файлы устройства»): путь выбирает ядро, как для любой программы.
+func (t *Tunnel) DialApp(target string) (net.Conn, error) {
+	route, _ := t.decide("", target)
+	return t.dialRoute(route, target)
+}
+
 var (
 	errMeshNotReady = errors.New("сеть устройств ещё не подключилась")
 	errBlocked      = errors.New("сеть устройств выключена")

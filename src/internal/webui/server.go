@@ -40,11 +40,15 @@ import (
 	"time"
 
 	"sshtunnel/internal/addons"
+	_ "sshtunnel/internal/addons/devapps"
 	"sshtunnel/internal/app"
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/core"
+	"sshtunnel/internal/devfiles"
+	"sshtunnel/internal/devnet"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/filedialog"
+	"sshtunnel/internal/mesh"
 	"sshtunnel/internal/procinfo"
 	"sshtunnel/internal/serverusers"
 	"sshtunnel/internal/sysproxy"
@@ -103,6 +107,12 @@ func NewOn(a *App, addr string) (*Server, error) {
 		addons: addons.New(config.Dir())}
 	if a != nil && a.Bus != nil {
 		s.addons.SetLog(a.Bus.Warnf)
+	}
+	if a != nil {
+		devnet.Set(appNet{a})
+		if a.Bus != nil {
+			devfiles.SetLog(func(t string) { a.Bus.Infof("%s", t) })
+		}
 	}
 	// Порт 0 означает «любой свободный» — такой адрес в файл службы писать
 	// нечего, он всё равно будет другим при следующем запуске.
@@ -848,3 +858,9 @@ func (s *Server) handleServerUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, out)
 }
+
+// appNet — сеть устройств окна для дополнительных приложений.
+type appNet struct{ a *app.App }
+
+func (n appNet) Mesh() *mesh.Client                          { return n.a.Mesh() }
+func (n appNet) Dial(network, addr string) (net.Conn, error) { return n.a.DialApp(network, addr) }
