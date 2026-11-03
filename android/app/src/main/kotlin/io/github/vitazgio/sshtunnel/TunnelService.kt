@@ -48,6 +48,9 @@ class TunnelService : VpnService(), Callbacks {
         @Volatile var statsJson: String = "{}"
         val log = ArrayDeque<String>()
 
+        /** Плитка в шторке, пока шторка открыта. */
+        @Volatile var onUpdate: (() -> Unit)? = null
+
         /** Общий экран (AndroidApi): состояние и строки журнала. */
         @Volatile var onApiUpdate: (() -> Unit)? = null
         @Volatile var onApiLog: ((String) -> Unit)? = null
@@ -695,6 +698,7 @@ class TunnelService : VpnService(), Callbacks {
     }
 
     private fun fireUpdate() {
+        onUpdate?.invoke()
         onApiUpdate?.invoke()
     }
 
