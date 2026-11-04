@@ -286,6 +286,15 @@ class MainActivity : AppCompatActivity(), AndroidApi.Screen {
 
     // Мост для страницы: только то, чего WebView не умеет сам.
     inner class Bridge {
+        /** «Сканер сети» → Wi-Fi: сети вокруг, своя сеть сейчас, разрешение. */
+        @JavascriptInterface
+        fun wifiScan(): String = WifiScan.scanJson(this@MainActivity)
+
+        @JavascriptInterface
+        fun wifiInfo(): String = WifiScan.infoJson(this@MainActivity)
+
+        @JavascriptInterface
+        fun wifiAskPermission() = runOnUiThread { WifiScan.askPermission(this@MainActivity) }
         @JavascriptInterface
         fun readClipboard(): String {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager

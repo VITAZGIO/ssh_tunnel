@@ -16,6 +16,10 @@ func init() {
 		Path: "/api/lanscan", Methods: "GET, POST",
 		Desc: "Сканер сети: GET — как идёт и кто найден (ip, mac, name, vendor, rttMs, ports из 22/80/443), POST {\"net\":\"подсеть\"} — сканировать заново (net из nets; пусто — лучшая). Ничего не запоминается.",
 		H:    handle,
+	}, addons.Route{
+		Path: "/api/lanscan/wifi", Methods: "GET",
+		Desc: "Сканер сети → Wi-Fi: сети вокруг (ssid, bssid, level дБм, freq, channel, sec, radio) и своя сеть (link). ?now=1 — только своя сеть, быстро. Телефон отдаёт это сам.",
+		H:    handleWifi,
 	})
 }
 
@@ -36,7 +40,11 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	} else {
 		res = scanner.Get()
 	}
+	writeJSON(w, res)
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(res)
+	_ = json.NewEncoder(w).Encode(v)
 }

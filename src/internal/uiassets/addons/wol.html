@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Включить по сети</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../pages.css">
+<style>
+  body{background:transparent}
+  .wrap{display:flex;flex-direction:column;gap:10px;padding:12px 14px 16px}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .bar input{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--text);font:inherit;flex:1;min-width:140px}
+  .bar .btn{display:inline-flex;align-items:center;gap:6px}
+  .h{display:grid;grid-template-columns:auto 1fr auto auto;gap:4px 12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+  .h:last-child{border-bottom:0}
+  .h .mi{width:24px;height:24px;color:var(--accent)}
+  .h .n{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .h .m{font-family:var(--mono);font-size:12.5px;color:var(--dim)}
+  .h .st{grid-column:2/-1;font-size:12.5px}
+  .ok{color:var(--ok)}.err{color:var(--err)}
+  .sug{display:flex;gap:6px;flex-wrap:wrap}
+  .sug button{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:8px;padding:5px 10px;cursor:pointer;font:inherit;font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card" id="list"></div>
+  <div class="card">
+    <div class="bar">
+      <input id="name"><input id="mac" spellcheck="false" autocapitalize="characters">
+      <button class="btn primary" id="add"></button>
+    </div>
+    <div class="hint" id="sugT" style="margin-top:10px" hidden></div>
+    <div class="sug" id="sug"></div>
+  </div>
+  <div class="hint" id="note"></div>
+</div>
+<script src="../pages.js"></script>
+<script>
+/* Включить по сети (Wake-on-LAN). Пакет шлёт ядро (/api/wol): страница
+   только показывает список и просит. */
+let HOSTS = [];
+const status = {};
+
+function draw(){
+  $('list').innerHTML = HOSTS.length ? HOSTS.map(h => `<div class="h">${icon('power_settings_new')}
+      <div><div class="n">${esc(h.name)}</div><div class="m">${esc(h.mac)}</div></div>
+      <button class="btn primary" data-wake="${esc(h.mac)}">${esc(L('Включить', 'Wake'))}</button>
+      <button class="ico" data-rm="${esc(h.mac)}" title="${esc(L('Убрать', 'Remove'))}">${icon('close')}</button>
+      ${status[h.mac] ? `<div class="st ${status[h.mac][1]}">${esc(status[h.mac][0])}</div>` : ''}</div>`).join('')
+    : `<div class="empty" style="padding:20px">${esc(L('Машин пока нет. Впиши имя и MAC ниже — MAC видно в «Сканере сети» на компьютере или в настройках роутера.', 'No machines yet. Enter a name and MAC below — the MAC is shown by the Network scanner on a computer or in the router settings.'))}</div>`;
+  $('list').querySelectorAll('[data-wake]').forEach(b => b.onclick = async () => {
+    const mac = b.dataset.wake;
+    const r = await api('/api/wol', {op: 'wake', mac}).catch(e => ({error: String(e)}));
+    status[mac] = r.error ? [r.error, 'err'] : [L('Пакет отправлен — машина включится за 10–60 с, если WoL у неё включён.', 'Packet sent — the machine wakes in 10–60 s if WoL is on.'), 'ok'];
+    draw();
+  });
+  $('list').querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => {
+    const h = HOSTS.find(x => x.mac === b.dataset.rm);
+    if(!h || !confirm(L(`Убрать «${h.name}» из списка?`, `Remove «${h.name}»?`))) return;
+    const r = await api('/api/wol', {op: 'remove', mac: h.mac});
+    if(r.hosts) HOSTS = r.hosts;
+    draw();
+  });
+}
+
+async function load(){
+  const r = await api('/api/wol').catch(() => null);
+  if(r && r.hosts) HOSTS = r.hosts;
+  draw();
+  // Подсказка из «Сканера сети»: найденные с MAC — добавить одним нажатием.
+  const s = await api('/api/lanscan').catch(() => null);
+  const known = new Set(HOSTS.map(h => h.mac));
+  const list = ((s && s.hosts) || []).filter(h => h.mac && !h.self && !known.has(h.mac.toLowerCase()));
+  $('sugT').hidden = !list.length;
+  $('sugT').textContent = L('Из «Сканера сети»:', 'From the Network scanner:');
+  $('sug').innerHTML = list.slice(0, 20).map(h => `<button data-m="${esc(h.mac)}" data-n="${esc(h.name || h.vendor || h.ip)}">${esc(h.name || h.ip)}</button>`).join('');
+  $('sug').querySelectorAll('button').forEach(b => b.onclick = () => { $('name').value = b.dataset.n; $('mac').value = b.dataset.m; });
+}
+
+$('name').placeholder = L('имя, например «ПК»', 'name, e.g. «PC»');
+$('mac').placeholder = 'AA:BB:CC:DD:EE:FF';
+$('add').innerHTML = icon('add') + esc(L('Добавить', 'Add'));
+$('add').onclick = async () => {
+  const r = await api('/api/wol', {op: 'add', name: $('name').value.trim(), mac: $('mac').value.trim()}).catch(e => ({error: String(e)}));
+  if(r.error){ $('note').textContent = r.error; $('note').className = 'hint err'; return; }
+  $('name').value = $('mac').value = '';
+  $('note').className = 'hint';
+  HOSTS = r.hosts || HOSTS;
+  load();
+};
+$('note').textContent = L('Работает в той же локальной сети, что и машина. У неё должен быть включён Wake-on-LAN: в BIOS и в свойствах сетевой карты (Windows: «Разрешить этому устройству выводить компьютер из ждущего режима» и «Wake on Magic Packet»). По Wi-Fi обычно не просыпается — нужен кабель.',
+  'Works on the same local network as the machine. Wake-on-LAN must be on in BIOS and in the network card settings. Usually does not wake over Wi-Fi — a cable is needed.');
+load();
+</script>
+</body>
+</html>

@@ -27,10 +27,94 @@
   .host .acts{grid-column:2/3;grid-row:1/3;display:flex;gap:6px;align-items:center;justify-content:flex-end}
   .host .acts .btn{padding:5px 10px;font-size:13px;display:inline-flex;gap:5px;align-items:center}
   .host .acts .mi{width:16px;height:16px}
+  /* Вкладки: устройства / сети Wi-Fi / сигнал. */
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex-wrap:wrap}
+  .seg button{border:0;background:transparent;color:var(--dim);padding:7px 13px;cursor:pointer;font:inherit;display:inline-flex;gap:6px;align-items:center}
+  .seg button.on{background:var(--accent-muted);color:#fff}
+  .seg .mi{width:16px;height:16px}
+  .tab[hidden]{display:none}
+  .tab{display:flex;flex-direction:column;gap:10px}
+  /* Каналы: кривые сетей над осью каналов. */
+  .chart{width:100%;height:220px;display:block}
+  .chart text{fill:var(--dim);font-size:10.5px}
+  .chart .ax{stroke:var(--line)}
+  .chart .lbl{fill:var(--text);font-size:10.5px;font-weight:600}
+  .reco{display:flex;gap:10px;flex-wrap:wrap}
+  .reco .card{flex:1;min-width:150px;padding:10px 12px}
+  .reco .k{color:var(--dim);font-size:12px}
+  .reco .v{font-size:18px;font-weight:700;margin-top:2px}
+  .wn{display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+  .wn:last-child{border-bottom:0}
+  .wn .bars{grid-row:1/3}
+  .wn .n{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wn .n small{font-weight:400;color:var(--ok);margin-left:6px}
+  .wn .db{font-family:var(--mono);font-size:13px;text-align:right}
+  .wn .d{grid-column:2/4;color:var(--dim);font-size:12px;display:flex;gap:10px;flex-wrap:wrap}
+  .wn .d .m{font-family:var(--mono)}
+  .bars{display:inline-flex;align-items:flex-end;gap:2px;height:18px}
+  .bars i{width:4px;border-radius:1px;background:var(--line)}
+  .bars i:nth-child(1){height:5px}.bars i:nth-child(2){height:9px}.bars i:nth-child(3){height:13px}.bars i:nth-child(4){height:18px}
+  .bars.l4 i,.bars.l3 i:nth-child(-n+3){background:var(--ok)}
+  .bars.l2 i:nth-child(-n+2){background:var(--warn)}
+  .bars.l1 i:nth-child(1){background:var(--err)}
+  /* Сигнал: крупное число, шкала, мин/сред/макс, график, точки по дому. */
+  .big{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .big .num{font-size:56px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+  .big .u{color:var(--dim);font-size:16px}
+  .big .q{font-size:18px;font-weight:700}
+  .scale{position:relative;height:10px;border-radius:5px;background:linear-gradient(90deg,var(--err),var(--warn) 45%,var(--ok) 80%)}
+  .scale i{position:absolute;top:-4px;width:4px;height:18px;border-radius:2px;background:var(--text);transform:translateX(-2px);transition:left .4s}
+  .scale+.ticks{display:flex;justify-content:space-between;color:var(--dim);font-size:11px;margin-top:3px}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .stats .card{padding:9px 11px;text-align:center}
+  .stats .k{color:var(--dim);font-size:12px}
+  .stats .v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+  .spark{width:100%;height:90px;display:block}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px}
+  .kv span:nth-child(odd){color:var(--dim)}
+  .kv .m{font-family:var(--mono)}
+  .pts .row{display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .pts .row:last-child{border-bottom:0}
+  .pts input{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:7px 9px;color:var(--text);font:inherit;flex:1;min-width:120px}
+  .c-ok{color:var(--ok)}.c-warn{color:var(--warn)}.c-err{color:var(--err)}
 </style>
 </head>
 <body>
 <div class="wrap">
+  <div class="seg" id="tabs"></div>
+  <div class="card" id="wperm" hidden></div>
+
+  <!-- Сети Wi-Fi: каналы и все сети вокруг. -->
+  <div class="tab" id="tWifi" hidden>
+    <div class="bar"><div class="seg" id="band"></div><span class="hint" id="wstate"></span></div>
+    <div class="card"><svg class="chart" id="chan"></svg></div>
+    <div class="reco" id="reco"></div>
+    <div class="card" id="wlist"></div>
+    <div class="hint" id="wnote"></div>
+  </div>
+
+  <!-- Сигнал своей сети — ходишь по дому и смотришь. -->
+  <div class="tab" id="tSig" hidden>
+    <div class="card">
+      <div class="big"><span class="num" id="sNum">—</span><span class="u">дБм</span><span class="q" id="sQ"></span></div>
+      <div style="margin-top:14px" class="scale"><i id="sMark" style="left:0"></i></div>
+      <div class="ticks"><span>−90</span><span>−80</span><span>−70</span><span>−60</span><span>−50</span><span>−40</span></div>
+    </div>
+    <div class="stats">
+      <div class="card"><div class="k" id="kMin"></div><div class="v" id="sMin">—</div></div>
+      <div class="card"><div class="k" id="kAvg"></div><div class="v" id="sAvg">—</div></div>
+      <div class="card"><div class="k" id="kMax"></div><div class="v" id="sMax">—</div></div>
+    </div>
+    <div class="card"><svg class="spark" id="spark"></svg></div>
+    <div class="card kv" id="sInfo"></div>
+    <div class="card pts">
+      <div class="bar"><input id="ptName"><button class="btn" id="ptAdd"></button><button class="btn" id="sReset"></button></div>
+      <div id="pts"></div>
+    </div>
+    <div class="hint" id="snote"></div>
+  </div>
+
+  <div class="tab" id="tDev">
   <div class="bar">
     <button class="btn primary" id="go"></button>
     <select id="netSel" hidden></select>
@@ -39,6 +123,7 @@
   </div>
   <div class="card" id="list"></div>
   <div class="hint" id="note"></div>
+  </div>
 </div>
 <script src="../pages.js"></script>
 <script>
@@ -52,7 +137,7 @@ async function goApp(id, extra){
   if(!e){
     const m = (st.catalog || []).find(c => c.id === id);
     if(!m) return;
-    if(!confirm(L(`Добавить приложение «${appName(m)}»?`, `Add the «${appName(m)}» app?`))) return;
+    if(!confirm(L(`Добавить плагин «${appName(m)}»?`, `Add the «${appName(m)}» plugin?`))) return;
     st = await api('/api/addons', {op: 'add', id});
     changed();
   }
@@ -129,6 +214,213 @@ $('netSel').onchange = scan;
 render();
 // Открыли — сразу ищем, если ещё не идёт.
 api('/api/lanscan').then(r => { R = r; if(!r.running) scan(); else render(); });
+
+/* ---------- вкладки ---------- */
+let TAB = 'dev';
+function setTab(t){
+  TAB = t;
+  $('tabs').innerHTML = [['dev', 'radar', L('Устройства', 'Devices')], ['wifi', 'wifi', L('Сети Wi-Fi', 'Wi-Fi networks')], ['sig', 'signal_cellular', L('Сигнал', 'Signal')]]
+    .map(([v, ic, n]) => `<button data-v="${v}" class="${v === t ? 'on' : ''}">${icon(ic)}${esc(n)}</button>`).join('');
+  $('tabs').querySelectorAll('button').forEach(b => b.onclick = () => setTab(b.dataset.v));
+  $('tDev').hidden = t !== 'dev'; $('tWifi').hidden = t !== 'wifi'; $('tSig').hidden = t !== 'sig';
+  if(t === 'wifi') wifiLoad();
+  if(t === 'sig') sigTick();
+  if(t === 'dev') $('wperm').hidden = true;
+}
+
+/* ---------- Wi-Fi: откуда данные ---------- */
+// Телефон отдаёт сам (мост), компьютер — ядро (netsh / nmcli).
+async function wifiGet(now){
+  try {
+    if(ANDROID && window.SSHTunnelAndroid.wifiScan){
+      if(now){ const i = JSON.parse(SSHTunnelAndroid.wifiInfo()); return {available: i.available, need: i.need, link: i}; }
+      const r = JSON.parse(SSHTunnelAndroid.wifiScan());
+      return {available: r.available, need: r.need, wifiOff: r.wifiOff, networks: r.networks || []};
+    }
+    return await api('/api/lanscan/wifi' + (now ? '?now=1' : ''));
+  } catch(e) { return {available: false, error: String(e)}; }
+}
+function permCard(r){
+  const box = $('wperm');
+  if(r.available){ box.hidden = true; return false; }
+  box.hidden = false;
+  if(r.need === 'permission'){
+    box.innerHTML = `<p style="margin:0 0 8px">${esc(L('Android показывает сети Wi-Fi только приложениям с доступом к точной геолокации: по адресам точек доступа можно узнать, где ты. Программа никуда это не отправляет.', 'Android shows Wi-Fi networks only to apps with precise location access: access point addresses reveal where you are. Nothing is sent anywhere.'))}</p>
+      <button class="btn primary" id="wpBtn">${esc(L('Разрешить', 'Allow'))}</button>`;
+    $('wpBtn').onclick = () => SSHTunnelAndroid.wifiAskPermission();
+  } else if(r.need === 'location'){
+    box.textContent = L('Включи геолокацию в шторке — без неё Android сети Wi-Fi не показывает.', 'Turn on location in quick settings — without it Android shows no Wi-Fi networks.');
+  } else box.textContent = r.error || L('Wi-Fi здесь недоступен.', 'Wi-Fi is not available here.');
+  return true;
+}
+
+/* ---------- Wi-Fi: каналы и сети ---------- */
+let BAND = '2.4', WIFI = null, wifiTimer = 0;
+const freqBand = f => f >= 5925 ? '6' : f >= 4900 ? '5' : '2.4';
+const freqChan = f => f === 2484 ? 14 : f < 2500 ? Math.round((f - 2407) / 5) : f >= 5925 ? Math.round((f - 5950) / 5) : Math.round((f - 5000) / 5);
+function normNet(n){
+  const f = n.freq || 0;
+  return {...n, band: freqBand(f), channel: n.channel || freqChan(f), width: n.width || 20};
+}
+// Стандарт: Android — код wifiStandard, компьютер — «802.11ax».
+function stdName(n){
+  const m = {4: 'Wi-Fi 4', 5: 'Wi-Fi 5', 6: 'Wi-Fi 6', 8: 'Wi-Fi 7'};
+  if(n.std && m[n.std]) return m[n.std] + (n.std === 6 && n.band === '6' ? 'E' : '');
+  const r = (n.radio || '').toLowerCase();
+  return r.endsWith('be') ? 'Wi-Fi 7' : r.endsWith('ax') ? 'Wi-Fi 6' : r.endsWith('ac') ? 'Wi-Fi 5' : r.endsWith('n') ? 'Wi-Fi 4' : (n.radio || '');
+}
+function secName(s){
+  const u = (s || '').toUpperCase();
+  if(u.includes('WPA3') || u.includes('SAE')) return 'WPA3';
+  if(u.includes('WPA2') || u.includes('RSN')) return 'WPA2';
+  if(u.includes('WPA')) return 'WPA';
+  if(u.includes('WEP')) return 'WEP ⚠';
+  return L('открытая', 'open');
+}
+const lvl = d => d >= -55 ? 4 : d >= -67 ? 3 : d >= -78 ? 2 : 1;
+const bars = d => `<span class="bars l${lvl(d)}"><i></i><i></i><i></i><i></i></span>`;
+function quality(d){
+  if(d >= -50) return [L('отлично', 'excellent'), 'c-ok'];
+  if(d >= -60) return [L('хорошо', 'good'), 'c-ok'];
+  if(d >= -70) return [L('нормально', 'fair'), 'c-warn'];
+  if(d >= -80) return [L('слабо', 'weak'), 'c-warn'];
+  return [L('плохо', 'poor'), 'c-err'];
+}
+// Цвет сети — по имени, одинаковый между обновлениями.
+function hue(s){ let h = 0; for(const c of s || '?') h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+
+async function wifiLoad(){
+  clearTimeout(wifiTimer);
+  const r = await wifiGet(false);
+  if(TAB !== 'wifi') return;
+  wifiTimer = setTimeout(() => { if(!document.hidden) wifiLoad(); else wifiTimer = setTimeout(wifiLoad, 3000); }, 6000);
+  if(permCard(r)){ $('chan').innerHTML = ''; $('wlist').innerHTML = ''; $('reco').innerHTML = ''; return; }
+  WIFI = (r.networks || []).map(normNet);
+  const bands = ['2.4', '5', '6'].filter(b => WIFI.some(n => n.band === b));
+  if(bands.length && !bands.includes(BAND)) BAND = bands[0];
+  $('band').innerHTML = (bands.length ? bands : ['2.4']).map(b => `<button data-v="${b}" class="${b === BAND ? 'on' : ''}">${b} ${L('ГГц', 'GHz')}</button>`).join('');
+  $('band').querySelectorAll('button').forEach(b => b.onclick = () => { BAND = b.dataset.v; wifiDraw(); $('band').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
+  $('wstate').textContent = r.wifiOff ? L('Wi-Fi выключен — сети не видно.', 'Wi-Fi is off.') : `${L('сетей', 'networks')}: ${WIFI.length}`;
+  wifiDraw();
+}
+
+// Загрузка канала: сколько сетей его задевают, с весом по силе сигнала
+// (сосед за стеной в −85 мешает меньше, чем в −50).
+function chanLoad(nets, ch){
+  const f0 = BAND === '2.4' ? 2407 + 5 * ch : (BAND === '6' ? 5950 : 5000) + 5 * ch;
+  let s = 0;
+  for(const n of nets){
+    if(Math.abs((n.freq || 0) - f0) < n.width / 2 + 10) s += Math.max(0.1, (n.level + 100) / 50);
+  }
+  return s;
+}
+
+function wifiDraw(){
+  const nets = WIFI.filter(n => n.band === BAND).sort((a, b) => b.level - a.level);
+  // График каналов: ось по частоте, сеть — «холм» шириной в свою полосу,
+  // высотой в уровень сигнала. Так видно, кто на ком сидит.
+  const W = Math.max(300, $('chan').clientWidth || 600), H = 220, top = 14, bot = 24, left = 34;
+  const [f1, f2, ticks] = BAND === '2.4' ? [2400, 2484, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]]
+    : BAND === '6' ? [5945, 6425, [1, 17, 33, 49, 65, 81, 97]] : [5160, 5895, [36, 44, 52, 60, 100, 116, 132, 149, 157, 165]];
+  const fx = f => left + (W - left - 6) * (f - f1) / (f2 - f1);
+  const chF = c => BAND === '2.4' ? 2407 + 5 * c : (BAND === '6' ? 5950 : 5000) + 5 * c;
+  const dy = d => top + (H - top - bot) * (1 - (Math.max(-100, Math.min(-30, d)) + 100) / 70);
+  let s = '';
+  for(const d of [-90, -70, -50]) s += `<line class="ax" x1="${left}" x2="${W}" y1="${dy(d)}" y2="${dy(d)}" stroke-dasharray="3 4"/><text x="${left - 4}" y="${dy(d) + 3}" text-anchor="end">${d}</text>`;
+  s += `<line class="ax" x1="${left}" x2="${W}" y1="${H - bot}" y2="${H - bot}"/>`;
+  for(const c of ticks) s += `<text x="${fx(chF(c))}" y="${H - 8}" text-anchor="middle">${c}</text>`;
+  for(const n of [...nets].reverse()){
+    const xa = fx(n.freq - n.width / 2), xb = fx(n.freq + n.width / 2), yt = dy(n.level), yb = H - bot, k = (xb - xa) * 0.18;
+    const h = hue(n.ssid || n.bssid);
+    s += `<path d="M${xa},${yb} C${xa + k},${yt} ${xb - k},${yt} ${xb},${yb} Z" fill="hsla(${h},70%,55%,.18)" stroke="hsl(${h},70%,60%)" stroke-width="${n.current ? 3 : 1.4}"/>`;
+    s += `<text class="lbl" x="${fx(n.freq)}" y="${Math.max(top + 8, yt + 6)}" text-anchor="middle" style="fill:hsl(${h},70%,70%)">${esc((n.ssid || '•').slice(0, 14))}</text>`;
+  }
+  if(!nets.length) s += `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">${esc(L('В этом диапазоне сетей нет', 'No networks in this band'))}</text>`;
+  $('chan').setAttribute('viewBox', `0 0 ${W} ${H}`);
+  $('chan').innerHTML = s;
+
+  // Совет: свободнее всего из непересекающихся каналов.
+  const cands = BAND === '2.4' ? [1, 6, 11] : BAND === '5' ? [36, 40, 44, 48, 149, 153, 157, 161] : [1, 5, 9, 13, 17, 21];
+  const others = nets.filter(n => !n.current); // своя сеть себе не соседка
+  const best = cands.map(c => [c, chanLoad(others, c)]).sort((a, b) => a[1] - b[1])[0];
+  const mine = nets.find(n => n.current);
+  const cards = [[L('Свободнее всего', 'Least busy'), best ? `${L('канал', 'channel')} ${best[0]}` : '—']];
+  if(mine) cards.push([L('Твоя сеть', 'Your network'), `${L('канал', 'channel')} ${mine.channel} · ${mine.width} ${L('МГц', 'MHz')}`],
+    [L('Соседей на твоём канале', 'Neighbours on your channel'), String(nets.filter(n => !n.current && Math.abs(n.freq - mine.freq) < (n.width + mine.width) / 2).length)]);
+  $('reco').innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
+
+  $('wlist').innerHTML = nets.length ? nets.map(n => `<div class="wn">${bars(n.level)}
+      <span class="n">${esc(n.ssid || L('скрытая сеть', 'hidden network'))}${n.current ? `<small>${esc(L('твоя', 'yours'))}</small>` : ''}</span>
+      <span class="db">${n.level} ${L('дБм', 'dBm')}</span>
+      <span class="d"><span>${L('канал', 'ch')} ${n.channel}</span><span>${n.width} ${L('МГц', 'MHz')}</span>${stdName(n) ? `<span>${esc(stdName(n))}</span>` : ''}<span>${esc(secName(n.sec))}</span><span class="m">${esc(n.bssid)}</span></span>
+    </div>`).join('') : `<div class="empty" style="padding:20px">${esc(L('Сетей не видно.', 'No networks visible.'))}</div>`;
+  $('wnote').textContent = (ANDROID ? L('Android даёт сканировать примерно 4 раза за 2 минуты — список обновляется раз в 30 с. ', 'Android allows about 4 scans per 2 minutes — the list refreshes every 30 s. ') : '')
+    + L('Совет по каналу — из непересекающихся (1, 6, 11 для 2,4 ГГц); поменять канал — в настройках роутера.', 'Channel advice is from non-overlapping ones (1, 6, 11 for 2.4 GHz); change it in the router settings.');
+}
+
+/* ---------- Сигнал ---------- */
+let HIST = [], sigTimer = 0, LAST = null;
+let PTS = []; try { PTS = JSON.parse(localStorage.getItem('wifiPts') || '[]'); } catch(e) {}
+const savePts = () => { try { localStorage.setItem('wifiPts', JSON.stringify(PTS)); } catch(e) {} };
+async function sigTick(){
+  clearTimeout(sigTimer);
+  const r = await wifiGet(true);
+  if(TAB !== 'sig') return;
+  sigTimer = setTimeout(() => { if(!document.hidden) sigTick(); else sigTimer = setTimeout(sigTick, 2000); }, 1000);
+  if(permCard(r)) return;
+  const l = r.link;
+  if(!l || !l.connected){ $('sNum').textContent = '—'; $('sQ').textContent = L('не подключён к Wi-Fi', 'not connected to Wi-Fi'); $('sQ').className = 'q'; return; }
+  LAST = l;
+  HIST.push(l.level); if(HIST.length > 180) HIST.shift();
+  const [q, cls] = quality(l.level);
+  $('sNum').textContent = l.level; $('sNum').className = 'num ' + cls;
+  $('sQ').textContent = q; $('sQ').className = 'q ' + cls;
+  $('sMark').style.left = Math.max(0, Math.min(100, (l.level + 90) * 2)) + '%';
+  $('sMin').textContent = Math.min(...HIST); $('sMax').textContent = Math.max(...HIST);
+  $('sAvg').textContent = Math.round(HIST.reduce((a, b) => a + b, 0) / HIST.length);
+  const f = l.freq || 0;
+  $('sInfo').innerHTML = [[L('Сеть', 'Network'), esc(l.ssid || '—')], ['BSSID', `<span class="m">${esc(l.bssid || '—')}</span>`],
+    [L('Частота', 'Frequency'), f ? `${f} ${L('МГц', 'MHz')} · ${L('канал', 'channel')} ${l.channel || freqChan(f)} · ${freqBand(f)} ${L('ГГц', 'GHz')}` : '—'],
+    [L('Скорость', 'Link rate'), l.rate ? `${l.rate} ${L('Мбит/с', 'Mbit/s')}` + (l.tx ? ` (↑${l.tx} ↓${l.rx})` : '') : '—'],
+    [L('Стандарт', 'Standard'), esc(stdName({...l, band: freqBand(f)}) || '—')]].map(([k, v]) => `<span>${esc(k)}</span><span>${v}</span>`).join('');
+  drawSpark();
+}
+function drawSpark(){
+  const W = Math.max(240, $('spark').clientWidth || 500), H = 90;
+  const y = d => 6 + (H - 12) * (1 - (Math.max(-95, Math.min(-35, d)) + 95) / 60);
+  let s = '';
+  for(const d of [-80, -67, -55]) s += `<line x1="0" x2="${W}" y1="${y(d)}" y2="${y(d)}" stroke="var(--line)" stroke-dasharray="3 4"/>`;
+  if(HIST.length > 1){
+    const step = W / 179, x0 = W - (HIST.length - 1) * step;
+    const pts = HIST.map((d, i) => `${(x0 + i * step).toFixed(1)},${y(d).toFixed(1)}`).join(' ');
+    s += `<polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>`;
+  }
+  $('spark').setAttribute('viewBox', `0 0 ${W} ${H}`);
+  $('spark').innerHTML = s;
+}
+function drawPts(){
+  $('pts').innerHTML = PTS.length ? PTS.map((p, i) => { const [q, cls] = quality(p.level);
+    return `<div class="row"><span>${esc(p.name)}</span><span class="${cls}">${p.level} ${L('дБм', 'dBm')}</span><span class="${cls}">${esc(q)}</span><button class="ico" data-i="${i}">${icon('close')}</button></div>`; }).join('')
+    : `<div class="hint" style="padding:8px 0">${esc(L('Встань в комнате, впиши её название и нажми «Отметить» — так видно, где сигнал проседает.', 'Stand in a room, type its name and tap «Mark» — you will see where the signal drops.'))}</div>`;
+  $('pts').querySelectorAll('[data-i]').forEach(b => b.onclick = () => { PTS.splice(+b.dataset.i, 1); savePts(); drawPts(); });
+}
+$('kMin').textContent = L('мин', 'min'); $('kAvg').textContent = L('средний', 'avg'); $('kMax').textContent = L('макс', 'max');
+$('ptName').placeholder = L('комната, например «кухня»', 'room, e.g. «kitchen»');
+$('ptAdd').textContent = L('Отметить', 'Mark');
+$('sReset').textContent = L('Сбросить', 'Reset');
+$('ptAdd').onclick = () => {
+  if(!LAST || !LAST.connected || !HIST.length) return;
+  // В точку пишется средний за последние 5 секунд — один замер скачет.
+  const last = HIST.slice(-5), level = Math.round(last.reduce((a, b) => a + b, 0) / last.length);
+  PTS.push({name: $('ptName').value.trim() || L('Точка ', 'Spot ') + (PTS.length + 1), level, t: Date.now()});
+  $('ptName').value = ''; savePts(); drawPts();
+};
+$('sReset').onclick = () => { HIST = []; drawSpark(); ['sMin', 'sAvg', 'sMax'].forEach(id => $(id).textContent = '—'); };
+$('snote').textContent = L('Уровень обновляется раз в секунду. −50 и выше — отлично, до −67 — хорошо для видео и звонков, ниже −75 — будут обрывы.', 'Updates every second. −50 and above is excellent, down to −67 is fine for video and calls, below −75 expect drops.');
+drawPts();
+addEventListener('resize', () => { if(TAB === 'wifi' && WIFI) wifiDraw(); if(TAB === 'sig') drawSpark(); });
+setTab(Q.get('tab') || 'dev');
+
 </script>
 </body>
 </html>
