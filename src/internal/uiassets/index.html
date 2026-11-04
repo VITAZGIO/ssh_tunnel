@@ -2870,7 +2870,9 @@ async function openProcessPicker(){
   procs = r.processes || [];
   procs.forEach(p => { if(p.label) appLabels[p.name] = p.label; });
   renderProcs();
-  $('procSearch').focus();
+  // На телефоне клавиатура сама не выезжает: сначала смотрят список, поиск —
+  // по нажатию на поле.
+  if(!ANDROID) $('procSearch').focus();
 }
 $('closeProc').onclick = () => { $('procOverlay').hidden = true; };
 $('procOverlay').onclick = ev => { if(ev.target === $('procOverlay')) $('procOverlay').hidden = true; };
@@ -2896,11 +2898,16 @@ function renderProcs(){
     icon.textContent = ((p.label || p.name)[0] || '?').toUpperCase();
     const src = appIconURL(p.name, p.path);
     if(src){
+      // Картинка — сразу в списке (поверх буквы, пока не загрузилась —
+      // прозрачная). Ленивая картинка вне страницы не грузится вовсе: так
+      // значки и пропадали у всех, кроме уже виденных.
       const img = document.createElement('img');
       img.loading = 'lazy';
+      img.style.opacity = '0';
+      img.onload = () => { img.style.opacity = ''; icon.style.color = 'transparent'; };
+      img.onerror = () => img.remove();
       img.src = src;
-      img.onload = () => { icon.textContent = ''; icon.appendChild(img); };
-      img.onerror = () => {};
+      icon.appendChild(img);
     }
     b.appendChild(icon);
 
