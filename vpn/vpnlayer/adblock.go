@@ -24,6 +24,7 @@ func adBlockFile() string { return filepath.Join(config.Dir(), "adblock.list") }
 // SetAdBlock применяет настройки (реализует app.AdBlocker). Действует и на
 // поднятом адаптере: новые запросы имён сразу проходят через новый список.
 func (l *Layer) SetAdBlock(cfg config.Config) {
+	core.SetAdStatsFile(filepath.Join(config.Dir(), "adstats.json"))
 	if !cfg.AdBlockEnabled {
 		l.block.Set(nil, nil)
 	} else {
@@ -47,6 +48,9 @@ func (l *Layer) UpdateAdBlockLists(sources string) (int, error) {
 	}
 	return n, err
 }
+
+// AdStatsJSON — статистика для плагина «Блокировка рекламы».
+func (l *Layer) AdStatsJSON() string { return core.AdStatsJSON() }
 
 // AdBlocked — сколько запросов имён отвергнуто с подъёма адаптера (для
 // строки «Заблокировано» в настройках, как на телефоне).

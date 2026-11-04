@@ -46,6 +46,11 @@
     <string name="crash_title">The app crashed last time</string>
     <string name="crash_copy">Copy</string>
     <string name="crash_copied">Copied</string>
+    <string name="phonelink_ring">Someone is looking for this phone</string>
+    <string name="vault_locked">🔒 ssh_tunnel passwords — unlock</string>
+    <string name="vault_unlock_title">Unlock passwords</string>
+    <string name="vault_master">Master password</string>
+    <string name="vault_unlock">Unlock</string>
     <string name="calendar_account">ssh_tunnel calendar</string>
     <string name="calendar_widget_desc">Upcoming Nextcloud events</string>
     <string name="calendar_widget_empty">No events this week</string>

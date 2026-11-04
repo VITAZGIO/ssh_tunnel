@@ -679,6 +679,23 @@ func (u *ui) showTrayHint() {
 	pShellNotifyIcon.Call(nimModify, uintptr(unsafe.Pointer(&nid)))
 }
 
+// Notify — уведомление у часов (значок в трее), например уведомление с
+// телефона («Связь с телефоном»). Окна нет — ничего не делает.
+func Notify(title, text string) {
+	u := active
+	if u == nil {
+		return
+	}
+	u.tipMu.Lock()
+	defer u.tipMu.Unlock()
+	nid := u.nid
+	nid.UFlags = nifInfo
+	nid.DwInfoFlags = niifInfo
+	copyUTF16(nid.SzInfoTitle[:], title)
+	copyUTF16(nid.SzInfo[:], text)
+	pShellNotifyIcon.Call(nimModify, uintptr(unsafe.Pointer(&nid)))
+}
+
 // showMenu показывает меню у значка в трее.
 func (u *ui) showMenu() {
 	menu, _, _ := pCreatePopupMenu.Call()

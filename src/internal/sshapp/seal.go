@@ -96,6 +96,10 @@ func signer() (ssh.Signer, error) {
 	return ssh.NewSignerFromKey(k)
 }
 
+// Signer — ключ программы для входа на свои серверы (плагин «Машины»
+// читает показания по SSH тем же ключом, что ставит плагин SSH).
+func Signer() (ssh.Signer, error) { return signer() }
+
 // PublicKey — открытая часть ключа одной строкой для authorized_keys.
 func PublicKey() (string, error) {
 	s, err := signer()

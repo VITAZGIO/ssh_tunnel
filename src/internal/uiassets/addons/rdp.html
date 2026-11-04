@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Удалённый стол</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../pages.css">
+<style>
+  body{background:transparent}
+  .wrap{display:flex;flex-direction:column;gap:10px;padding:12px 14px 16px}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .bar input,.bar select,.f input,.f select{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--text);font:inherit}
+  .bar input{flex:1;min-width:140px}
+  .btn{display:inline-flex;align-items:center;gap:6px}
+  .m{display:grid;grid-template-columns:auto 1fr auto auto;gap:3px 12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+  .m:last-child{border-bottom:0}
+  .m>.mi{width:26px;height:26px;color:var(--accent)}
+  .m .n{font-weight:600}
+  .m .a{font-family:var(--mono);font-size:12.5px;color:var(--dim)}
+  .relay{display:flex;gap:12px;align-items:flex-start}
+  .relay>.mi{width:30px;height:30px;color:var(--warn);flex:none}
+  .relay.ok>.mi{color:var(--ok)}
+  .f{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .f label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim)}
+  .f .full{grid-column:1/-1}
+  .ok{color:var(--ok)}.err{color:var(--err)}
+  /* Сеанс: картинка на всю ширину, сверху тонкая строка кнопок. */
+  #sess{position:fixed;inset:0;background:#000;display:flex;flex-direction:column;z-index:20}
+  #sess[hidden]{display:none}
+  #tools{display:flex;gap:4px;padding:4px;background:var(--card);border-bottom:1px solid var(--line);overflow-x:auto;flex:none;scrollbar-width:none}
+  #tools button,#tools select{flex:none;border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:7px;padding:6px 9px;font:13px inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  #tools button.on{background:var(--accent-muted);border-color:var(--accent);color:#fff}
+  #tools .mi{width:16px;height:16px}
+  #view{flex:1;position:relative;overflow:hidden;touch-action:none}
+  #disp{position:absolute;left:0;top:0;transform-origin:0 0}
+  #state{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);background:rgba(0,0,0,.7);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;text-align:center;max-width:80%}
+  #state[hidden]{display:none}
+  #kbd{position:absolute;opacity:0;left:-1000px;top:0;width:1px;height:1px}
+</style>
+</head>
+<body>
+<div class="wrap" id="home">
+  <div class="card relay" id="relayCard">
+    <span class="mi" style="--i:url(/icons/antenna.svg)"></span>
+    <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+      <div><b id="relayT"></b> <span class="hint" id="relayS"></span></div>
+      <div class="hint" id="relayH"></div>
+      <div class="bar"><input id="relay" spellcheck="false"><button class="btn" id="relaySave"></button></div>
+    </div>
+  </div>
+  <div class="card" id="list"></div>
+  <div class="card">
+    <div class="f">
+      <label><span id="lName"></span><input id="fName"></label>
+      <label><span id="lHost"></span><input id="fHost" spellcheck="false"></label>
+      <label><span id="lUser"></span><input id="fUser" autocomplete="off" spellcheck="false"></label>
+      <label><span id="lPass"></span><input id="fPass" type="password" autocomplete="new-password"></label>
+      <label class="full" style="flex-direction:row;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" id="fRem"><span id="lRem"></span></label>
+    </div>
+    <div class="bar" style="margin-top:8px"><button class="btn primary" id="fAdd"></button><span class="hint" id="note"></span></div>
+  </div>
+</div>
+
+<div class="wrap" id="cred" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:30;justify-content:center">
+  <div class="card" style="max-width:380px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:8px">
+    <b id="cName"></b>
+    <div class="f"><label><span id="lcUser"></span><input id="cUser" autocomplete="off" spellcheck="false"></label>
+      <label><span id="lcPass"></span><input id="cPass" type="password" autocomplete="off"></label>
+      <label class="full" style="flex-direction:row;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" id="cRem"><span id="lcRem"></span></label></div>
+    <div class="bar"><button class="btn primary" id="cGo"></button><button class="btn" id="cNo"></button></div>
+  </div>
+</div>
+
+<div id="sess" hidden>
+  <div id="tools"></div>
+  <div id="view"><div id="disp"></div><div id="state" hidden></div><input id="kbd" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></div>
+</div>
+
+<script src="../vendor/guacamole-common.min.js"></script>
+<script src="../pages.js"></script>
+<script>
+/* Удалённый стол (RDP через guacd). Ядро (/api/rdp/*) держит связь с guacd
+   и передаёт инструкции; здесь — клиент Guacamole. Канал — длинный опрос:
+   read ждёт данные до 20 с, write шлёт нажатия и мышь. */
+let CONF = {relay: '', hosts: []}, EDIT = null;
+const TOUCH = matchMedia('(pointer: coarse)').matches;
+
+// PollTunnel — Guacamole.Tunnel поверх /api/rdp/{open,read,write,close}.
+function PollTunnel(openBody){
+  Guacamole.Tunnel.call(this);
+  const self = this;
+  let sid = null, alive = false, out = [], sending = false;
+  const parser = new Guacamole.Parser();
+  parser.oninstruction = (op, args) => { if(self.oninstruction) self.oninstruction(op, args); };
+  const H = {'X-Token': T};
+  const setState = st => { self.state = st; if(self.onstatechange) self.onstatechange(st); };
+  async function readLoop(){
+    while(alive){
+      let r;
+      try { r = await fetch(`/api/rdp/read?sid=${sid}&t=${T}`, {headers: H, cache: 'no-store'}); }
+      catch(e){ if(!alive) return; await new Promise(res => setTimeout(res, 800)); continue; }
+      if(r.status === 410 || !r.ok){ alive = false; setState(Guacamole.Tunnel.State.CLOSED); return; }
+      const text = await r.text();
+      self.lastRecv = performance.now();
+      if(text) try { parser.receive(text); } catch(e) { console.error(e); }
+    }
+  }
+  async function flush(){
+    if(sending || !out.length || !alive) return;
+    sending = true;
+    const body = out.join(''); out = [];
+    try { await fetch(`/api/rdp/write?sid=${sid}&t=${T}`, {method: 'POST', headers: H, body}); } catch(e) {}
+    sending = false;
+    if(out.length) flush();
+  }
+  this.connect = async () => {
+    setState(Guacamole.Tunnel.State.CONNECTING);
+    const r = await api('/api/rdp/open', openBody).catch(e => ({error: String(e)}));
+    if(r.error || !r.sid){
+      if(self.onerror) self.onerror(new Guacamole.Status(Guacamole.Status.Code.UPSTREAM_NOT_FOUND, r.error || 'нет связи'));
+      setState(Guacamole.Tunnel.State.CLOSED);
+      return;
+    }
+    sid = r.sid; alive = true; self.lastRecv = performance.now();
+    setState(Guacamole.Tunnel.State.OPEN);
+    readLoop();
+  };
+  this.sendMessage = (...a) => {
+    if(!alive) return;
+    out.push(a.map(v => { const s = String(v); return [...s].length + '.' + s; }).join(',') + ';');
+    flush();
+  };
+  this.disconnect = () => {
+    if(sid && alive) fetch(`/api/rdp/close?sid=${sid}&t=${T}`, {method: 'POST', headers: H}).catch(() => {});
+    alive = false;
+    setState(Guacamole.Tunnel.State.CLOSED);
+  };
+}
+PollTunnel.prototype = Object.create(Guacamole.Tunnel.prototype);
+
+/* ---------- список машин и ретранслятор ---------- */
+async function load(){
+  CONF = await api('/api/rdp').catch(() => CONF);
+  $('relay').value = CONF.relay || '';
+  drawList();
+  checkRelay();
+}
+async function checkRelay(){
+  const c = $('relayCard');
+  if(!CONF.relay){ c.classList.remove('ok'); $('relayS').textContent = L('— не задан', '— not set'); return; }
+  $('relayS').textContent = L('проверяю…', 'checking…');
+  const r = await api('/api/rdp', {op: 'check'}).catch(e => ({error: String(e)}));
+  c.classList.toggle('ok', !r.error);
+  $('relayS').textContent = r.error ? '— ' + r.error : L('— на связи', '— online');
+  $('relayS').className = 'hint ' + (r.error ? 'err' : 'ok');
+}
+function drawList(){
+  $('list').innerHTML = CONF.hosts.length ? CONF.hosts.map(h => `<div class="m">${icon('desktop_windows')}
+      <div><div class="n">${esc(h.name)}</div><div class="a">${esc((h.user ? h.user + '@' : '') + h.host)}${h.saved ? ' · ' + esc(L('пароль сохранён', 'password saved')) : ''}</div></div>
+      <button class="btn primary" data-go="${esc(h.id)}">${icon('desktop_windows')}${esc(L('Подключиться', 'Connect'))}</button>
+      <span><button class="ico" data-ed="${esc(h.id)}" title="${esc(L('Изменить', 'Edit'))}">${icon('edit')}</button><button class="ico" data-rm="${esc(h.id)}" title="${esc(L('Убрать', 'Remove'))}">${icon('close')}</button></span></div>`).join('')
+    : `<div class="empty" style="padding:20px">${esc(L('Машин пока нет — добавь ниже: имя и адрес в домашней сети (например 192.168.1.202). Адрес — тот, по которому её видит ретранслятор.', 'No machines yet — add one below: a name and its home network address. The address is what the relay sees.'))}</div>`;
+  $('list').querySelectorAll('[data-go]').forEach(b => b.onclick = () => start(CONF.hosts.find(h => h.id === b.dataset.go)));
+  $('list').querySelectorAll('[data-ed]').forEach(b => b.onclick = () => {
+    const h = CONF.hosts.find(x => x.id === b.dataset.ed); EDIT = h.id;
+    $('fName').value = h.name; $('fHost').value = h.host + (h.port && h.port !== 3389 ? ':' + h.port : ''); $('fUser').value = h.user || ''; $('fPass').value = ''; $('fRem').checked = h.saved;
+    $('fAdd').textContent = L('Сохранить', 'Save'); $('fName').focus();
+  });
+  $('list').querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => {
+    const h = CONF.hosts.find(x => x.id === b.dataset.rm);
+    if(!confirm(L(`Убрать «${h.name}»?`, `Remove «${h.name}»?`))) return;
+    CONF = await api('/api/rdp', {op: 'remove', id: h.id}); drawList();
+  });
+}
+$('relaySave').onclick = async () => { CONF = await api('/api/rdp', {op: 'relay', relay: $('relay').value.trim()}); $('relay').value = CONF.relay || ''; checkRelay(); };
+$('fAdd').onclick = async () => {
+  let [host, port] = $('fHost').value.trim().split(':');
+  const body = {op: 'add', id: EDIT || '', name: $('fName').value.trim(), host, port: +port || 0, user: $('fUser').value.trim(),
+    pass: $('fRem').checked ? $('fPass').value : '', forget: !$('fRem').checked};
+  const r = await api('/api/rdp', body).catch(e => ({error: String(e)}));
+  if(r.error){ $('note').className = 'hint err'; $('note').textContent = r.error; return; }
+  CONF = r; EDIT = null; ['fName', 'fHost', 'fUser', 'fPass'].forEach(id => $(id).value = ''); $('fRem').checked = false;
+  $('fAdd').textContent = L('Добавить', 'Add'); $('note').textContent = ''; drawList();
+};
+
+/* ---------- сеанс ---------- */
+let client = null, keyboard = null, mouse = null, cur = null, creds = null, retries = 0, wasUp = false, mods = {}, touchMode = 'touchpad', qual = 'medium';
+let resizeT = 0, watchT = 0;
+
+function start(h){
+  cur = h; retries = 0;
+  if(!h.saved && !creds){
+    // Пароль не сохранён — спросим (в память страницы, до «Отключить»).
+    $('cName').textContent = h.name; $('cUser').value = h.user || ''; $('cPass').value = '';
+    $('cred').hidden = false; ($('cUser').value ? $('cPass') : $('cUser')).focus();
+    return;
+  }
+  $('home').hidden = true; $('sess').hidden = false;
+  drawTools();
+  connect();
+}
+
+function size(){
+  const v = $('view'), dpr = Math.min(window.devicePixelRatio || 1, 2);
+  // Телефон: экран в настоящих пикселях и dpi крупнее — Windows сама
+  // увеличит шрифты, читать удобно. ПК — как есть.
+  return {w: Math.round(v.clientWidth * dpr), h: Math.round(v.clientHeight * dpr), dpi: Math.round(96 * dpr)};
+}
+function fit(){
+  if(!client) return;
+  const d = client.getDisplay(), v = $('view');
+  if(!d.getWidth()) return;
+  d.scale(Math.min(v.clientWidth / d.getWidth(), v.clientHeight / d.getHeight()));
+}
+function say(t){ $('state').hidden = !t; $('state').textContent = t || ''; }
+
+function connect(){
+  const s = size();
+  const tunnel = new PollTunnel({id: cur.id, w: s.w, h: s.h, dpi: s.dpi, quality: qual, user: creds ? creds.user : '', pass: creds ? creds.pass : ''});
+  client = new Guacamole.Client(tunnel);
+  const disp = client.getDisplay().getElement();
+  $('disp').innerHTML = ''; $('disp').appendChild(disp);
+  say(L('Подключаюсь…', 'Connecting…'));
+  client.onstatechange = st => {
+    if(st === 3){ wasUp = true; retries = 0; say(''); fit(); }           // CONNECTED
+    if(st === 5 && client) lost();                                       // DISCONNECTED
+  };
+  client.onerror = e => { say(L('Ошибка: ', 'Error: ') + (e.message || e.code)); wasUp = false; };
+  client.getDisplay().onresize = fit;
+  client.onclipboard = () => {};
+  client.connect('');
+  // Сторож: 12 с без данных от сервера — переподключаемся.
+  clearInterval(watchT);
+  watchT = setInterval(() => { if(tunnel.lastRecv && performance.now() - tunnel.lastRecv > 25000 && wasUp) lost(); }, 4000);
+  bindInput();
+}
+function lost(){
+  if(!client) return;
+  const c = client; client = null; try { c.disconnect(); } catch(e) {}
+  if(wasUp && retries < 5){
+    retries++; say(L(`Связь пропала — переподключаюсь (${retries})…`, `Connection lost — reconnecting (${retries})…`));
+    setTimeout(connect, 1500 * retries);
+  } else if(!$('state').textContent.startsWith(L('Ошибка', 'Error'))) say(L('Отключено.', 'Disconnected.'));
+}
+function stop(){
+  clearInterval(watchT);
+  const c = client; client = null; wasUp = false;
+  if(c) try { c.disconnect(); } catch(e) {}
+  unbindInput();
+  $('sess').hidden = true; $('home').hidden = false; creds = null;
+  if(document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+
+/* ---------- ввод ---------- */
+function bindInput(){
+  unbindInput();
+  const el = client.getDisplay().getElement();
+  if(!TOUCH){
+    mouse = new Guacamole.Mouse(el);
+  } else mouse = touchMode === 'touchpad' ? new Guacamole.Mouse.Touchpad(el) : new Guacamole.Mouse.Touchscreen(el);
+  // Координаты — экранные; картинка уменьшена под окно — делим на масштаб.
+  mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = st => {
+    if(!client) return;
+    const sc = client.getDisplay().getScale() || 1;
+    client.sendMouseState(new Guacamole.Mouse.State(st.x / sc, st.y / sc, st.left, st.middle, st.right, st.up, st.down));
+  };
+  // Физическая клавиатура — один раз и только пока открыт сеанс (на сайте
+  // новый Guacamole.Keyboard на каждое подключение глушил ввод после).
+  keyboard = new Guacamole.Keyboard(document);
+  keyboard.onkeydown = k => { if(document.activeElement === $('kbd')) return true; if(client) client.sendKeyEvent(1, k); return false; };
+  keyboard.onkeyup = k => { if(document.activeElement === $('kbd')) return; if(client) client.sendKeyEvent(0, k); };
+}
+function unbindInput(){
+  if(keyboard){ keyboard.onkeydown = keyboard.onkeyup = null; keyboard.reset(); keyboard = null; }
+  if(mouse){ mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = null; mouse = null; }
+}
+const K = {ctrl: 0xffe3, alt: 0xffe9, shift: 0xffe1, win: 0xffeb, esc: 0xff1b, tab: 0xff09, bs: 0xff08, enter: 0xff0d, del: 0xffff,
+  left: 0xff51, up: 0xff52, right: 0xff53, down: 0xff54, home: 0xff50, end: 0xff57};
+function tap(...keys){
+  if(!client) return;
+  const held = Object.keys(mods).filter(m => mods[m]).map(m => K[m]);
+  for(const k of [...held, ...keys]) client.sendKeyEvent(1, k);
+  for(const k of [...keys].reverse().concat(held.reverse())) client.sendKeyEvent(0, k);
+  // Залипшие Ctrl/Alt/Shift/Win — на одно нажатие, как на телефонных клавиатурах.
+  if(held.length){ mods = {}; drawTools(); }
+}
+// Экранная клавиатура: буквы — Юникодом (0x01000000 + код), тогда Windows
+// печатает то же, что набрано, при любой раскладке; с Ctrl/Alt — латиница.
+$('kbd').addEventListener('input', () => {
+  const v = $('kbd').value; $('kbd').value = '';
+  const withMods = Object.values(mods).some(Boolean);
+  for(const ch of v){
+    const cp = ch.codePointAt(0);
+    if(ch === '\n'){ tap(K.enter); continue; }
+    tap(withMods && cp < 0x100 ? ch.toLowerCase().codePointAt(0) : (cp < 0x100 ? cp : 0x01000000 | cp));
+  }
+});
+$('kbd').addEventListener('keydown', e => {
+  if(e.key === 'Backspace'){ tap(K.bs); e.preventDefault(); }
+  else if(e.key === 'Enter'){ tap(K.enter); e.preventDefault(); }
+});
+
+// combo — нажать вместе и отпустить в обратном порядке.
+function combo(...keys){
+  if(!client) return;
+  keys.forEach(k => client.sendKeyEvent(1, k));
+  [...keys].reverse().forEach(k => client.sendKeyEvent(0, k));
+}
+// reconnect — новый сеанс с теми же входом и окном (смена качества).
+function reconnect(){
+  const c = client; client = null;
+  if(c) try { c.disconnect(); } catch(e) {}
+  retries = 0; connect();
+}
+function drawTools(){
+  const b = (id, html, on, title) => `<button data-t="${id}" class="${on ? 'on' : ''}" title="${esc(title || '')}">${html}</button>`;
+  $('tools').innerHTML = [
+    TOUCH ? b('kbd', '⌨', false, L('Клавиатура', 'Keyboard')) : '',
+    TOUCH ? b('mode', touchMode === 'touchpad' ? L('Тачпад', 'Touchpad') : L('Касание', 'Touch'), false, L('Как работает палец', 'How touch works')) : '',
+    b('ctrl', 'Ctrl', mods.ctrl), b('alt', 'Alt', mods.alt), b('shift', 'Shift', mods.shift), b('win', 'Win', mods.win),
+    b('esc', 'Esc'), b('tab', 'Tab'), b('left', '←'), b('up', '↑'), b('down', '↓'), b('right', '→'),
+    b('cad', 'Ctrl+Alt+Del'), b('alttab', 'Alt+Tab'),
+    `<select data-t="q" title="${esc(L('Качество', 'Quality'))}">${[['high', L('Чётко', 'High')], ['medium', L('Обычно', 'Medium')], ['low', L('Слабая связь', 'Low')]].map(([v, t]) => `<option value="${v}"${v === qual ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`,
+    b('full', '⛶', !!document.fullscreenElement, L('Во весь экран', 'Full screen')), b('x', '✕ ' + esc(L('Отключить', 'Disconnect')))
+  ].join('');
+  $('tools').querySelectorAll('button').forEach(el => el.onclick = () => tool(el.dataset.t));
+  $('tools').querySelector('select').onchange = e => { qual = e.target.value; reconnect(); };
+}
+function tool(t){
+  if(['ctrl', 'alt', 'shift', 'win'].includes(t)){ mods[t] = !mods[t]; drawTools(); return; }
+  if(K[t]) return tap(K[t]);
+  if(t === 'cad') return combo(K.ctrl, K.alt, K.del);
+  if(t === 'alttab') return combo(K.alt, K.tab);
+  // Клавиатура — только по кнопке: тап по экрану её не зовёт.
+  if(t === 'kbd'){ const k = $('kbd'); if(document.activeElement === k) k.blur(); else k.focus(); return; }
+  if(t === 'mode'){ touchMode = touchMode === 'touchpad' ? 'touch' : 'touchpad'; if(client) bindInput(); drawTools(); return; }
+  if(t === 'full'){ (document.fullscreenElement ? document.exitFullscreen() : $('sess').requestFullscreen()).catch(() => {}).then(drawTools); return; }
+  if(t === 'x') stop();
+}
+// Поворот телефона или новое окно — Windows меняет разрешение сама.
+addEventListener('resize', () => {
+  fit();
+  clearTimeout(resizeT);
+  resizeT = setTimeout(() => { if(client){ const s = size(); client.sendSize(s.w, s.h); } }, 600);
+});
+addEventListener('pagehide', () => { if(client) client.disconnect(); });
+
+/* ---------- подписи ---------- */
+$('relayT').textContent = L('Ретранслятор RDP', 'RDP relay');
+$('relayH').innerHTML = esc(L('Это guacd (Apache Guacamole) на компьютере в той же локальной сети, что и машины: он разговаривает с Windows по RDP, а программа — с ним. Поставить: «docker run -d --name guacd --restart unless-stopped -p 4822:4822 guacamole/guacd». Адрес — через сеть устройств («ubuntu.mesh:4822») или в локалке («192.168.1.201:4822»).',
+  'This is guacd (Apache Guacamole) on a computer in the same local network as the machines. Install: «docker run -d --name guacd -p 4822:4822 guacamole/guacd». Address — via the device network («ubuntu.mesh:4822») or local («192.168.1.201:4822»).'));
+$('relay').placeholder = 'ubuntu.mesh:4822';
+$('relaySave').textContent = L('Сохранить и проверить', 'Save and check');
+$('lName').textContent = L('Имя', 'Name'); $('fName').placeholder = L('например «ПК»', 'e.g. «PC»');
+$('lHost').textContent = L('Адрес в домашней сети', 'Home network address'); $('fHost').placeholder = '192.168.1.202';
+$('lUser').textContent = L('Пользователь Windows', 'Windows user');
+$('lPass').textContent = L('Пароль', 'Password');
+$('lRem').textContent = L('Запомнить вход на этом устройстве (иначе спрошу при подключении)', 'Remember the login on this device (otherwise asked on connect)');
+$('fAdd').textContent = L('Добавить', 'Add');
+$('lcUser').textContent = L('Пользователь Windows', 'Windows user'); $('lcPass').textContent = L('Пароль', 'Password');
+$('lcRem').textContent = L('Запомнить на этом устройстве', 'Remember on this device');
+$('cGo').textContent = L('Подключиться', 'Connect'); $('cNo').textContent = L('Отмена', 'Cancel');
+$('cNo').onclick = () => { $('cred').hidden = true; };
+$('cGo').onclick = async () => {
+  creds = {user: $('cUser').value.trim(), pass: $('cPass').value};
+  $('cred').hidden = true;
+  if($('cRem').checked){
+    // Запомнить — в rdp.json этой машины (0600), дальше одна кнопка.
+    CONF = await api('/api/rdp', {op: 'add', id: cur.id, name: cur.name, host: cur.host, port: cur.port || 0, user: creds.user, pass: creds.pass}).catch(() => CONF);
+    cur = CONF.hosts.find(h => h.id === cur.id) || cur; drawList();
+  }
+  start(cur);
+};
+$('cPass').addEventListener('keydown', e => { if(e.key === 'Enter') $('cGo').click(); });
+load();
+</script>
+</body>
+</html>

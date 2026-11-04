@@ -21,6 +21,7 @@ import (
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/events"
 	"sshtunnel/internal/nativeui"
+	"sshtunnel/internal/phonelink"
 	"sshtunnel/internal/shutdown"
 	"sshtunnel/internal/updater"
 	"sshtunnel/internal/webui"
@@ -116,6 +117,7 @@ func main() {
 			"/addons/calendar.html?widget=1&solo=1&key="+calendar.ID+"-widget&t="+srv.Token())
 	}
 
+	phonelink.Notify = nativeui.Notify // уведомления с телефона — у часов
 	err = nativeui.Run(nativeui.Options{
 		Title:    windowTitle,
 		URL:      url,

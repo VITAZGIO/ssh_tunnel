@@ -8,6 +8,7 @@ import (
 	"sshtunnel/internal/app"
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/nativeui"
+	"sshtunnel/internal/phonelink"
 	"sshtunnel/internal/shutdown"
 	"sshtunnel/internal/webui"
 	"sshtunnel/vpn/internal/winsvc"
@@ -55,6 +56,7 @@ func runWindow(url string, tray bool, running func() bool, toggle, onQuit func()
 			"Поставь «Microsoft Edge WebView2 Runtime» с сайта Microsoft\n" +
 			"или запусти так: ssh_tunnel_vpn.exe -nowindow")
 	}
+	phonelink.Notify = nativeui.Notify // уведомления с телефона — у часов
 	err := nativeui.Run(nativeui.Options{
 		Title:       windowTitle,
 		URL:         url,

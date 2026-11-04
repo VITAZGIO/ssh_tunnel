@@ -20,6 +20,8 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- «Связь с телефоном» → «Найти телефон»: вибрация вместе со звонком. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Список установленных приложений нужен для экрана исключений. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
@@ -128,6 +130,35 @@
             приложения (ровно так стартует always-on VPN после перезагрузки)
             поднимает туннель с теми же настройками, что были в последний раз.
         -->
+        <!-- «Пароли»: автозаполнение логинов и паролей в приложениях. Включает
+             человек сам: Настройки → Пароли и автозаполнение → ssh_tunnel. -->
+        <service
+            android:name=".VaultFill"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+        </service>
+        <activity
+            android:name=".VaultUnlockActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@style/AppTheme" />
+
+        <!-- «Связь с телефоном»: уведомления — на свои устройства. Работает,
+             только если человек сам разрешил «Доступ к уведомлениям». -->
+        <service
+            android:name=".PhoneNotifs"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".TunnelService"
             android:exported="false"

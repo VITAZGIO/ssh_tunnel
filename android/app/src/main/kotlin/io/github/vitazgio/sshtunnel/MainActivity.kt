@@ -286,9 +286,33 @@ class MainActivity : AppCompatActivity(), AndroidApi.Screen {
 
     // Мост для страницы: только то, чего WebView не умеет сам.
     inner class Bridge {
+        /** «Пароли»: служба автозаполнения — наша ли, и открыть её настройки. */
+        @JavascriptInterface
+        fun autofillOn(): Boolean = try {
+            getSystemService(android.view.autofill.AutofillManager::class.java)?.hasEnabledAutofillServices() == true
+        } catch (_: Exception) { false }
+
+        @JavascriptInterface
+        fun openAutofill() = runOnUiThread {
+            try {
+                startActivity(Intent(android.provider.Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE)
+                    .setData(Uri.parse("package:" + packageName)))
+            } catch (_: Exception) {}
+        }
+
+        /** «Связь с телефоном»: дан ли «Доступ к уведомлениям», открыть его. */
+        @JavascriptInterface
+        fun notifAccess(): Boolean = PhoneNotifs.allowed(this@MainActivity)
+
+        @JavascriptInterface
+        fun openNotifAccess() = runOnUiThread { PhoneNotifs.openSettings(this@MainActivity) }
+
         /** «Сканер сети» → Wi-Fi: сети вокруг, своя сеть сейчас, разрешение. */
         @JavascriptInterface
         fun wifiScan(): String = WifiScan.scanJson(this@MainActivity)
+
+        @JavascriptInterface
+        fun wifiStartScan(): Long = WifiScan.startScan(this@MainActivity)
 
         @JavascriptInterface
         fun wifiInfo(): String = WifiScan.infoJson(this@MainActivity)

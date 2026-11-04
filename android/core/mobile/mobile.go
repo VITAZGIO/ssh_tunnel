@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -154,6 +155,9 @@ func (t *Tunnel) Configure(
 		poolSize = 4
 	}
 
+	if adBlockListPath != "" {
+		core.SetAdStatsFile(filepath.Join(filepath.Dir(adBlockListPath), "adstats.json"))
+	}
 	var block *core.BlockList
 	if adBlockEnabled {
 		var blocked []string
@@ -915,6 +919,9 @@ func splitNonEmpty(text string) []string {
 // Вызывается только по явному нажатию кнопки в настройках, никогда сама по
 // себе: список не должен меняться без ведома человека, а обновление по
 // расписанию — это ещё и сетевой запрос, который на телефоне не бесплатен.
+// AdStatsJSON — статистика плагина «Блокировка рекламы» (см. core.AdStatsJSON).
+func AdStatsJSON() string { return core.AdStatsJSON() }
+
 func UpdateBlockLists(sourcesText string, cachePath string) string {
 	n, err := core.UpdateBlockListFile(routing.SplitEntries(sourcesText), cachePath)
 	if err != nil {

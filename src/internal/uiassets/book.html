@@ -41,6 +41,7 @@
   .flow{height:100%;overflow:hidden;column-fill:auto;column-gap:56px}
   .flow .ch + .ch{break-before:column}
   .pager{display:flex;align-items:center;justify-content:center;gap:14px;padding:8px 14px;flex:none;color:var(--dim)}
+  .pager span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
   .foot{flex:none;text-align:center;padding:6px 14px 12px;font-size:12.5px}
   .foot a{cursor:pointer}
 </style>
@@ -124,6 +125,23 @@ function render(q){
     s.className = 'scroll';
     s.innerHTML = html;
     r.appendChild(s);
+    // Телефон: страниц нет — внизу «глава N из M · название · сколько
+    // прочитано», чтобы было видно, где ты.
+    const p = document.createElement('div');
+    p.className = 'pager';
+    p.innerHTML = '<span id="pno"></span>';
+    r.appendChild(p);
+    const secs = [...s.querySelectorAll('.ch')];
+    const where = () => {
+      const top = s.scrollTop + 40;
+      let i = 0;
+      secs.forEach((x, k) => { if(x.offsetTop - s.offsetTop <= top) i = k; });
+      const h = secs[i] && secs[i].querySelector('h1');
+      const pct = s.scrollHeight > s.clientHeight ? Math.round(s.scrollTop * 100 / (s.scrollHeight - s.clientHeight)) : 100;
+      $('pno').textContent = `${L('глава', 'chapter')} ${i + 1} ${L('из', 'of')} ${secs.length}${h ? ' · ' + h.textContent : ''} · ${pct}%`;
+    };
+    s.addEventListener('scroll', where, {passive: true});
+    where();
   } else {
     const b = document.createElement('div');
     b.className = 'book';

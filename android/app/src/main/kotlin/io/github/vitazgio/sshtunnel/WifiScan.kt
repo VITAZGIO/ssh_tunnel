@@ -58,17 +58,25 @@ object WifiScan {
     private fun ssidOf(r: ScanResult): String =
         if (Build.VERSION.SDK_INT >= 33) (r.wifiSsid?.toString() ?: "").trim('"') else r.SSID ?: ""
 
-    /** Сети вокруг. Новый скан — не чаще раза в 30 с (ограничение Android). */
+    /** Кнопка «Сканировать»: новый скан. Android даёт ~4 за 2 минуты —
+     * чаще раза в 30 с не просим; ответ — через сколько мс можно снова. */
+    @Suppress("DEPRECATION")
+    fun startScan(ctx: Context): Long {
+        val now = System.currentTimeMillis()
+        val wait = 30_000 - (now - lastScanAt)
+        if (wait > 0) return wait
+        lastScanAt = now
+        try { wm(ctx).startScan() } catch (_: Exception) {}
+        return 0
+    }
+
+    /** Сети вокруг — последний скан (сам скан — startScan). */
     @Suppress("DEPRECATION")
     fun scanJson(ctx: Context): String {
         val o = head(ctx)
         if (!o.getBoolean("available")) return o.toString()
         val w = wm(ctx)
         val now = System.currentTimeMillis()
-        if (now - lastScanAt > 30_000) {
-            lastScanAt = now
-            try { w.startScan() } catch (_: Exception) {}
-        }
         val cur = try { w.connectionInfo?.bssid?.lowercase() } catch (_: Exception) { null }
         val list = JSONArray()
         val results = try { w.scanResults } catch (_: SecurityException) { emptyList() }

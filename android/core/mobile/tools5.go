@@ -13,6 +13,7 @@ import (
 
 	"sshtunnel/internal/clipshare"
 	"sshtunnel/internal/lanscan"
+	"sshtunnel/internal/phonelink"
 	"sshtunnel/internal/traffic"
 )
 
@@ -31,6 +32,11 @@ type Phone interface {
 	// Alert — предупреждение человеку (лимит трафика). Не Notify: в Java
 	// такое имя уже занято у Object.
 	Alert(text string)
+	// Ring — «Найти телефон» с другого устройства: громкий звонок.
+	Ring()
+	// Media — медиа-кнопка с другого устройства (playpause, next, prev,
+	// volup, voldown, mute).
+	Media(key string)
 }
 
 var (
@@ -52,8 +58,10 @@ func SetPhone(p Phone) {
 	if p == nil {
 		lanscan.SetLANSource(nil)
 		clipshare.SetSink(nil)
+		phonelink.SetPhone(nil)
 		return
 	}
+	phonelink.SetPhone(p)
 	lanscan.SetLANSource(func() string { return p.LocalNet() })
 	clipshare.SetSink(func(it clipshare.Item, path string) {
 		text := ""
@@ -62,6 +70,23 @@ func SetPhone(p Phone) {
 		}
 		p.OnClip(it.Kind, text, path, it.Mime, it.Name)
 	})
+}
+
+// PhoneLinkNotify — уведомление телефона: разослать своим устройствам
+// («Связь с телефоном»), если плагин добавлен и пересылка включена.
+func PhoneLinkNotify(app, title, text string) {
+	if !phonelink.Active() || !phonelink.Current().SendNotifs {
+		return
+	}
+	go phonelink.Broadcast(phonelink.Ev{Kind: "notif", App: app, Title: title, Text: text})
+}
+
+// PhoneLinkBattery — заряд телефона для других устройств.
+func PhoneLinkBattery(level int, charging bool) {
+	if !phonelink.Active() {
+		return
+	}
+	go phonelink.Broadcast(phonelink.Ev{Kind: "battery", Level: level, Charging: charging})
 }
 
 // SetNetworkKind — какая сеть у телефона сейчас: "wifi", "mobile" или "".

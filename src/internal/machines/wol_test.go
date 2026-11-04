@@ -1,4 +1,4 @@
-package lanscan
+package machines
 
 import "testing"
 
