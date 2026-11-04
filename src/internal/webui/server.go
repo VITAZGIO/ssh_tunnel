@@ -403,6 +403,16 @@ func (s *Server) handleAdBlockUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]int{"count": n})
 }
 
+func (s *Server) handleAdBlockStats(w http.ResponseWriter, r *http.Request) {
+	j := s.app.AdStatsJSON()
+	if j == "" {
+		writeJSON(w, map[string]string{"error": "блокировка рекламы есть только в режиме VPN"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write([]byte(j))
+}
+
 func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	if err := s.app.Start(); err != nil {
 		resp := map[string]string{"error": err.Error()}

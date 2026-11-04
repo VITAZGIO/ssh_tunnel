@@ -105,6 +105,7 @@ func (d *DNS) Answer(query []byte) ([]byte, error) {
 		if d.Stats != nil {
 			d.Stats.block()
 		}
+		ads.add(name)
 		return refuse(h, q, dnsmessage.RCodeNameError)
 	}
 

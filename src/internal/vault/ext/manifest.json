@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "ssh_tunnel — пароли",
+  "version": "1.0",
+  "description": "Подставляет логины и пароли из плагина «Пароли» программы ssh_tunnel на этом компьютере.",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1:47840/*"],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_popup": "popup.html", "default_title": "ssh_tunnel — пароли"},
+  "content_scripts": [{"matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "all_frames": true, "run_at": "document_idle"}]
+}

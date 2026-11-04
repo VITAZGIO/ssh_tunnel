@@ -1012,7 +1012,7 @@
 
     <div class="grp" id="grpTraffic">
       <button type="button" class="grpHead"><span class="t"><span data-i18n="sect_traffic">Трафик</span>
-        <span class="sub" data-i18n="grp_traffic_sub">Программы, сеть устройств, реклама, домены</span></span>
+        <span class="sub" data-i18n="grp_traffic_sub">Программы, сеть устройств, домены</span></span>
         <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
       <div class="grpBody"><div><div class="grpIn">
         <button class="row-link" id="toFilter">
@@ -2140,7 +2140,7 @@ const I18N = {
       'был включён, когда программу закрыли или выключили компьютер. Сеть устройств настраивается '+
       'отдельно, строкой ниже.',
     start_on:'Включать', start_mesh:'Только сеть', start_last:'Как при закрытии', start_off:'Не включать',
-    grp_traffic_sub:'Программы, сеть устройств, реклама, домены', grp_look_sub:'Тема и фон',
+    grp_traffic_sub:'Программы, сеть устройств, домены', grp_look_sub:'Тема и фон',
     grp_launch_sub:'Автозапуск, туннель и сеть устройств при запуске',
     grp_more_sub:'Локальная сеть, UDP, выбор сервера, журнал',
     mesh_start_mode:'Сеть устройств при запуске программы',
@@ -2470,7 +2470,7 @@ const I18N = {
     start_mode_note:'Unblocking — sites through the server. “As on exit” turns it on if it was on when '+
       'the app was closed or the computer was shut down. The device network has its own choice below.',
     start_on:'Turn on', start_mesh:'Devices only', start_last:'As on exit', start_off:'Keep off',
-    grp_traffic_sub:'Apps, device network, ads, domains', grp_look_sub:'Theme and background',
+    grp_traffic_sub:'Apps, device network, domains', grp_look_sub:'Theme and background',
     grp_launch_sub:'Autostart, tunnel and device network on launch',
     grp_more_sub:'Local network, UDP, server choice, log',
     mesh_start_mode:'Device network when the app starts',
@@ -2609,7 +2609,10 @@ $('language').addEventListener('change', () => {
 const FIELDS = ['host','user','keyPath','sshPort','socksPort','httpPort','poolSize','meshName','meshKey',
                 'keepAliveSec','connectTimeoutSec','cipher','ipVersion'];
 const PROFILE_CHECKS = ['localViaTunnel', 'udpRelayEnabled', 'meshEnabled', 'meshIncoming', 'shareLan'];
-const CHECKS = ['verbose', 'adBlockEnabled', 'mcpEnabled', 'fakeIP', 'uiLock'];
+// Блокировка рекламы — теперь плагин (addons/adblock.html): её поля
+// (adBlock*) настройки не шлют, иначе «Сохранить» здесь затирало бы
+// то, что задано в плагине.
+const CHECKS = ['verbose', 'mcpEnabled', 'fakeIP', 'uiLock'];
 
 /* Правила фильтра живут отдельно от полей формы: они правятся на своём
    экране и сохраняются своей кнопкой. */
@@ -4711,8 +4714,6 @@ $('save').onclick = async () => {
   // Галочка «через VPN», а в настройках — «напрямую»: по умолчанию через VPN.
   doc.hotspotDirect = !$('hotspotVpn').checked;
   doc.realIPHosts = splitEntries($('realIPHosts').value);
-  doc.adBlockSources = $('adBlockSources').value.trim();
-  doc.adBlockAllowlist = $('adBlockAllowlist').value.trim();
   // Прежние галочки ставим по выбранному режиму — их читают старые версии,
   // а новые смотрят на startMode.
   doc.startMode = startMode;
@@ -4732,7 +4733,7 @@ $('save').onclick = async () => {
   $('savedNote').textContent = r.note ? tr('saved') + ' — ' + r.note : tr('saved');
   setTimeout(() => $('savedNote').textContent = '', 4000);
   // На странице рекламы «Сохранить» заодно скачивает списки.
-  if(current === 'viewAdBlock') updateAdBlockLists();
+
 };
 
 function fillProfileForm(p){
@@ -5059,7 +5060,7 @@ async function refresh(){
   if(detail && usingBackup) detail += ' (' + tr('backup_server_note') + ')';
   if(st.modes) netModes = st.modes;
   if(st.core) renderCore(st.core);
-  $('toAdBlock').hidden = !st.adBlock;
+  $('toAdBlock').hidden = true; // реклама — в плагине «Блокировка рекламы»
   // Раздача через точку доступа есть только у VPN-версии — как и блокировка.
   $('hotspotRow').hidden = !st.adBlock;
   // DNS программы — тоже только у VPN-версии.
@@ -5261,7 +5262,10 @@ async function openQuick(id){
   const m = addonsState.catalog.find(x => x.id === id);
   const e = addonsState.added.find(x => x.id === id);
   const win = e && e.win != null ? e.win : !!(m && m.window);
-  if(m && win &&
+  // Телефон: окон нет — плагин открывается внутри приложения, как из
+  // «Плагинов» (шапка и «Назад» на месте). Раньше уходил отдельным экраном
+  // без кнопки «Назад».
+  if(m && win && !ANDROID &&
      await openWindow(id, addonName(m) + ' — ssh_tunnel', pageURL('apps.html', {open: id, solo: '1', key: id}))) return;
   showAddons(id);
 }

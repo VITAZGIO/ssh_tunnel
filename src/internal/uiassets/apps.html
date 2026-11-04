@@ -191,7 +191,9 @@ async function op(o, id, value){
 
 // needsIcons — значки «нужна сеть устройств» / «нужен интернет».
 const NEEDS = {mesh: ['hub', L('Нужна сеть устройств', 'Needs the device network')],
-               internet: ['globe', L('Нужен интернет', 'Needs the internet')]};
+               internet: ['globe', L('Нужен интернет', 'Needs the internet')],
+               // RDP: guacd в домашней сети (см. Книгу, «Удалённый стол»).
+               relay: ['antenna', L('Нужен ретранслятор RDP (guacd) в локальной сети — как поставить, в Книге', 'Needs an RDP relay (guacd) on the local network — see the Book')]};
 function needsIcons(m){
   const list = (m.needs || []).filter(n => NEEDS[n]);
   if(!list.length) return '';

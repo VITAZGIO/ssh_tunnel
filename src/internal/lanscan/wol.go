@@ -8,22 +8,28 @@ package lanscan
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"sshtunnel/internal/addons"
+	"sshtunnel/internal/devnet"
+	"sshtunnel/internal/mesh"
 )
 
 // WolID — плагин в каталоге.
 const WolID = "wol"
 
 func init() {
-	addons.Register(WolID, func() addons.Module { return module{} })
+	addons.Register(WolID, func() addons.Module { return wolModule{} })
 	addons.RegisterRoutes(WolID, addons.Route{
 		Path: "/api/wol", Methods: "GET, POST",
 		Desc: "Включить по сети (Wake-on-LAN): GET — список машин {name, mac}; POST {\"op\":\"add|remove|wake\",\"name\",\"mac\"} — добавить, убрать, разбудить (wake можно и с mac не из списка).",
@@ -35,6 +41,80 @@ func init() {
 type WolHost struct {
 	Name string `json:"name"`
 	MAC  string `json:"mac"`
+	// Via — откуда слать: "local" — только отсюда (та же локалка), "mesh" —
+	// попросить все свои устройства в сети устройств (у кого добавлен этот
+	// плагин) — каждое шлёт пакет в свою локалку; "" — и так, и так.
+	Via string `json:"via,omitempty"`
+}
+
+// WolPort — порт плагина в сети устройств: «разбуди MAC в своей локалке».
+const WolPort = 47842
+
+type wolModule struct{}
+
+func (wolModule) Start() error {
+	mesh.Serve(WolPort, func(c net.Conn, _ mesh.Caller) {
+		defer c.Close()
+		_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+		var req struct {
+			MAC string `json:"mac"`
+		}
+		if json.NewDecoder(io.LimitReader(c, 512)).Decode(&req) != nil {
+			return
+		}
+		_, hw, err := normMAC(req.MAC)
+		if err == nil {
+			err = wake(hw)
+		}
+		ans := "ok"
+		if err != nil {
+			ans = err.Error()
+		}
+		_, _ = c.Write([]byte(ans))
+	})
+	return nil
+}
+
+func (wolModule) Stop() { mesh.Serve(WolPort, nil) }
+
+// wakeViaMesh просит все свои устройства в сети разбудить MAC; ответ — кто
+// отправил (имена) и кто не смог.
+func wakeViaMesh(mac string) (ok, bad []string) {
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, p := range devnet.Status().Peers {
+		if p.Self || !p.Online || !p.IP.IsValid() {
+			continue
+		}
+		name := p.Name
+		if name == "" {
+			name = p.Host
+		}
+		wg.Add(1)
+		go func(ip, name string) {
+			defer wg.Done()
+			c, err := devnet.DialPeer(net.JoinHostPort(ip, strconv.Itoa(WolPort)))
+			ans := ""
+			if err == nil {
+				_ = c.SetDeadline(time.Now().Add(8 * time.Second))
+				b, _ := json.Marshal(map[string]string{"mac": mac})
+				_, _ = c.Write(b)
+				r, _ := io.ReadAll(io.LimitReader(c, 300))
+				c.Close()
+				ans = string(r)
+			}
+			mu.Lock()
+			if ans == "ok" {
+				ok = append(ok, name)
+			} else if err == nil && ans != "" {
+				bad = append(bad, name+": "+ans)
+			}
+			mu.Unlock()
+		}(p.IP.String(), name)
+	}
+	wg.Wait()
+	sort.Strings(ok)
+	return ok, bad
 }
 
 var wolMu sync.Mutex
@@ -141,6 +221,7 @@ func handleWol(w http.ResponseWriter, r *http.Request) {
 		Op   string `json:"op"`
 		Name string `json:"name"`
 		MAC  string `json:"mac"`
+		Via  string `json:"via"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, map[string]string{"error": "нужен JSON {\"op\"}"})
@@ -163,7 +244,7 @@ func handleWol(w http.ResponseWriter, r *http.Request) {
 				out = append(out, h)
 			}
 		}
-		err = wolSave(append(out, WolHost{Name: name, MAC: mac}))
+		err = wolSave(append(out, WolHost{Name: name, MAC: mac, Via: req.Via}))
 	case "remove":
 		out := hs[:0]
 		for _, h := range hs {
@@ -173,7 +254,34 @@ func handleWol(w http.ResponseWriter, r *http.Request) {
 		}
 		err = wolSave(out)
 	case "wake":
-		err = wake(hw)
+		via := req.Via
+		for _, h := range hs {
+			if h.MAC == mac && via == "" {
+				via = h.Via
+			}
+		}
+		res := map[string]any{"ok": true}
+		var sent []string
+		if via != "mesh" {
+			if e := wake(hw); e == nil {
+				sent = append(sent, "это устройство")
+			} else {
+				res["localError"] = e.Error()
+			}
+		}
+		if via != "local" {
+			ok, bad := wakeViaMesh(mac)
+			sent = append(sent, ok...)
+			res["failed"] = bad
+		}
+		if len(sent) == 0 {
+			err = errors.New("никто не отправил пакет: нет своих устройств в сети с этим плагином, а отсюда — " + fmt.Sprint(res["localError"]))
+			break
+		}
+		res["sent"] = sent
+		res["hosts"] = hs
+		writeJSON(w, res)
+		return
 	default:
 		err = errors.New("op: add, remove или wake")
 	}

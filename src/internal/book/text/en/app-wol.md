@@ -10,3 +10,5 @@ the local network and the network card of the sleeping machine wakes it.
 It needs the same local network, Wake-on-LAN on in BIOS/UEFI and in the
 network card settings, and usually a cable: most machines do not wake over
 Wi-Fi.
+
+Not at home: choose «via the device network» — your devices that have this plugin (e.g. a home server) send the packet into their local network.

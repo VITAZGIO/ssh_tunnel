@@ -32,10 +32,10 @@ func init() {
 			Name: map[string]string{"ru": "Включить по сети", "en": "Wake on LAN"},
 			Icon: "power_settings_new",
 			Hint: map[string]string{
-				"ru": "Включить компьютер кнопкой (Wake-on-LAN): список своих машин по MAC. Работает в той же локальной сети; WoL должен быть включён в BIOS.",
+				"ru": "Включить компьютер кнопкой (Wake-on-LAN) — и из дома, и с работы: пакет шлют твои устройства в той же локалке (через сеть устройств). WoL должен быть включён в BIOS.",
 				"en": "Turn a computer on with a button (Wake-on-LAN): a list of your machines by MAC. Works on the same local network; WoL must be on in BIOS.",
 			},
-			Book: "app-wol", Page: "addons/wol.html", Permissions: []string{},
+			Book: "app-wol", Page: "addons/wol.html", Background: true, Permissions: []string{},
 		},
 		Manifest{
 			ID:   "clipboard",

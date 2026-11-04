@@ -10,6 +10,7 @@
   body{background:transparent}
   .wrap{display:flex;flex-direction:column;gap:10px;padding:12px 14px 16px}
   .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .bar select,.h select{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--text);font:inherit}
   .bar input{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--text);font:inherit;flex:1;min-width:140px}
   .bar .btn{display:inline-flex;align-items:center;gap:6px}
   .h{display:grid;grid-template-columns:auto 1fr auto auto;gap:4px 12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
@@ -29,6 +30,7 @@
   <div class="card">
     <div class="bar">
       <input id="name"><input id="mac" spellcheck="false" autocapitalize="characters">
+      <select id="via"></select>
       <button class="btn primary" id="add"></button>
     </div>
     <div class="hint" id="sugT" style="margin-top:10px" hidden></div>
@@ -41,11 +43,14 @@
 /* Включить по сети (Wake-on-LAN). Пакет шлёт ядро (/api/wol): страница
    только показывает список и просит. */
 let HOSTS = [];
+// Откуда слать пакет: отсюда (та же локалка) или попросить свои устройства в
+// сети устройств — каждое пошлёт в свою локалку (с работы будит ПК дома).
+const VIA = {'': L('отсюда и через сеть устройств', 'here and via the device network'), local: L('только отсюда (локально)', 'only from here (local)'), mesh: L('через сеть устройств', 'via the device network')};
 const status = {};
 
 function draw(){
   $('list').innerHTML = HOSTS.length ? HOSTS.map(h => `<div class="h">${icon('power_settings_new')}
-      <div><div class="n">${esc(h.name)}</div><div class="m">${esc(h.mac)}</div></div>
+      <div><div class="n">${esc(h.name)}</div><div class="m">${esc(h.mac)} · ${esc(VIA[h.via || ''])}</div></div>
       <button class="btn primary" data-wake="${esc(h.mac)}">${esc(L('Включить', 'Wake'))}</button>
       <button class="ico" data-rm="${esc(h.mac)}" title="${esc(L('Убрать', 'Remove'))}">${icon('close')}</button>
       ${status[h.mac] ? `<div class="st ${status[h.mac][1]}">${esc(status[h.mac][0])}</div>` : ''}</div>`).join('')
@@ -53,7 +58,8 @@ function draw(){
   $('list').querySelectorAll('[data-wake]').forEach(b => b.onclick = async () => {
     const mac = b.dataset.wake;
     const r = await api('/api/wol', {op: 'wake', mac}).catch(e => ({error: String(e)}));
-    status[mac] = r.error ? [r.error, 'err'] : [L('Пакет отправлен — машина включится за 10–60 с, если WoL у неё включён.', 'Packet sent — the machine wakes in 10–60 s if WoL is on.'), 'ok'];
+    status[mac] = r.error ? [r.error, 'err'] : [L('Отправили: ', 'Sent by: ') + (r.sent || []).join(', ') + L(' — машина включится за 10–60 с, если WoL у неё включён.', ' — wakes in 10–60 s if WoL is on.')
+      + ((r.failed || []).length ? ' ' + L('Не смогли: ', 'Failed: ') + r.failed.join('; ') : ''), 'ok'];
     draw();
   });
   $('list').querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => {
@@ -81,16 +87,17 @@ async function load(){
 
 $('name').placeholder = L('имя, например «ПК»', 'name, e.g. «PC»');
 $('mac').placeholder = 'AA:BB:CC:DD:EE:FF';
+$('via').innerHTML = Object.entries(VIA).map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('');
 $('add').innerHTML = icon('add') + esc(L('Добавить', 'Add'));
 $('add').onclick = async () => {
-  const r = await api('/api/wol', {op: 'add', name: $('name').value.trim(), mac: $('mac').value.trim()}).catch(e => ({error: String(e)}));
+  const r = await api('/api/wol', {op: 'add', name: $('name').value.trim(), mac: $('mac').value.trim(), via: $('via').value}).catch(e => ({error: String(e)}));
   if(r.error){ $('note').textContent = r.error; $('note').className = 'hint err'; return; }
   $('name').value = $('mac').value = '';
   $('note').className = 'hint';
   HOSTS = r.hosts || HOSTS;
   load();
 };
-$('note').textContent = L('Работает в той же локальной сети, что и машина. У неё должен быть включён Wake-on-LAN: в BIOS и в свойствах сетевой карты (Windows: «Разрешить этому устройству выводить компьютер из ждущего режима» и «Wake on Magic Packet»). По Wi-Fi обычно не просыпается — нужен кабель.',
+$('note').textContent = L('Не из дома — «через сеть устройств»: пакет пошлют твои устройства, которые стоят в одной локалке с машиной (домашний сервер, другой ПК), если на них тоже добавлен этот плагин. Дома — хватает «отсюда». У неё должен быть включён Wake-on-LAN: в BIOS и в свойствах сетевой карты (Windows: «Разрешить этому устройству выводить компьютер из ждущего режима» и «Wake on Magic Packet»). По Wi-Fi обычно не просыпается — нужен кабель.',
   'Works on the same local network as the machine. Wake-on-LAN must be on in BIOS and in the network card settings. Usually does not wake over Wi-Fi — a cable is needed.');
 load();
 </script>

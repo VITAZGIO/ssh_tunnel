@@ -150,6 +150,7 @@ object AndroidApi : mobile.API {
                 pushState()
                 r
             }
+            "/api/adblock/stats" -> mobile.Mobile.adStatsJSON()
             "/api/update/check" -> updateCheck()
             "/api/update/download" -> updateDownload()
             "/api/processes" -> apps()

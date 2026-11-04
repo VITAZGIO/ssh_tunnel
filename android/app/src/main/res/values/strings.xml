@@ -46,6 +46,11 @@
     <string name="crash_title">Прошлый запуск завершился сбоем</string>
     <string name="crash_copy">Скопировать</string>
     <string name="crash_copied">Скопировано</string>
+    <string name="phonelink_ring">Тебя ищут: нажали «Найти телефон»</string>
+    <string name="vault_locked">🔒 Пароли ssh_tunnel — открыть</string>
+    <string name="vault_unlock_title">Открыть пароли</string>
+    <string name="vault_master">Главный пароль</string>
+    <string name="vault_unlock">Открыть</string>
     <!-- Календарь (ТЗ 7): аккаунт и виджет. -->
     <string name="calendar_account">Календарь ssh_tunnel</string>
     <string name="calendar_widget_desc">Ближайшие события из Nextcloud</string>

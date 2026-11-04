@@ -53,6 +53,80 @@ object Tools5 : mobile.Phone {
         app = c
         mobile.Mobile.setPhone(this)
         watchNetwork(c)
+        watchBattery(c)
+    }
+
+    /** Заряд — другим устройствам («Связь с телефоном»), при каждом изменении процента. */
+    private var lastBattery = -1
+    private fun watchBattery(c: Context) {
+        val f = android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+        val r = object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: Context, i: Intent) {
+                val lvl = i.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)
+                val scale = i.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100)
+                if (lvl < 0 || scale <= 0) return
+                val pct = lvl * 100 / scale
+                val st = i.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, 0)
+                val charging = st == android.os.BatteryManager.BATTERY_STATUS_CHARGING || st == android.os.BatteryManager.BATTERY_STATUS_FULL
+                if (pct == lastBattery) return
+                lastBattery = pct
+                Thread { mobile.Mobile.phoneLinkBattery(pct.toLong(), charging) }.start()
+            }
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 33) c.registerReceiver(r, f, Context.RECEIVER_NOT_EXPORTED) else c.registerReceiver(r, f)
+        } catch (_: Exception) {
+        }
+    }
+
+    /** «Найти телефон»: будильник на полную громкость 20 с и вибрация — даже в беззвучном. */
+    override fun ring() {
+        val c = app ?: return
+        main.post {
+            try {
+                val am = c.getSystemService(android.media.AudioManager::class.java)
+                am?.setStreamVolume(android.media.AudioManager.STREAM_ALARM, am.getStreamMaxVolume(android.media.AudioManager.STREAM_ALARM), 0)
+                val uri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM)
+                    ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
+                val rt = android.media.RingtoneManager.getRingtone(c, uri)
+                rt?.audioAttributes = android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_ALARM).build()
+                rt?.play()
+                main.postDelayed({ rt?.stop() }, 20_000)
+                val v = if (Build.VERSION.SDK_INT >= 31)
+                    c.getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator
+                else @Suppress("DEPRECATION") c.getSystemService(android.os.Vibrator::class.java)
+                v?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 600, 400), 0))
+                main.postDelayed({ v?.cancel() }, 20_000)
+                Toast.makeText(c, c.getString(R.string.phonelink_ring), Toast.LENGTH_LONG).show()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** Медиа-кнопка с другого устройства: играет/пауза/дальше/громкость. */
+    override fun media(key: String) {
+        val c = app ?: return
+        val am = c.getSystemService(android.media.AudioManager::class.java) ?: return
+        val code = when (key) {
+            "playpause" -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+            "next" -> android.view.KeyEvent.KEYCODE_MEDIA_NEXT
+            "prev" -> android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS
+            "stop" -> android.view.KeyEvent.KEYCODE_MEDIA_STOP
+            else -> 0
+        }
+        if (code != 0) {
+            am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, code))
+            am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, code))
+            return
+        }
+        val dir = when (key) {
+            "volup" -> android.media.AudioManager.ADJUST_RAISE
+            "voldown" -> android.media.AudioManager.ADJUST_LOWER
+            "mute" -> android.media.AudioManager.ADJUST_TOGGLE_MUTE
+            else -> return
+        }
+        am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, dir, android.media.AudioManager.FLAG_SHOW_UI)
     }
 
     private fun cm(): ConnectivityManager? = app?.getSystemService(ConnectivityManager::class.java)

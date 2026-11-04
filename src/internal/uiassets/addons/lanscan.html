@@ -32,12 +32,17 @@
   .seg button{border:0;background:transparent;color:var(--dim);padding:7px 13px;cursor:pointer;font:inherit;display:inline-flex;gap:6px;align-items:center}
   .seg button.on{background:var(--accent-muted);color:#fff}
   .seg .mi{width:16px;height:16px}
+  /* Вкладки — на всю ширину поровну: иначе справа оставалась пустая полоса. */
+  #tabs{display:flex;flex-wrap:nowrap}
+  #tabs button{flex:1;justify-content:center;white-space:nowrap;padding:7px 6px}
   .tab[hidden]{display:none}
   .tab{display:flex;flex-direction:column;gap:10px}
   /* Каналы: кривые сетей над осью каналов. */
-  .chart{width:100%;height:220px;display:block}
+  .chart{width:100%;height:230px;display:block}
   .chart text{fill:var(--dim);font-size:10.5px}
-  .chart .ax{stroke:var(--line)}
+  .chart .ax{stroke:var(--dim);stroke-width:1}
+  .chart .grid{stroke:var(--line);stroke-width:1;opacity:.7}
+  .chart .unit{fill:var(--dim);font-size:10px;font-style:italic}
   .chart .lbl{fill:var(--text);font-size:10.5px;font-weight:600}
   .reco{display:flex;gap:10px;flex-wrap:wrap}
   .reco .card{flex:1;min-width:150px;padding:10px 12px}
@@ -86,7 +91,7 @@
 
   <!-- Сети Wi-Fi: каналы и все сети вокруг. -->
   <div class="tab" id="tWifi" hidden>
-    <div class="bar"><div class="seg" id="band"></div><span class="hint" id="wstate"></span></div>
+    <div class="bar"><button class="btn primary" id="wscan"></button><div class="seg" id="band"></div><span class="hint" id="wstate"></span></div>
     <div class="card"><svg class="chart" id="chan"></svg></div>
     <div class="reco" id="reco"></div>
     <div class="card" id="wlist"></div>
@@ -223,7 +228,7 @@ function setTab(t){
     .map(([v, ic, n]) => `<button data-v="${v}" class="${v === t ? 'on' : ''}">${icon(ic)}${esc(n)}</button>`).join('');
   $('tabs').querySelectorAll('button').forEach(b => b.onclick = () => setTab(b.dataset.v));
   $('tDev').hidden = t !== 'dev'; $('tWifi').hidden = t !== 'wifi'; $('tSig').hidden = t !== 'sig';
-  if(t === 'wifi') wifiLoad();
+  if(t === 'wifi'){ if(!SCANNED) wifiScan(); else wifiLoad(); }
   if(t === 'sig') sigTick();
   if(t === 'dev') $('wperm').hidden = true;
 }
@@ -289,18 +294,34 @@ function quality(d){
 // Цвет сети — по имени, одинаковый между обновлениями.
 function hue(s){ let h = 0; for(const c of s || '?') h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
 
+// Список — по кнопке «Сканировать» (и при открытии вкладки): сам не
+// обновляется, чтобы было понятно, что на экране.
+let SCANNED = 0;
+async function wifiScan(){
+  $('wscan').disabled = true;
+  $('wscan').innerHTML = icon('radar') + esc(L('Сканирую…', 'Scanning…'));
+  let wait = 0;
+  if(ANDROID && window.SSHTunnelAndroid.wifiStartScan) wait = SSHTunnelAndroid.wifiStartScan();
+  // Android сканирует 2–4 с; ПК отдаёт свежий список сразу.
+  await new Promise(res => setTimeout(res, ANDROID && !wait ? 4000 : 300));
+  await wifiLoad();
+  SCANNED = Date.now();
+  $('wscan').disabled = false;
+  $('wscan').innerHTML = icon('radar') + esc(L('Сканировать', 'Scan'));
+  if(wait > 0) $('wstate').textContent += ' · ' + L(`Android даст новый скан через ${Math.ceil(wait / 1000)} с — показан прошлый`, `Android allows a new scan in ${Math.ceil(wait / 1000)} s — showing the previous one`);
+}
 async function wifiLoad(){
   clearTimeout(wifiTimer);
   const r = await wifiGet(false);
   if(TAB !== 'wifi') return;
-  wifiTimer = setTimeout(() => { if(!document.hidden) wifiLoad(); else wifiTimer = setTimeout(wifiLoad, 3000); }, 6000);
   if(permCard(r)){ $('chan').innerHTML = ''; $('wlist').innerHTML = ''; $('reco').innerHTML = ''; return; }
   WIFI = (r.networks || []).map(normNet);
   const bands = ['2.4', '5', '6'].filter(b => WIFI.some(n => n.band === b));
   if(bands.length && !bands.includes(BAND)) BAND = bands[0];
   $('band').innerHTML = (bands.length ? bands : ['2.4']).map(b => `<button data-v="${b}" class="${b === BAND ? 'on' : ''}">${b} ${L('ГГц', 'GHz')}</button>`).join('');
   $('band').querySelectorAll('button').forEach(b => b.onclick = () => { BAND = b.dataset.v; wifiDraw(); $('band').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
-  $('wstate').textContent = r.wifiOff ? L('Wi-Fi выключен — сети не видно.', 'Wi-Fi is off.') : `${L('сетей', 'networks')}: ${WIFI.length}`;
+  $('wstate').textContent = r.wifiOff ? L('Wi-Fi выключен — сети не видно.', 'Wi-Fi is off.')
+    : `${L('сетей', 'networks')}: ${WIFI.length} · ${L('скан', 'scan')} ${new Date().toLocaleTimeString(LANG === 'en' ? 'en-GB' : 'ru-RU')}`;
   wifiDraw();
 }
 
@@ -319,16 +340,19 @@ function wifiDraw(){
   const nets = WIFI.filter(n => n.band === BAND).sort((a, b) => b.level - a.level);
   // График каналов: ось по частоте, сеть — «холм» шириной в свою полосу,
   // высотой в уровень сигнала. Так видно, кто на ком сидит.
-  const W = Math.max(300, $('chan').clientWidth || 600), H = 220, top = 14, bot = 24, left = 34;
+  const W = Math.max(300, $('chan').clientWidth || 600), H = 230, top = 22, bot = 24, left = 34;
   const [f1, f2, ticks] = BAND === '2.4' ? [2400, 2484, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]]
     : BAND === '6' ? [5945, 6425, [1, 17, 33, 49, 65, 81, 97]] : [5160, 5895, [36, 44, 52, 60, 100, 116, 132, 149, 157, 165]];
   const fx = f => left + (W - left - 6) * (f - f1) / (f2 - f1);
   const chF = c => BAND === '2.4' ? 2407 + 5 * c : (BAND === '6' ? 5950 : 5000) + 5 * c;
   const dy = d => top + (H - top - bot) * (1 - (Math.max(-100, Math.min(-30, d)) + 100) / 70);
   let s = '';
-  for(const d of [-90, -70, -50]) s += `<line class="ax" x1="${left}" x2="${W}" y1="${dy(d)}" y2="${dy(d)}" stroke-dasharray="3 4"/><text x="${left - 4}" y="${dy(d) + 3}" text-anchor="end">${d}</text>`;
-  s += `<line class="ax" x1="${left}" x2="${W}" y1="${H - bot}" y2="${H - bot}"/>`;
-  for(const c of ticks) s += `<text x="${fx(chF(c))}" y="${H - 8}" text-anchor="middle">${c}</text>`;
+  // Сетка: по уровню — каждые 10 дБм, по каналам — у каждой подписи.
+  for(let d = -90; d <= -30; d += 10) s += `<line class="grid" x1="${left}" x2="${W - 6}" y1="${dy(d)}" y2="${dy(d)}"/><text x="${left - 4}" y="${dy(d) + 3}" text-anchor="end">${d}</text>`;
+  for(const c of ticks) s += `<line class="grid" x1="${fx(chF(c))}" x2="${fx(chF(c))}" y1="${top}" y2="${H - bot}"/><text x="${fx(chF(c))}" y="${H - 8}" text-anchor="middle">${c}</text>`;
+  s += `<line class="ax" x1="${left}" x2="${W - 6}" y1="${H - bot}" y2="${H - bot}"/><line class="ax" x1="${left}" x2="${left}" y1="${top}" y2="${H - bot}"/>`;
+  // Единицы — в углах: уровень сверху слева, каналы снизу справа.
+  s += `<text class="unit" x="${left + 4}" y="${top - 2}">${esc(L('дБм', 'dBm'))}</text><text class="unit" x="${W - 6}" y="${H - bot - 4}" text-anchor="end">${esc(L('канал', 'channel'))}</text>`;
   for(const n of [...nets].reverse()){
     const xa = fx(n.freq - n.width / 2), xb = fx(n.freq + n.width / 2), yt = dy(n.level), yb = H - bot, k = (xb - xa) * 0.18;
     const h = hue(n.ssid || n.bssid);
@@ -354,7 +378,7 @@ function wifiDraw(){
       <span class="db">${n.level} ${L('дБм', 'dBm')}</span>
       <span class="d"><span>${L('канал', 'ch')} ${n.channel}</span><span>${n.width} ${L('МГц', 'MHz')}</span>${stdName(n) ? `<span>${esc(stdName(n))}</span>` : ''}<span>${esc(secName(n.sec))}</span><span class="m">${esc(n.bssid)}</span></span>
     </div>`).join('') : `<div class="empty" style="padding:20px">${esc(L('Сетей не видно.', 'No networks visible.'))}</div>`;
-  $('wnote').textContent = (ANDROID ? L('Android даёт сканировать примерно 4 раза за 2 минуты — список обновляется раз в 30 с. ', 'Android allows about 4 scans per 2 minutes — the list refreshes every 30 s. ') : '')
+  $('wnote').textContent = (ANDROID ? L('Список обновляется кнопкой «Сканировать». Android даёт сканировать примерно 4 раза за 2 минуты. ', 'The list refreshes with «Scan». Android allows about 4 scans per 2 minutes. ') : '')
     + L('Совет по каналу — из непересекающихся (1, 6, 11 для 2,4 ГГц); поменять канал — в настройках роутера.', 'Channel advice is from non-overlapping ones (1, 6, 11 for 2.4 GHz); change it in the router settings.');
 }
 
@@ -404,6 +428,8 @@ function drawPts(){
     : `<div class="hint" style="padding:8px 0">${esc(L('Встань в комнате, впиши её название и нажми «Отметить» — так видно, где сигнал проседает.', 'Stand in a room, type its name and tap «Mark» — you will see where the signal drops.'))}</div>`;
   $('pts').querySelectorAll('[data-i]').forEach(b => b.onclick = () => { PTS.splice(+b.dataset.i, 1); savePts(); drawPts(); });
 }
+$('wscan').innerHTML = icon('radar') + esc(L('Сканировать', 'Scan'));
+$('wscan').onclick = wifiScan;
 $('kMin').textContent = L('мин', 'min'); $('kAvg').textContent = L('средний', 'avg'); $('kMax').textContent = L('макс', 'max');
 $('ptName').placeholder = L('комната, например «кухня»', 'room, e.g. «kitchen»');
 $('ptAdd').textContent = L('Отметить', 'Mark');

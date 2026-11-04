@@ -1,0 +1,407 @@
+// Package phonelink — плагин «Связь с телефоном» (как KDE Connect): между
+// своими устройствами по сети устройств — уведомления телефона на ПК,
+// «Найти устройство» (громкий звонок), пульт музыки, телефон как тачпад и
+// клавиатура для ПК, заряд батареи.
+//
+// Устройства говорят друг с другом по HTTP на порту Port сети устройств
+// (как «Общий буфер»): POST /ev {kind, …}. Что делать с пришедшим, решает
+// платформа: на ПК — нажатия и мышь (input_*.go) и уведомление у часов, на
+// телефоне — приложение (SetPhone: звонок, медиа-кнопки).
+package phonelink
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"sync"
+	"time"
+
+	"sshtunnel/internal/addons"
+	"sshtunnel/internal/devnet"
+	"sshtunnel/internal/mesh"
+)
+
+// ID — плагин в каталоге.
+const ID = "phonelink"
+
+// Port — порт плагина в сети устройств.
+const Port = 47839
+
+func init() {
+	addons.Register(ID, func() addons.Module { return &module{} })
+	addons.RegisterRoutes(ID, addons.Route{
+		Path: "/api/phonelink", Methods: "GET, POST",
+		Desc: "Связь с телефоном: GET — устройства (заряд), уведомления с других устройств, настройки; POST {\"op\":\"ring|media|mouse|text|clear|set\",\"peer\",…} — позвонить, медиа-кнопка (playpause|next|prev|volup|voldown|mute), мышь {dx,dy,btn,scroll}, напечатать текст, очистить уведомления, настройки {sendNotifs,allowControl}.",
+		H:    handleAPI,
+	})
+}
+
+// Ev — сообщение между устройствами.
+type Ev struct {
+	Kind string `json:"kind"` // notif, ring, media, mouse, text, battery
+
+	App   string `json:"app,omitempty"` // notif
+	Title string `json:"title,omitempty"`
+	Text  string `json:"text,omitempty"` // notif, text
+	Key   string `json:"key,omitempty"`  // media
+
+	DX     int    `json:"dx,omitempty"` // mouse
+	DY     int    `json:"dy,omitempty"`
+	Btn    string `json:"btn,omitempty"` // left, right, middle — щелчок
+	Scroll int    `json:"scroll,omitempty"`
+
+	Level    int  `json:"level,omitempty"` // battery, %
+	Charging bool `json:"charging,omitempty"`
+
+	From string `json:"from,omitempty"` // заполняет получатель
+	Time int64  `json:"time,omitempty"`
+}
+
+// Phone — что умеет сам телефон (задаёт приложение Android).
+type Phone interface {
+	Ring()
+	Media(key string)
+}
+
+// Settings — настройки этого устройства.
+type Settings struct {
+	SendNotifs   bool `json:"sendNotifs"`   // телефон: пересылать свои уведомления
+	AllowControl bool `json:"allowControl"` // пускать мышь/клавиатуру/медиа с других устройств
+}
+
+type battery struct {
+	Level    int   `json:"level"`
+	Charging bool  `json:"charging"`
+	Time     int64 `json:"time"`
+}
+
+var (
+	mu       sync.Mutex
+	phone    Phone
+	notifs   []Ev
+	bats     = map[string]battery{} // ip → заряд
+	settings = Settings{SendNotifs: true, AllowControl: true}
+	loaded   bool
+	running  bool
+)
+
+// Notify — уведомление у часов на ПК (задаёт окно программы:
+// nativeui.Notify). Через переменную, чтобы ядро телефона не тянуло окно.
+var Notify func(title, text string)
+
+func notify(title, text string) {
+	if f := Notify; f != nil {
+		f(title, text)
+	}
+}
+
+// SetPhone — телефон подключает свои звонок и медиа-кнопки.
+func SetPhone(p Phone) {
+	mu.Lock()
+	phone = p
+	mu.Unlock()
+}
+
+func setPath() string { return filepath.Join(addons.DataDir(), "phonelink.json") }
+
+func loadSettings() {
+	if loaded {
+		return
+	}
+	loaded = true
+	if b, err := os.ReadFile(setPath()); err == nil {
+		_ = json.Unmarshal(b, &settings)
+	}
+}
+
+// Current — настройки (телефон спрашивает перед пересылкой уведомления).
+func Current() Settings {
+	mu.Lock()
+	defer mu.Unlock()
+	loadSettings()
+	return settings
+}
+
+// Active — плагин добавлен и включён на этом устройстве.
+func Active() bool {
+	mu.Lock()
+	defer mu.Unlock()
+	return running
+}
+
+type module struct {
+	srv *http.Server
+	ln  *chanListener
+}
+
+type chanListener struct {
+	ch   chan net.Conn
+	done chan struct{}
+	once sync.Once
+}
+
+func (l *chanListener) Accept() (net.Conn, error) {
+	select {
+	case c := <-l.ch:
+		return c, nil
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+}
+func (l *chanListener) Close() error   { l.once.Do(func() { close(l.done) }); return nil }
+func (l *chanListener) Addr() net.Addr { return &net.TCPAddr{Port: Port} }
+
+type fromKey struct{}
+
+type callerConn struct {
+	net.Conn
+	from mesh.Caller
+}
+
+func (m *module) Start() error {
+	m.ln = &chanListener{ch: make(chan net.Conn), done: make(chan struct{})}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ev", receive)
+	m.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second,
+		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+			if cc, ok := c.(callerConn); ok {
+				return context.WithValue(ctx, fromKey{}, cc.from)
+			}
+			return ctx
+		}}
+	go m.srv.Serve(m.ln)
+	ln := m.ln
+	mesh.Serve(Port, func(c net.Conn, from mesh.Caller) {
+		select {
+		case ln.ch <- callerConn{c, from}:
+		case <-ln.done:
+			c.Close()
+		}
+	})
+	mu.Lock()
+	running = true
+	loadSettings()
+	mu.Unlock()
+	return nil
+}
+
+func (m *module) Stop() {
+	mesh.Serve(Port, nil)
+	if m.srv != nil {
+		m.srv.Close()
+	}
+	if m.ln != nil {
+		m.ln.Close()
+	}
+	mu.Lock()
+	running = false
+	mu.Unlock()
+}
+
+func peerName(ip, fallback string) string {
+	for _, p := range devnet.Status().Peers {
+		if p.IP.String() == ip {
+			if p.Name != "" {
+				return p.Name
+			}
+			return p.Host
+		}
+	}
+	return fallback
+}
+
+func receive(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST", http.StatusMethodNotAllowed)
+		return
+	}
+	var e Ev
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&e); err != nil {
+		http.Error(w, "json", http.StatusBadRequest)
+		return
+	}
+	from, _ := r.Context().Value(fromKey{}).(mesh.Caller)
+	e.From = peerName(from.IP, from.Host)
+	e.Time = time.Now().Unix()
+	if err := handleEv(e, from.IP); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleEv(e Ev, ip string) error {
+	mu.Lock()
+	loadSettings()
+	allow, p := settings.AllowControl, phone
+	switch e.Kind {
+	case "notif":
+		notifs = append([]Ev{e}, notifs...)
+		if len(notifs) > 100 {
+			notifs = notifs[:100]
+		}
+	case "battery":
+		bats[ip] = battery{e.Level, e.Charging, e.Time}
+	}
+	mu.Unlock()
+	switch e.Kind {
+	case "notif":
+		showNotif(e)
+	case "ring":
+		if p != nil {
+			p.Ring()
+		} else {
+			ring(e.From)
+		}
+	case "media", "mouse", "text":
+		if !allow {
+			return errors.New("управление этим устройством выключено")
+		}
+		if e.Kind == "media" && p != nil {
+			p.Media(e.Key)
+			return nil
+		}
+		return inject(e)
+	}
+	return nil
+}
+
+var peerClient = &http.Client{
+	Timeout: 8 * time.Second,
+	Transport: &http.Transport{
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			return devnet.DialPeer(addr)
+		},
+		MaxIdleConnsPerHost: 2,
+		IdleConnTimeout:     60 * time.Second,
+	},
+}
+
+func sendTo(ip string, e Ev) error {
+	b, _ := json.Marshal(e)
+	resp, err := peerClient.Post("http://"+net.JoinHostPort(ip, "47839")+"/ev", "application/json", bytes.NewReader(b))
+	if err != nil {
+		return errors.New("устройство не отвечает — на нём нет плагина «Связь с телефоном» или оно не в сети")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 500))
+		return errors.New(string(bytes.TrimSpace(msg)))
+	}
+	return nil
+}
+
+// Broadcast — всем устройствам сети, кто онлайн (уведомление, заряд).
+func Broadcast(e Ev) int {
+	if !Active() {
+		return 0
+	}
+	n := 0
+	var wg sync.WaitGroup
+	var nmu sync.Mutex
+	for _, p := range devnet.Status().Peers {
+		if p.Self || !p.Online || !p.IP.IsValid() {
+			continue
+		}
+		wg.Add(1)
+		go func(ip string) {
+			defer wg.Done()
+			if sendTo(ip, e) == nil {
+				nmu.Lock()
+				n++
+				nmu.Unlock()
+			}
+		}(p.IP.String())
+	}
+	wg.Wait()
+	return n
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func handleAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		st := devnet.Status()
+		type peer struct {
+			IP      string   `json:"ip"`
+			Name    string   `json:"name"`
+			Online  bool     `json:"online"`
+			Battery *battery `json:"battery,omitempty"`
+		}
+		mu.Lock()
+		loadSettings()
+		var ps []peer
+		for _, p := range st.Peers {
+			if p.Self || !p.IP.IsValid() {
+				continue
+			}
+			pp := peer{IP: p.IP.String(), Name: p.Name, Online: p.Online}
+			if pp.Name == "" {
+				pp.Name = p.Host
+			}
+			if b, ok := bats[pp.IP]; ok {
+				b := b
+				pp.Battery = &b
+			}
+			ps = append(ps, pp)
+		}
+		sort.Slice(ps, func(i, j int) bool {
+			return ps[i].Online && !ps[j].Online || ps[i].Online == ps[j].Online && ps[i].Name < ps[j].Name
+		})
+		out := map[string]any{"devnet": st.State, "peers": ps, "notifs": append([]Ev{}, notifs...), "settings": settings}
+		mu.Unlock()
+		writeJSON(w, out)
+		return
+	}
+	var req struct {
+		Op   string `json:"op"`
+		Peer string `json:"peer"`
+		Ev
+		Settings *Settings `json:"settings"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil {
+		writeJSON(w, map[string]string{"error": "нужен JSON {\"op\"}"})
+		return
+	}
+	var err error
+	switch req.Op {
+	case "clear":
+		mu.Lock()
+		notifs = nil
+		mu.Unlock()
+	case "set":
+		if req.Settings != nil {
+			mu.Lock()
+			settings = *req.Settings
+			b, _ := json.MarshalIndent(settings, "", "  ")
+			err = os.WriteFile(setPath(), b, 0o600)
+			mu.Unlock()
+		}
+	case "ring", "media", "mouse", "text":
+		if req.Peer == "" {
+			err = errors.New("выбери устройство")
+			break
+		}
+		e := req.Ev
+		e.Kind = req.Op
+		err = sendTo(req.Peer, e)
+	default:
+		err = errors.New("op: ring, media, mouse, text, clear или set")
+	}
+	if err != nil {
+		writeJSON(w, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, map[string]bool{"ok": true})
+}

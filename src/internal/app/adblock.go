@@ -50,6 +50,15 @@ func (a *App) AdBlocked() int {
 	return 0
 }
 
+// AdStatsJSON — статистика плагина «Блокировка рекламы» (JSON); "" — нет
+// блокировки в этой версии.
+func (a *App) AdStatsJSON() string {
+	if c, ok := a.adBlocker().(interface{ AdStatsJSON() string }); ok {
+		return c.AdStatsJSON()
+	}
+	return ""
+}
+
 // ConfigLayer — слой VPN, которому нужны общие настройки программы на ходу
 // (сейчас — куда вести устройства точки доступа). Зовётся при подключении
 // слоя и после каждого сохранения настроек.
