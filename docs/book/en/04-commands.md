@@ -25,7 +25,7 @@ In PowerShell (on Linux — `ssh_tunnel_linux` instead of `ssh_tunnel.exe`):
 - `ssh_tunnel.exe apps` — plugins: `apps add calendar`, `apps remove …`,
   `apps star …`, `apps on …`, `apps off …`.
 - `ssh_tunnel.exe check` — self-check, `check site youtube.com` — check a
-  site (needs the Site check app).
+  site (needs the Site check plugin).
 - `ssh_tunnel.exe help` — all commands. The list is built from the app
   itself: whatever a new version adds is in the commands right away.
 

@@ -21,5 +21,5 @@ Available if the server was issued by a panel.
 
 ## Silently, on every connection
 
-While the app is on (the switch on its tile), the app checks for leaks after
+While the plugin is on (the switch on its tile), the app checks for leaks after
 every connection and writes to the log **only when it finds a leak**.

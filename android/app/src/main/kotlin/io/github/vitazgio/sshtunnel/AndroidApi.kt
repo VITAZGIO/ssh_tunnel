@@ -173,10 +173,13 @@ object AndroidApi : mobile.API {
         val bypass = if (starting) startingBypass else run && TunnelService.bypassOn
         val mesh = meshOk && (if (starting) startingMesh else run && TunnelService.meshOn)
         val linkUp = st == "connected"
+        // «on» — только когда связь с сервером правда есть. При
+        // переподключении раньше было «on»: сеть устройств горела зелёной,
+        // хотя до сервера не доходило ничего.
         fun phase(on: Boolean) = when {
             !on -> "off"
             starting -> "connecting"
-            linkUp || st == "reconnecting" -> "on"
+            linkUp -> "on"
             else -> "connecting"
         }
         val tunnel = JSONObject().put("want", bypass).put("phase", phase(bypass))

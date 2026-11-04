@@ -39,7 +39,7 @@
   body.android .ico{width:48px;height:48px}
   body.android .ico svg{width:26px;height:26px}
 
-  .view{flex:1;overflow-y:auto;padding:0 16px 16px;display:none}
+  .view{flex:1;overflow-y:auto;padding:0 16px 16px;display:none;scrollbar-gutter:stable}
   .view.on{display:block}
   .view::-webkit-scrollbar{width:8px}
   .view::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
@@ -106,6 +106,12 @@
   #meshBtn.on{border-color:var(--ok);color:var(--ok)}
   #meshBtn.on .dot{background:var(--ok);box-shadow:0 0 6px var(--ok)}
   #meshBtn:disabled{opacity:.55;cursor:default}
+  /* Своё состояние у «Сети устройств», как у большой кнопки: подключаюсь —
+     жёлтая и «дышит», ошибка — красная. Зелёная — только когда правда работает. */
+  #meshBtn.busy{border-color:var(--warn);color:var(--warn)}
+  #meshBtn.busy .dot{background:var(--warn);animation:breathe 1.5s infinite}
+  #meshBtn.bad{border-color:var(--err);color:var(--err)}
+  #meshBtn.bad .dot{background:var(--err)}
 
   /* Главный экран — две «страницы» одна под другой, каждая ровно в высоту
      окна: первая — кнопка и сведения, вторая — список устройств. Колесом,
@@ -263,6 +269,10 @@
   .help{background:var(--card);border:1px solid var(--line);border-radius:10px;
         padding:11px 12px;margin:6px 0 12px}
   .help:not([hidden]){animation:helpIn .2s ease both}
+  /* Подсказка по «?» — окошком поверх (как у .infoq), а не вставкой, которая
+     растягивала настройки. Ставит toggleHelp. */
+  .help.pop{position:fixed;z-index:60;margin:0;width:min(420px, calc(100vw - 32px));max-height:60vh;
+            overflow:auto;box-shadow:0 10px 28px rgba(0,0,0,.45)}
   @keyframes helpIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
   @media (prefers-reduced-motion: reduce){ .help:not([hidden]){animation:none} }
   .sect{margin:16px 0 8px;color:var(--dim);font-size:11.5px;font-weight:600;
@@ -495,13 +505,18 @@
   #viewAddons{padding:0;overflow:hidden}
   #viewAddons.on{display:flex}
   #addonsFrame{flex:1;border:0;width:100%;height:100%;background:transparent}
-  /* Стрелка — справа сверху, прямо под кнопкой настроек. */
-  #quickBtn{position:absolute;top:46px;right:14px;z-index:4}
-  #quickBtn .mi{width:18px;height:18px}
-  #quickPanel{position:absolute;top:84px;right:10px;z-index:6;background:var(--card2);
+  /* Стрелка вниз — в шапке, слева от журнала; панель выезжает сверху вниз
+     под шапкой и кнопок шапки не закрывает. */
+  #quickBtn .mi{width:20px;height:20px}
+  body.android #quickBtn .mi{width:30px;height:30px}
+  /* Рамка у стрелки — только пока панель открыта. На телефоне :hover и
+     :focus «залипают» после касания, и рамка висела до тапа в другом месте. */
+  #quickBtn:hover:not(.open),#quickBtn:focus:not(.open){background:transparent;border-color:transparent;outline:none}
+  #quickBtn.open{background:var(--card2);border-color:var(--line)}
+  #quickPanel{position:absolute;top:60px;right:10px;z-index:6;background:var(--card2);
               border:1px solid var(--line);border-radius:12px;padding:6px;min-width:170px;
               box-shadow:0 8px 24px rgba(0,0,0,.35);animation:quickIn .16s ease-out}
-  @keyframes quickIn{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}
+  @keyframes quickIn{from{transform:translateY(-12px);opacity:0}to{transform:none;opacity:1}}
   #quickPanel button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;
                      border:0;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--text);font:inherit}
   #quickPanel button:hover{background:var(--card)}
@@ -610,6 +625,11 @@
   .srvTools .tb{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 6px;
        border:1px solid var(--line);background:transparent;color:var(--text);font:inherit;font-size:12.5px;cursor:pointer}
   .srvTools .tb:hover{border-color:var(--accent)}
+  /* Подписи кнопок — в одну строку: когда раскрывали сервер и появлялась
+     полоса прокрутки, «QR-код» и «Экспорт всех» ломались на две строки.
+     Не влезают — кнопки целиком уходят на вторую строку. */
+  .srvTools{flex-wrap:wrap}
+  .srvTools .tb{flex:1 0 auto;white-space:nowrap}
   .srvTools svg,.srv .mi svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;
        stroke-linecap:round;stroke-linejoin:round;flex:none}
   .srvlist{border-top:1px solid var(--line)}
@@ -846,13 +866,13 @@
     <div class="head">
       <button class="ico" id="backFromServers" title="Назад" data-i18n-title="back"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
       <span class="t" data-i18n="servers_title">Выбор сервера</span>
+      <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)">?<span class="tip" data-i18n="paste_note">«Вставить» добавляет сервер (или сразу несколько) из текста или ссылки sshtunnel://, которые тебе прислали (или из панели сервера): скопируй и нажми кнопку. «Экспорт всех» кладёт в буфер все серверы вместе с ключами.</span></span>
     </div>
     <div class="srvTools">
       <button type="button" class="tb" id="pasteBtn" title="Вставить сервер из буфера обмена" data-i18n-title="paste_title"><svg viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="4"/><path d="M8 5H5v16h14V5h-3"/></svg><span data-i18n="paste_server">Вставить</span></button>
       <button type="button" class="tb android-only" id="scanQrBtn"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg><span data-i18n="scan_qr">QR-код</span></button>
       <button type="button" class="tb" id="addServerBtn"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span data-i18n="new_server">Новый</span></button>
       <button type="button" class="tb" id="exportAllBtn"><svg viewBox="0 0 24 24"><path d="M12 15V4M7 9l5-5 5 5M5 20h14"/></svg><span data-i18n="export_all">Экспорт всех</span></button>
-      <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)">?<span class="tip" data-i18n="paste_note">«Вставить» добавляет сервер (или сразу несколько) из текста или ссылки sshtunnel://, которые тебе прислали (или из панели сервера): скопируй и нажми кнопку. «Экспорт всех» кладёт в буфер все серверы вместе с ключами.</span></span>
     </div>
     <div class="srvlist" id="profileTabs"></div>
 
@@ -1534,40 +1554,37 @@
         <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
       </button>
       <span class="t" data-i18n="mesh_title">Сеть устройств</span>
-    </div>
-    <p class="note" style="margin-top:0" data-i18n="mesh_intro">Твои устройства — компьютер, телефон,
+      <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)">?<span class="tip" data-i18n="mesh_intro">Твои устройства — компьютер, телефон,
       домашний сервер — видят друг друга по именам вида «ноутбук.mesh», как в NetBird. Всё идёт через этот
       сервер: белые адреса и проброс портов на роутерах не нужны. На сервере должна стоять служба сети
-      устройств — её ставит мастер настройки VPS.</p>
-
+      устройств — её ставит мастер настройки VPS.</span></span>
+    </div>
+    
     <label class="chk"><input type="checkbox" id="meshEnabled">
       <span class="lbl" data-i18n="mesh_enable">Включить сеть устройств на этом сервере</span></label>
 
     <div class="field" style="margin-top:10px"><label for="meshName" data-i18n="mesh_name">Имя этого устройства</label>
       <input type="text" id="meshName" maxlength="64" placeholder="имя компьютера"></div>
 
-    <div class="field"><label for="meshKey" data-i18n="mesh_key">Ключ сети</label>
+    <div class="field"><div class="lbl-row"><label for="meshKey" data-i18n="mesh_key">Ключ сети</label> <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)">?<span class="tip" data-i18n="mesh_key_hint">Устройства с одинаковым ключом — одна
+      сеть. Ключ переносится вместе с сервером через «Экспорт» (на телефон — QR-кодом). Никому постороннему
+      его не давай.</span></span></div>
       <div class="keybox">
         <input type="text" id="meshKey" spellcheck="false" autocomplete="off">
         <button class="btn" id="meshCopyKey" data-i18n="mesh_copy">Скопировать</button>
       </div>
     </div>
-    <div class="hint" style="margin:-4px 0 10px" data-i18n="mesh_key_hint">Устройства с одинаковым ключом — одна
-      сеть. Ключ переносится вместе с сервером через «Экспорт» (на телефон — QR-кодом). Никому постороннему
-      его не давай.</div>
     <button class="btn" id="meshNewKey" data-i18n="mesh_new">Создать новую сеть</button>
 
     <label class="chk" style="margin-top:10px"><input type="checkbox" id="meshIncoming">
-      <span class="lbl" data-i18n="mesh_incoming">Пускать другие устройства к моим службам</span></label>
-    <div class="hint" style="margin:-4px 0 10px" data-i18n="mesh_incoming_hint">Тогда с другого устройства
+      <span class="lbl" data-i18n="mesh_incoming">Пускать другие устройства к моим службам</span> <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)">?<span class="tip" data-i18n="mesh_incoming_hint">Тогда с другого устройства
       откроется то, что слушает на этом: например «сервер.mesh:8080» — это порт 8080 здесь (Docker, веб-панели,
-      SSH). Выключи на устройствах, к которым ходить не нужно, — например на телефоне.</div>
+      SSH). Выключи на устройствах, к которым ходить не нужно, — например на телефоне.</span></span></label>
 
     <label class="chk"><input type="checkbox" id="meshDirect" checked>
-      <span class="lbl" data-i18n="mesh_direct">Соединяться с устройствами напрямую, когда получается</span></label>
-    <div class="hint" style="margin:-4px 0 10px" data-i18n="mesh_direct_hint">Устройства пробуют найти путь
+      <span class="lbl" data-i18n="mesh_direct">Соединяться с устройствами напрямую, когда получается</span> <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)">?<span class="tip" data-i18n="mesh_direct_hint">Устройства пробуют найти путь
       друг к другу мимо сервера (пробивание NAT по UDP, шифрование QUIC/TLS 1.3) — так быстрее и не тратит канал
-      сервера. Не получилось — всё идёт через сервер, как раньше.</div>
+      сервера. Не получилось — всё идёт через сервер, как раньше.</span></span></label>
 
     <div style="display:flex;gap:9px;align-items:center;margin:4px 0 14px">
       <button class="btn primary" id="meshSave" data-i18n="save">Сохранить</button>
@@ -1896,6 +1913,7 @@ const I18N = {
     log:'Журнал', settings:'Настройки', back:'Назад', back_to_settings:'Назад в настройки',
     connect:'Подключить', disconnect:'Отключить', cancel:'Отмена',
     mesh_btn_on:'Сеть устройств: вкл', mesh_btn_off:'Сеть устройств: выкл',
+    mesh_btn_wait:'Сеть устройств: подключаюсь…', mesh_btn_err:'Сеть устройств: ошибка',
     mesh_btn_hint:'Виртуальная сеть между твоими устройствами (имена .mesh, RDP). Включается и выключается отдельно от обхода блокировок — большая кнопка её не трогает.',
     state_mesh_only:'Только сеть устройств',
     state_stopped:'Отключено', state_connecting:'Подключаюсь…', state_connected:'Защищено',
@@ -2228,6 +2246,7 @@ const I18N = {
     log:'Log', settings:'Settings', back:'Back', back_to_settings:'Back to settings',
     connect:'Connect', disconnect:'Disconnect', cancel:'Cancel',
     mesh_btn_on:'Device network: on', mesh_btn_off:'Device network: off',
+    mesh_btn_wait:'Device network: connecting…', mesh_btn_err:'Device network: error',
     mesh_btn_hint:'Virtual network between your devices (.mesh names, RDP). Turned on and off separately from unblocking — the big button leaves it alone.',
     state_mesh_only:'Device network only',
     state_stopped:'Disconnected', state_connecting:'Connecting…', state_connected:'Protected',
@@ -2865,7 +2884,9 @@ async function openProcessPicker(){
   procs = r.processes || [];
   procs.forEach(p => { if(p.label) appLabels[p.name] = p.label; });
   renderProcs();
-  $('procSearch').focus();
+  // На телефоне клавиатура сама не выезжает: сначала смотрят список, поиск —
+  // по нажатию на поле.
+  if(!ANDROID) $('procSearch').focus();
 }
 $('closeProc').onclick = () => { $('procOverlay').hidden = true; };
 $('procOverlay').onclick = ev => { if(ev.target === $('procOverlay')) $('procOverlay').hidden = true; };
@@ -2891,11 +2912,16 @@ function renderProcs(){
     icon.textContent = ((p.label || p.name)[0] || '?').toUpperCase();
     const src = appIconURL(p.name, p.path);
     if(src){
+      // Картинка — сразу в списке (поверх буквы, пока не загрузилась —
+      // прозрачная). Ленивая картинка вне страницы не грузится вовсе: так
+      // значки и пропадали у всех, кроме уже виденных.
       const img = document.createElement('img');
       img.loading = 'lazy';
+      img.style.opacity = '0';
+      img.onload = () => { img.style.opacity = ''; icon.style.color = 'transparent'; };
+      img.onerror = () => img.remove();
       img.src = src;
-      img.onload = () => { icon.textContent = ''; icon.appendChild(img); };
-      img.onerror = () => {};
+      icon.appendChild(img);
     }
     b.appendChild(icon);
 
@@ -3089,6 +3115,15 @@ const STATES = {
 let lastState = 'stopped';
 function setState(s, detail){
   lastState = s;
+  // Есть состояние ядра — кнопки рисует только оно (renderCore): иначе
+  // «подключаюсь» связи красило большую кнопку в жёлтый, даже когда
+  // включали одну сеть устройств.
+  if(core){
+    if(detail !== undefined && core.link === 'connected') $('stateDetail').textContent = detail || '';
+    if(s !== 'connected') showPing(0);
+    renderCore(core);
+    return;
+  }
   const [textKey, capKey, cls] = STATES[s] || ['state_stopped', 'connect', ''];
   const text = tr(textKey), cap = tr(capKey);
   $('stateText').textContent = text;
@@ -3113,12 +3148,17 @@ function renderCore(st){
   if(core && st.seq && core.seq && st.seq < core.seq) return;
   core = st;
   netModes = {bypass: st.tunnel.phase === 'on', mesh: st.mesh.phase === 'on', meshConfigured: st.meshAvailable};
-  const t = st.tunnel.phase, reconnecting = st.link === 'reconnecting';
+  // Связь с сервером рвётся или ещё не поднялась — «включено» по ядру ещё
+  // не значит «работает»: обе кнопки показываем «подключаюсь».
+  const linkDown = st.link === 'reconnecting' || st.link === 'connecting';
+  const live = ph => ph === 'on' && linkDown ? 'connecting' : ph;
+  const t = live(st.tunnel.phase), reconnecting = st.link === 'reconnecting', mp = live(st.mesh.phase);
   const look = {off:['connect',''], connecting:['cancel','busy'], on:['disconnect','on'], error:['connect','bad']}[t] || ['connect',''];
-  $('powerCap').textContent = tr(look[0]);
-  $('power').className = (t === 'on' && reconnecting) ? 'busy' : look[1];
+  // Связь переподключается, а туннель включён — кнопка по-прежнему «Отключить».
+  $('powerCap').textContent = tr(t === 'connecting' && st.tunnel.phase === 'on' ? 'disconnect' : look[0]);
+  $('power').className = look[1];
   let key = {off:'state_stopped', connecting:'state_connecting', on:'state_connected', error:'state_error'}[t] || 'state_stopped';
-  if(t === 'on' && reconnecting) key = 'state_reconnecting';
+  if(t === 'connecting' && reconnecting) key = 'state_reconnecting';
   else if(t !== 'on' && t !== 'connecting' && st.mode === 'mesh') key = 'state_mesh_only';
   $('stateText').textContent = tr(key);
   $('stateDetail').textContent = st.link === 'connected' ? (st.detail || '') : '';
@@ -3126,9 +3166,11 @@ function renderCore(st){
   $('speedtest').disabled = !running || speedRunning;
   const b = $('meshBtn');
   b.hidden = !st.meshAvailable;
-  b.classList.toggle('on', st.mesh.phase === 'on');
-  b.classList.toggle('busy', st.mesh.phase === 'connecting');
-  $('meshBtnCap').textContent = tr(st.mesh.want ? 'mesh_btn_on' : 'mesh_btn_off');
+  b.classList.toggle('on', mp === 'on');
+  b.classList.toggle('busy', mp === 'connecting');
+  b.classList.toggle('bad', mp === 'error');
+  $('meshBtnCap').textContent = tr({on: 'mesh_btn_on', connecting: 'mesh_btn_wait', error: 'mesh_btn_err'}[mp] || 'mesh_btn_off');
+  b.title = tr('mesh_btn_hint');
   const failed = t === 'error' ? st.tunnel : st.mesh.phase === 'error' ? st.mesh : null;
   showError(failed ? connErrorText(failed.errorKind, failed.error) : '');
   $('meddleOffer').hidden = t !== 'error';
@@ -3145,6 +3187,7 @@ async function wantCore(body){
    internal/app/modes.go). Туннель живёт, пока включена хотя бы одна. */
 let netModes = {bypass:false, mesh:false, meshConfigured:false};
 function renderNetModes(){
+  if(core) return; // кнопки рисует renderCore по состоянию ядра
   const b = $('meshBtn');
   b.hidden = !netModes.meshConfigured;
   b.classList.toggle('on', !!netModes.mesh);
@@ -3716,13 +3759,36 @@ document.querySelectorAll('.cp[data-cmd]').forEach(b => {
 // Подсказки закрываются тем же вопросительным знаком и не переживают уход с
 // экрана: вернувшись в настройки, человек видит их в обычном виде.
 function toggleHelp(btnId, boxId, onShow){
-  $(btnId).onclick = () => {
-    const show = $(boxId).hidden;
-    $(boxId).hidden = !show;
-    $(btnId).classList.toggle('on', show);
-    if(show && onShow) onShow();
+  $(btnId).onclick = ev => {
+    ev.stopPropagation();
+    const box = $(boxId), show = box.hidden;
+    closeHelpPops();
+    if(!show) return;
+    box.classList.add('pop');
+    box.hidden = false;
+    $(btnId).classList.add('on');
+    if(onShow) onShow();
+    placeHelpPop($(btnId), box);
   };
 }
+// Окошко подсказки — у своего «?»: под ним, а не влезает — над ним.
+function placeHelpPop(btn, box){
+  const r = btn.getBoundingClientRect(), w = box.offsetWidth, h = box.offsetHeight, m = 16;
+  box.style.left = Math.max(m, Math.min(r.right - w, innerWidth - w - m)) + 'px';
+  let top = r.bottom + 6;
+  if(top + h > innerHeight - m) top = Math.max(m, r.top - h - 6);
+  box.style.top = top + 'px';
+}
+function closeHelpPops(){
+  document.querySelectorAll('.help.pop:not([hidden])').forEach(b => b.hidden = true);
+  document.querySelectorAll('.qmark.on').forEach(b => b.classList.remove('on'));
+}
+// Тап мимо окошка или прокрутка — закрыть (окошко стоит на месте экрана).
+document.addEventListener('click', ev => { if(!ev.target.closest('.help.pop')) closeHelpPops(); });
+document.addEventListener('scroll', ev => {
+  if(ev.target.closest && ev.target.closest('.help.pop')) return; // листают само окошко
+  closeHelpPops();
+}, true);
 toggleHelp('keyHelpBtn', 'keyHelp', renderSetupCmd);
 toggleHelp('localHelpBtn', 'localHelp');
 toggleHelp('udpRelayHelpBtn', 'udpRelayHelp');
@@ -5205,21 +5271,24 @@ async function loadAddons(){
 // Быстрый доступ: пусто в избранном — стрелки и панели нет в странице вовсе
 // (раньше кнопка была в разметке с hidden, а display:grid у .ico его
 // перебивал — стрелка торчала всегда). Иначе создаём их и заполняем.
-// placeQuick — стрелка под шестерёнкой с зазором, а не на глаз: на телефоне
-// значки шапки крупнее (48 px), и при top:46px рамка нажатой стрелки
-// наезжала на шестерёнку. Зазор 8 px — рамка ровно посередине между ними.
+// placeQuick — панель под шапкой (высота шапки на телефоне больше), правым
+// краем по шестерёнке: выезжает вниз и кнопок шапки не закрывает.
 function placeQuick(){
-  const btn = $('quickBtn'), p = $('quickPanel'), g = $('btnSettings');
-  if(!btn || !g) return;
-  const host = btn.offsetParent ? btn.offsetParent.getBoundingClientRect() : {top: 0, right: innerWidth};
-  const gr = g.getBoundingClientRect();
-  if(!gr.height) return;
-  btn.style.top = (gr.bottom - host.top + 8) + 'px';
-  btn.style.right = (host.right - gr.right) + 'px';
-  btn.style.width = btn.style.height = gr.width + 'px';
-  p.style.top = (gr.bottom - host.top + 8 + gr.height + 6) + 'px';
+  const p = $('quickPanel'), g = $('btnSettings');
+  if(!p || !g) return;
+  const host = p.offsetParent ? p.offsetParent.getBoundingClientRect() : {top: 0, right: innerWidth};
+  const hr = g.parentNode.getBoundingClientRect(), gr = g.getBoundingClientRect();
+  if(!hr.height) return;
+  p.style.top = (hr.bottom - host.top + 6) + 'px';
+  p.style.right = (host.right - gr.right) + 'px';
 }
-function closeQuick(){ const p = $('quickPanel'); if(p) p.hidden = true; }
+// setQuick — открыть/закрыть панель; рамка стрелки — вместе с ней.
+function setQuick(open){
+  const p = $('quickPanel'), b = $('quickBtn');
+  if(p) p.hidden = !open;
+  if(b) b.classList.toggle('open', !!open);
+}
+function closeQuick(){ setQuick(false); }
 function renderQuick(list){
   let btn = $('quickBtn'), p = $('quickPanel');
   if(!list.length){
@@ -5232,12 +5301,13 @@ function renderQuick(list){
     btn.className = 'ico';
     btn.id = 'quickBtn';
     btn.title = tr('quick_title');
-    btn.innerHTML = '<span class="mi" style="--i:url(icons/keyboard_double_arrow_left.svg)"></span>';
-    btn.onclick = ev => { ev.stopPropagation(); $('quickPanel').hidden = !$('quickPanel').hidden; };
+    btn.innerHTML = '<span class="mi" style="--i:url(icons/keyboard_double_arrow_down.svg)"></span>';
+    btn.onclick = ev => { ev.stopPropagation(); setQuick($('quickPanel').hidden); btn.blur(); };
     p = document.createElement('div');
     p.id = 'quickPanel';
     p.hidden = true;
-    $('btnSettings').parentNode.after(btn, p); // там, где была в разметке
+    $('btnLog').before(btn); // в шапке, слева от журнала
+    $('btnSettings').parentNode.after(p);
     addEventListener('resize', placeQuick);
   }
   placeQuick();
@@ -5256,7 +5326,7 @@ function renderQuick(list){
 }
 document.addEventListener('click', ev => {
   const p = $('quickPanel');
-  if(p && !p.hidden && !p.contains(ev.target)) p.hidden = true;
+  if(p && !p.hidden && !p.contains(ev.target)) closeQuick();
 });
 $('toAddons').onclick = () => showAddons();
 // Не подключилось — «Кто трогает трафик» (добавляется по этому нажатию).
@@ -5410,7 +5480,12 @@ if(ANDROID){
     }
     if(menuEl){ closeMenu(); return true; }
     if($('quickPanel') && !$('quickPanel').hidden){ closeQuick(); return true; }
-    if(current === 'viewAddons'){ show(addonsReturnView); loadAddons(); return true; }
+    if(current === 'viewAddons'){
+      // Сначала шаг назад внутри «Плагинов» (из плагина — в их список),
+      // и только из списка — туда, откуда их открыли.
+      try { const w = $('addonsFrame').contentWindow; if(w && w.sshtunnelBack && w.sshtunnelBack()) return true; } catch(e) {}
+      show(addonsReturnView); loadAddons(); return true;
+    }
     if(current !== 'viewMain'){
       const back = $(current).querySelector('.head .ico');
       if(back) back.click(); else show('viewMain');

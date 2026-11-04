@@ -97,6 +97,10 @@ function changed(){
 // openBook — Книга на нужной главе: на ПК отдельным окном, на телефоне тут же.
 function openBook(chapter){
   const url = pageURL('book.html', chapter ? {ch: chapter, solo: '1', key: 'book'} : {solo: '1', key: 'book'});
+  // Телефон: Книга — своим экраном поверх (как с главной). Раньше страница
+  // плагина уходила на Книгу сама, и «Назад» телефона вела не в плагин, а в
+  // Настройки; теперь «Назад» закрывает Книгу — и ты там же, где был.
+  if(ANDROID && window.SSHTunnelAndroid && SSHTunnelAndroid.openPage){ SSHTunnelAndroid.openPage(url); return; }
   if(ANDROID){ location.href = pageURL('book.html', chapter ? {ch: chapter} : {}); return; }
   openWindow('book', L('Книга', 'Book') + ' — ssh_tunnel', url);
 }

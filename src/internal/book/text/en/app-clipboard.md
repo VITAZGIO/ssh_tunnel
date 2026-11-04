@@ -4,7 +4,7 @@ Copy on the PC — paste on the phone, and back. Text, images and files up to
 **50 MB** (bigger — via Device files). It travels **only over the device
 network**, encrypted like the network; turn on «Device network».
 
-- **Taking part** — the switch on the app tile, separate on each device.
+- **Taking part** — the switch on the plugin tile, separate on each device.
   Off — the device neither receives nor sends.
 - **PC and Linux → others** — automatically: copy, and a second later the
   others have it. What arrives goes straight to the clipboard (a file — as a

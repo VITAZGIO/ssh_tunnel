@@ -5,7 +5,7 @@ have it.
 
 - Add: "Plugins" → "+" → "Add".
 - The star on the tile puts the app into quick access on the main screen (the
-  arrow under the settings button).
+  down arrow in the header, left of the log).
 - The switch on the tile — for background apps: a switched-off app does not
   run and does not open.
 - "⧉ Window" in the header opens it in a separate window (PC and Linux).
