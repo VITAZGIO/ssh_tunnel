@@ -19,6 +19,7 @@
   .tot .v{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
   .dot{display:inline-block;width:10px;height:10px;border-radius:3px;flex:none}
   #barInfo{margin-top:6px}
+  .chart text.sum{font-size:10px;fill:var(--text)}
   #barInfo .dot{margin:0 4px 0 6px;vertical-align:-1px}
   .chart .hit{cursor:pointer}
   .c-server{background:var(--accent)} .c-direct{background:var(--ok)} .c-mesh{background:var(--warn)}
@@ -124,13 +125,20 @@ function drawChart(days){
     // Прозрачная полоса на весь столбик — по нажатию строка под графиком
     // («13:00 — через VPN 120 МБ · напрямую 5 МБ»): на телефоне подсказок нет.
     s += `<rect class="hit" data-i="${i}" x="${left + i * slot}" y="${top}" width="${slot}" height="${H - top - bot}" fill="transparent"/>`;
+    // Сколько всего — прямо над столбиком, если влезает подпись.
+    const sum = COLORS.reduce((a, k) => a + d[k], 0);
+    if(sum > 0 && slot >= 34) s += `<text class="sum" x="${x + bw / 2}" y="${Math.max(top + 8, y - 3)}" text-anchor="middle">${esc(human(sum))}</text>`;
     const step = n > 14 ? (n === 24 ? 3 : 5) : 1;
     if(i % step === 0 || (n !== 24 && i === n - 1))
       s += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">${esc(barLabel(d, true))}</text>`;
   });
   $('chart').innerHTML = s;
   $('chart').querySelectorAll('.hit').forEach(el => el.onclick = () => barInfo(days[+el.dataset.i]));
-  barInfo(null);
+  // Расход видно сразу: строка под графиком — по последнему столбику с
+  // трафиком (текущий час или день); нажатие на другой — покажет его.
+  let last = null;
+  for(const d of days) if(COLORS.some(k => d[k] > 0)) last = d;
+  barInfo(last);
 }
 // barLabel — подпись столбика: час («13:00», коротко «13») или день («04.11»).
 function barLabel(d, short){
@@ -139,7 +147,7 @@ function barLabel(d, short){
 }
 function barInfo(d){
   const box = $('barInfo');
-  if(!d){ box.textContent = L('Нажми на столбик — покажу, сколько какого трафика.', 'Tap a bar to see the breakdown.'); return; }
+  if(!d){ box.textContent = L('Трафика пока не было.', 'No traffic yet.'); return; }
   const parts = COLORS.filter(k => d[k] > 0).map(k => `<i class="dot c-${k}"></i>${esc(NAMES[k])} ${esc(human(d[k]))}`);
   box.innerHTML = `<b>${esc(barLabel(d))}</b> — ${parts.length ? parts.join(' · ') : esc(L('ничего', 'nothing'))}`;
 }
