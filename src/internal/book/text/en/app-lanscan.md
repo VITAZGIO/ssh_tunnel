@@ -13,7 +13,7 @@ Who is on your local network right now — Wi-Fi or wired.
 - «private MAC» — an address the device made up itself (a phone with a
   private Wi-Fi address, some routers): such a MAC has no vendor.
 - Only ports **22, 80, 443** are checked: SSH open — an «SSH» button (the
-  SSH app, address filled in), web open — «Open» in the browser. There is
+  SSH plugin, address filled in), web open — «Open» in the browser. There is
   no full port scan.
 - **Nothing is remembered** — a fresh list every time.
 

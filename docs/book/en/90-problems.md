@@ -24,7 +24,7 @@ the tray icon → "Quit".
 
 The close button hides the window to the tray icon, the tunnel keeps working.
 If the icon is not visible, press the "^" arrow next to the clock. To quit —
-right-click the icon → "Quit". Separate windows (the Book, apps) live on their
+right-click the icon → "Quit". Separate windows (the Book, plugins) live on their
 own and close with their own close button.
 
 ## A program says "non-public IP address"

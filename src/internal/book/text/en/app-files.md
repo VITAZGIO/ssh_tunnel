@@ -16,7 +16,7 @@ folders yourself: «Device files» → **«My folders»** → pick a common fold
 - The file service is reachable **only from your device network**: neither
   the internet nor your home LAN can see it. The network server knows who
   is calling — another device cannot be impersonated.
-- The app must be added on both devices.
+- The plugin must be added on both devices.
 
 ## Working with files
 
@@ -38,4 +38,4 @@ folders yourself: «Device files» → **«My folders»** → pick a common fold
 - The progress notification is shown **only while a transfer runs** and
   then goes away (Android always shows the VPN icon — that cannot be hidden).
 
-On a PC the app opens in its own window right away.
+On a PC the plugin opens in its own window right away.
