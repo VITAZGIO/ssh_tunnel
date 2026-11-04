@@ -40,8 +40,14 @@ func (t *Tunnel) owner(proc string, conn net.Conn) string {
 	if proc != "" || t.cfg.OwnerOf == nil || !traffic.On() {
 		return proc
 	}
-	src, err1 := netip.ParseAddrPort(conn.RemoteAddr().String())
-	dst, err2 := netip.ParseAddrPort(conn.LocalAddr().String())
+	// Закрытое приложением соединение стек gVisor отдаёт без адресов (nil):
+	// .String() у nil падал и ронял всё приложение на телефоне.
+	ra, la := conn.RemoteAddr(), conn.LocalAddr()
+	if ra == nil || la == nil {
+		return ""
+	}
+	src, err1 := netip.ParseAddrPort(ra.String())
+	dst, err2 := netip.ParseAddrPort(la.String())
 	if err1 != nil || err2 != nil {
 		return ""
 	}
