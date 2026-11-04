@@ -7,7 +7,8 @@
 // без прав (ICMP-датаграмма) или попыткой TCP; MAC — из ответа ARP или
 // таблицы соседей (/proc/net/arp; Android 10+ её не даёт — MAC «—»). Затем у
 // найденных — имя (DNS, mDNS, NetBIOS), производитель по базе OUI и краткая
-// проверка портов 22/80/443. Полного скана портов нет.
+// проверка известных портов (ports) — по ним видно, что это за устройство.
+// Полного скана портов нет.
 package lanscan
 
 import (
@@ -32,7 +33,7 @@ type Host struct {
 	Name   string  `json:"name,omitempty"`
 	Vendor string  `json:"vendor,omitempty"`
 	RTTMs  float64 `json:"rttMs,omitempty"`
-	Ports  []int   `json:"ports"` // открытые из 22, 80, 443
+	Ports  []int   `json:"ports"` // открытые из ports, по возрастанию
 	Self   bool    `json:"self,omitempty"`
 
 	mac net.HardwareAddr
@@ -66,7 +67,10 @@ const parallel = 48
 // maxHosts — больше /22 не сканируем: берём /24 вокруг своего адреса.
 const maxHosts = 1022
 
-var ports = []int{22, 80, 443}
+// ports — по чему узнаётся устройство (как у сканеров вроде Fing):
+// SSH, DNS (роутер), веб, SMB и RDP (Windows), камеры (RTSP), принтеры,
+// MQTT, NAS, Proxmox, Home Assistant.
+var ports = []int{22, 53, 80, 139, 443, 445, 554, 631, 1883, 3389, 5000, 5001, 8006, 8080, 8123, 8443, 9100}
 
 // LAN — своя локальная сеть.
 type LAN struct {
@@ -421,15 +425,26 @@ func (s *Scanner) run(ctx context.Context, lan LAN, list []netip.Addr) {
 			defer pwg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			// Порты одного адреса — разом: по очереди 17 портов по 700 мс
+			// у молчащего устройства — это 12 с.
+			var hw sync.WaitGroup
 			for _, p := range ports {
-				c, err := dialer(700*time.Millisecond).Dial("tcp", netip.AddrPortFrom(a, uint16(p)).String())
-				if err == nil {
-					c.Close()
-					fmu.Lock()
-					h.Ports = append(h.Ports, p)
-					fmu.Unlock()
-				}
+				hw.Add(1)
+				go func(p int) {
+					defer hw.Done()
+					c, err := dialer(700*time.Millisecond).Dial("tcp", netip.AddrPortFrom(a, uint16(p)).String())
+					if err == nil {
+						c.Close()
+						fmu.Lock()
+						h.Ports = append(h.Ports, p)
+						fmu.Unlock()
+					}
+				}(p)
 			}
+			hw.Wait()
+			fmu.Lock()
+			sort.Ints(h.Ports)
+			fmu.Unlock()
 		}(a, h)
 	}
 	pwg.Wait()

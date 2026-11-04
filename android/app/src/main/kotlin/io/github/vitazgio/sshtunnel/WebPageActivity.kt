@@ -92,6 +92,14 @@ class WebPageActivity : AppCompatActivity() {
                 openExternal(u)
                 return true
             }
+
+            override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                // Процесс страницы WebView упал (чаще всего — нехватка памяти).
+                // Не ответить true — Android закрывает всё приложение: это и
+                // было «зависает и вылетает». Пересоздаём экран.
+                recreate()
+                return true
+            }
         }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {

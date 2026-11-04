@@ -12,6 +12,9 @@
   .tabs{display:flex;gap:6px;padding-top:10px;flex-wrap:wrap}
   .tabs button{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:7px 12px;cursor:pointer}
   .tabs button.on{border-color:var(--accent);background:var(--card2)}
+  .tabs .ico{margin-left:auto;border:0;background:transparent;padding:7px}
+  .tabs .ico.spin svg,.tabs .ico.spin .mi{animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
   .tabs .badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:9px;background:var(--warn);color:#000;font-size:12px}
   .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .bar .sp{flex:1}
@@ -47,6 +50,7 @@
   <div class="tabs">
     <button id="tabSubs" class="on"></button><button id="tabServe"></button>
     <button id="tabConf"></button><button id="tabTrash"></button>
+    <button class="ico" id="reloadAll"></button>
   </div>
   <div class="card warn" id="perm" hidden></div>
   <div class="msg" id="msg"></div>
@@ -54,7 +58,7 @@
   <!-- Подключённые папки и найденные серверы. -->
   <div id="vSubs" class="box" style="padding:0">
     <div id="found"></div>
-    <div id="subs"></div>
+    <div id="subs"><div class="empty" style="padding:20px" id="loading"></div></div>
   </div>
 
   <!-- Папки, которые раздаёт это устройство. -->
@@ -90,6 +94,18 @@ const MODES = {both: L('отправлять и получать', 'send and rec
 set('tabSubs', L('Папки', 'Folders'));
 set('tabServe', L('Раздаю', 'Sharing'));
 set('tabTrash', L('Корзина и версии', 'Trash & versions'));
+set('tabConf', L('Конфликты', 'Conflicts'));
+set('loading', L('Загружаю…', 'Loading…'));
+$('reloadAll').innerHTML = icon('refresh');
+$('reloadAll').title = L('Обновить всё', 'Refresh all');
+
+// Путь как в проводнике телефона: от корня внутренней памяти (/TRASH/…),
+// без /storage/emulated/0 — как у Syncthing. Ядро принимает оба вида.
+const ROOT = '/storage/emulated/0';
+function shortPath(p){
+  if(!ANDROID || !p) return p || '';
+  return p === ROOT ? '/' : p.startsWith(ROOT + '/') ? p.slice(ROOT.length) : p;
+}
 set('serveHint', L('Это устройство — сервер папки: лучше то, что всегда включено. У папки один сервер. Другие устройства найдут её сами на вкладке «Папки».',
   'This device is the folder server: best an always-on one. A folder has one server. Other devices find it on the «Folders» tab.'));
 set('trashHint', L('Всё, что заменили или удалили, сервер хранит 30 дней. «Вернуть» кладёт версию на место; текущая при этом сама уходит в версии.',
@@ -130,7 +146,7 @@ function bindPick(root){
     b.onclick = async () => {
       const inp = b.dataset.pick === '.' ? b.parentNode.querySelector('input') : $(b.dataset.pick);
       const p = await pickFolder();
-      if(p){ inp.value = p; inp.dispatchEvent(new Event('input')); }
+      if(p){ inp.value = shortPath(p); inp.dispatchEvent(new Event('input')); }
     };
   });
 }
@@ -205,7 +221,7 @@ function draw(r){
       const row = document.createElement('div');
       row.className = 'bar';
       row.style.marginTop = '8px';
-      const def = (r.suggest ? r.suggest + (r.platform === 'windows' ? '\\' : '/') : '') + x.name;
+      const def = ANDROID ? '/' + x.name : (r.suggest ? r.suggest + (r.platform === 'windows' ? '\\' : '/') : '') + x.name;
       const key = f.peer + '|' + x.id;
       const d = drafts[key] || (drafts[key] = {path: def, mode: Object.keys(MODES)[0]});
       row.innerHTML = `<b style="min-width:110px">${esc(x.name)}</b>
@@ -238,7 +254,7 @@ function draw(r){
     c.innerHTML = `<div class="fold">${icon('sync')}<div class="tx"><b>${esc(s.name)}</b> · ${esc(s.host || s.peer)}</div>
       <button class="ico" data-a="sync" title="${esc(L('Сверить сейчас', 'Sync now'))}">${icon('refresh')}</button>
       <button class="ico" data-a="leave" title="${esc(L('Отключить (файлы останутся)', 'Disconnect (files stay)'))}">${icon('close')}</button></div>
-      <div class="p">${esc(s.path)}</div>
+      <div class="p">${esc(shortPath(s.path))}</div>
       <div class="st ${cls}">${esc(txt)}${s.status.lastOk ? ' · ' + esc(L('сверено ', 'checked ')) + esc(when(s.status.lastOk)) : ''}</div>
       <div class="ctl"><select title="${esc(L('Режим', 'Mode'))}">${Object.entries(MODES).map(([k, v]) => `<option value="${k}"${k === s.mode ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select></div>`;
     c.querySelector('select').onchange = ev => post({op: 'mode', id: s.id, mode: ev.target.value});
@@ -256,7 +272,7 @@ function draw(r){
     const c = document.createElement('div');
     c.className = 'card';
     c.innerHTML = `<div class="fold">${icon('dns')}<div class="tx"><div><b>${esc(f.name)}</b> · ${f.files} ${esc(L('файлов', 'files'))}</div>
-        <div class="p">${esc(f.path)}</div></div>
+        <div class="p">${esc(shortPath(f.path))}</div></div>
       <button class="ico" data-a="ign" title="${esc(L('Исключения', 'Exclusions'))}">${icon('settings')}</button>
       <button class="ico" data-a="off" title="${esc(L('Перестать раздавать', 'Stop sharing'))}">${icon('close')}</button></div>
       <div class="ign" hidden><div class="hint">${esc(L('Свои исключения, шаблон на строку (например *.log или build/). Мусор Obsidian, временные файлы и конфликты Syncthing исключены всегда.', 'Own exclusions, one pattern per line (e.g. *.log or build/). Obsidian workspace, temp files and Syncthing conflicts are always excluded.'))}</div>
@@ -334,15 +350,33 @@ $('serveAdd').onclick = async () => {
   if(await post({op: 'serve', path, name: $('serveName').value.trim()})){ $('servePath').value = ''; $('serveName').value = ''; }
 };
 
-async function refresh(){
-  const r = await api('/api/mirror').catch(() => null);
-  if(!r){ msg(L('Нет связи с программой.', 'No connection to the app.'), 'err'); return; }
+// refresh — свежий список. Один запрос за раз и не дольше 10 с: ответ,
+// который не пришёл, не должен оставлять страницу пустой навсегда.
+let busy = false;
+async function refresh(force){
+  if(busy && !force) return;
+  busy = true;
+  $('reloadAll').classList.add('spin');
+  const r = await Promise.race([api('/api/mirror').catch(() => null), new Promise(res => setTimeout(() => res(null), 10000))]);
+  busy = false;
+  $('reloadAll').classList.remove('spin');
+  if(!r){
+    msg(L('Программа не ответила — нажми «Обновить» справа сверху.', 'The app did not answer — tap Refresh at the top right.'), 'err');
+    if(!S) set('loading', L('Не загрузилось.', 'Did not load.'));
+    return;
+  }
   if(r.error){ msg(r.error, 'err'); return; }
   // Не перерисовывать, пока человек что-то вписывает.
   const a = document.activeElement;
-  if(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT')) return;
+  if(!force && a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT')) return;
   draw(r);
 }
+$('reloadAll').onclick = async () => {
+  msg('');
+  await refresh(true);
+  if(TAB === 'trash') loadTrash();
+  if(TAB === 'conf') drawConflicts();
+};
 refresh();
 setInterval(() => { if(!document.hidden && TAB !== 'trash') refresh(); }, 5000);
 document.addEventListener('visibilitychange', () => { if(!document.hidden) refresh(); });

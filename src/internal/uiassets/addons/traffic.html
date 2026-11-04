@@ -18,6 +18,9 @@
   .tot .k{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:6px}
   .tot .v{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
   .dot{display:inline-block;width:10px;height:10px;border-radius:3px;flex:none}
+  #barInfo{margin-top:6px}
+  #barInfo .dot{margin:0 4px 0 6px;vertical-align:-1px}
+  .chart .hit{cursor:pointer}
   .c-server{background:var(--accent)} .c-direct{background:var(--ok)} .c-mesh{background:var(--warn)}
   svg.chart{display:block;width:100%;height:190px}
   svg.chart text{font-size:10px;fill:var(--dim);font-variant-numeric:tabular-nums}
@@ -50,7 +53,8 @@
     <div class="seg" id="net" hidden></div>
   </div>
   <div class="tot" id="tot"></div>
-  <div class="card"><svg class="chart" id="chart"></svg></div>
+  <div class="card"><svg class="chart" id="chart"></svg>
+    <div class="hint" id="barInfo"></div></div>
   <h3 id="topT"></h3>
   <div class="card" id="top"></div>
   <div class="card lim" id="lim"></div>
@@ -115,13 +119,29 @@ function drawChart(days){
     let y = H - bot;
     for(const k of COLORS){
       const h = (H - top - bot) * d[k] / max;
-      if(h > 0){ y -= h; s += `<rect class="r-${k}" x="${x}" y="${y}" width="${bw}" height="${h}" rx="2"><title>${esc(d.date)} — ${esc(NAMES[k])}: ${esc(human(d[k]))}</title></rect>`; }
+      if(h > 0){ y -= h; s += `<rect class="r-${k}" x="${x}" y="${y}" width="${bw}" height="${h}" rx="2"><title>${esc(barLabel(d))} — ${esc(NAMES[k])}: ${esc(human(d[k]))}</title></rect>`; }
     }
-    const step = n > 14 ? 5 : 1;
-    if(i % step === 0 || i === n - 1)
-      s += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">${esc(d.date.slice(8))}.${esc(d.date.slice(5, 7))}</text>`;
+    // Прозрачная полоса на весь столбик — по нажатию строка под графиком
+    // («13:00 — через VPN 120 МБ · напрямую 5 МБ»): на телефоне подсказок нет.
+    s += `<rect class="hit" data-i="${i}" x="${left + i * slot}" y="${top}" width="${slot}" height="${H - top - bot}" fill="transparent"/>`;
+    const step = n > 14 ? (n === 24 ? 3 : 5) : 1;
+    if(i % step === 0 || (n !== 24 && i === n - 1))
+      s += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">${esc(barLabel(d, true))}</text>`;
   });
   $('chart').innerHTML = s;
+  $('chart').querySelectorAll('.hit').forEach(el => el.onclick = () => barInfo(days[+el.dataset.i]));
+  barInfo(null);
+}
+// barLabel — подпись столбика: час («13:00», коротко «13») или день («04.11»).
+function barLabel(d, short){
+  if(d.date.includes(':')) return short ? d.date.slice(0, 2) : d.date;
+  return d.date.slice(8) + '.' + d.date.slice(5, 7);
+}
+function barInfo(d){
+  const box = $('barInfo');
+  if(!d){ box.textContent = L('Нажми на столбик — покажу, сколько какого трафика.', 'Tap a bar to see the breakdown.'); return; }
+  const parts = COLORS.filter(k => d[k] > 0).map(k => `<i class="dot c-${k}"></i>${esc(NAMES[k])} ${esc(human(d[k]))}`);
+  box.innerHTML = `<b>${esc(barLabel(d))}</b> — ${parts.length ? parts.join(' · ') : esc(L('ничего', 'nothing'))}`;
 }
 
 function render(){
@@ -136,7 +156,7 @@ function render(){
   const t = r.total, sum = t.server + t.direct + t.mesh;
   $('tot').innerHTML = [[L('Всего', 'Total'), sum, '']].concat(COLORS.map(k => [NAMES[k], t[k], k]))
     .map(([n, v, k]) => `<div class="card"><span class="k">${k ? `<i class="dot c-${k}"></i>` : ''}${esc(n)}</span><span class="v">${esc(human(v))}</span></div>`).join('');
-  drawChart(r.days);
+  drawChart(chartData(r));
   $('topT').textContent = L('Программы', 'Apps');
   $('top').innerHTML = r.top.length ? r.top.map(p => {
     const w = k => (p.total ? p[k] * 100 / p.total : 0).toFixed(1);
@@ -180,7 +200,9 @@ async function load(){
 if(ANDROID) api('/api/processes').then(list => { for(const p of list || []) LABELS[p.name] = p.label; render(); }).catch(() => {});
 load();
 setInterval(load, 10000);
-window.addEventListener('resize', () => DATA && !DATA.error && drawChart(DATA.days));
+// chartData — «День» рисуется по часам, неделя и месяц — по дням.
+function chartData(r){ return PER === 'day' && r.hours && r.hours.length ? r.hours : r.days; }
+window.addEventListener('resize', () => DATA && !DATA.error && drawChart(chartData(DATA)));
 </script>
 </body>
 </html>

@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"sshtunnel/internal/addons"
@@ -101,6 +102,8 @@ type module struct {
 	subs  map[string]*runner
 	found []found
 	seen  time.Time // когда искали серверы
+
+	finding atomic.Bool // поиск серверов уже идёт — второй не запускать
 }
 
 type runner struct {
@@ -532,8 +535,8 @@ func (m *module) state() map[string]any {
 	}
 	stale := time.Since(m.seen) > 15*time.Second
 	m.mu.Unlock()
-	if stale {
-		go m.find()
+	if stale && m.finding.CompareAndSwap(false, true) {
+		go func() { defer m.finding.Store(false); m.find() }()
 	}
 	sort.Slice(subs, func(i, j int) bool { return subs[i].Name < subs[j].Name })
 	return map[string]any{"serve": serve, "subs": subs, "found": fs, "self": selfName(),

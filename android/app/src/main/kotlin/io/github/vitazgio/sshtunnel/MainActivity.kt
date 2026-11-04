@@ -118,6 +118,7 @@ class MainActivity : AppCompatActivity(), AndroidApi.Screen {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Look.apply(this)
+        CrashLog.install(this)
         if (!AndroidApi.init(this)) {
             // Без ядра экрана нет. VPN по-прежнему включается плиткой в шторке.
             setContentView(TextView(this).apply {
@@ -136,6 +137,7 @@ class MainActivity : AppCompatActivity(), AndroidApi.Screen {
         frame.addView(web, android.widget.FrameLayout.LayoutParams(
             android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(frame)
+        CrashLog.showIfAny(this)
         // С Android 15 окно занимает весь экран — отступы под системные полосы.
         ViewCompat.setOnApplyWindowInsetsListener(frame) { v, insets ->
             val bars = insets.getInsets(
@@ -155,6 +157,14 @@ class MainActivity : AppCompatActivity(), AndroidApi.Screen {
                 val u = req.url.toString()
                 if (u.startsWith("$base/")) return false
                 openExternal(u)
+                return true
+            }
+
+            override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                // Процесс страницы WebView упал (чаще всего — нехватка памяти).
+                // Не ответить true — Android закрывает всё приложение: это и
+                // было «зависает и вылетает». Пересоздаём экран.
+                recreate()
                 return true
             }
         }

@@ -5205,6 +5205,20 @@ async function loadAddons(){
 // Быстрый доступ: пусто в избранном — стрелки и панели нет в странице вовсе
 // (раньше кнопка была в разметке с hidden, а display:grid у .ico его
 // перебивал — стрелка торчала всегда). Иначе создаём их и заполняем.
+// placeQuick — стрелка под шестерёнкой с зазором, а не на глаз: на телефоне
+// значки шапки крупнее (48 px), и при top:46px рамка нажатой стрелки
+// наезжала на шестерёнку. Зазор 8 px — рамка ровно посередине между ними.
+function placeQuick(){
+  const btn = $('quickBtn'), p = $('quickPanel'), g = $('btnSettings');
+  if(!btn || !g) return;
+  const host = btn.offsetParent ? btn.offsetParent.getBoundingClientRect() : {top: 0, right: innerWidth};
+  const gr = g.getBoundingClientRect();
+  if(!gr.height) return;
+  btn.style.top = (gr.bottom - host.top + 8) + 'px';
+  btn.style.right = (host.right - gr.right) + 'px';
+  btn.style.width = btn.style.height = gr.width + 'px';
+  p.style.top = (gr.bottom - host.top + 8 + gr.height + 6) + 'px';
+}
 function closeQuick(){ const p = $('quickPanel'); if(p) p.hidden = true; }
 function renderQuick(list){
   let btn = $('quickBtn'), p = $('quickPanel');
@@ -5224,7 +5238,9 @@ function renderQuick(list){
     p.id = 'quickPanel';
     p.hidden = true;
     $('btnSettings').parentNode.after(btn, p); // там, где была в разметке
+    addEventListener('resize', placeQuick);
   }
+  placeQuick();
   p.innerHTML = '';
   for(const m of list){
     const b = document.createElement('button');

@@ -142,6 +142,8 @@ type Report struct {
 	// HasNet — есть деление Wi-Fi / мобильная (телефон).
 	HasNet bool   `json:"hasNet"`
 	Days   []Day  `json:"days"`
+	// Hours — 24 столбика по часам для периода «день» (Date — «15:00»).
+	Hours []Day `json:"hours,omitempty"`
 	Top    []Prog `json:"top"`
 	Total  Day    `json:"total"`
 	Limit  struct {
@@ -202,6 +204,15 @@ func build(st *store, period, netf string) Report {
 		r.Total.Direct += d.Direct
 		r.Total.Mesh += d.Mesh
 		r.Days = append(r.Days, d)
+	}
+	if period == "day" {
+		y, mo, dd := now.Date()
+		for h := 0; h < 24; h++ {
+			t := time.Date(y, mo, dd, h, 0, 0, 0, now.Location())
+			d := st.hour(t, netf)
+			d.Date = t.Format("15:04")
+			r.Hours = append(r.Hours, d)
+		}
 	}
 	for _, p := range progs {
 		r.Top = append(r.Top, *p)

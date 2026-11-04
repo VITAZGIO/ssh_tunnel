@@ -43,6 +43,9 @@ type fileData struct {
 	// Warned — до скольких процентов уже предупредили в периоде (ключ —
 	// период: «2026-11» или «2026-11-03»).
 	Warned map[string]int `json:"warned,omitempty"`
+	// Hours — по часам за двое суток (график «День»): «2026-11-04T13|wifi» →
+	// байты через сервер, напрямую, в сеть устройств.
+	Hours map[string][3]int64 `json:"hours,omitempty"`
 }
 
 // store — итоги по дням в памяти и в traffic.json.
@@ -53,13 +56,14 @@ type store struct {
 	days   map[string]map[key]*[2]int64
 	limit  Limit
 	warned map[string]int
+	hours  map[string]*[3]int64
 	dirty  bool
 	now    func() time.Time
 }
 
 func openStore(dir string) *store {
 	s := &store{path: filepath.Join(dir, "traffic.json"), days: map[string]map[key]*[2]int64{},
-		warned: map[string]int{}, now: time.Now,
+		warned: map[string]int{}, hours: map[string]*[3]int64{}, now: time.Now,
 		limit: Limit{GB: 50, Period: "month", Scope: "all"}}
 	var d fileData
 	if b, err := os.ReadFile(s.path); err == nil && json.Unmarshal(b, &d) == nil {
@@ -82,6 +86,10 @@ func openStore(dir string) *store {
 		if d.Warned != nil {
 			s.warned = d.Warned
 		}
+		for h, v := range d.Hours {
+			v := v
+			s.hours[h] = &v
+		}
 	}
 	s.prune()
 	return s
@@ -89,10 +97,31 @@ func openStore(dir string) *store {
 
 func dayKey(t time.Time) string { return t.Format("2006-01-02") }
 
+func hourKey(t time.Time, net string) string { return t.Format("2006-01-02T15") + "|" + net }
+
+// routeIndex — место пути в тройке часа: сервер, напрямую, сеть устройств.
+func routeIndex(route string) int {
+	switch route {
+	case RouteDirect:
+		return 1
+	case RouteMesh:
+		return 2
+	}
+	return 0
+}
+
 func (s *store) add(proc, route string, up, down int64) {
 	k := key{proc, route, currentNet()}
 	s.mu.Lock()
-	day := dayKey(s.now())
+	now := s.now()
+	day := dayKey(now)
+	hk := hourKey(now, k.net)
+	h := s.hours[hk]
+	if h == nil {
+		h = &[3]int64{}
+		s.hours[hk] = h
+	}
+	h[routeIndex(route)] += up + down
 	m := s.days[day]
 	if m == nil {
 		m = map[key]*[2]int64{}
@@ -120,6 +149,13 @@ func (s *store) prune() {
 			s.dirty = true
 		}
 	}
+	hedge := dayKey(s.now().AddDate(0, 0, -2))
+	for h := range s.hours {
+		if h[:10] < hedge {
+			delete(s.hours, h)
+			s.dirty = true
+		}
+	}
 	for p := range s.warned {
 		if p < edge[:7] {
 			delete(s.warned, p)
@@ -134,7 +170,10 @@ func (s *store) save() error {
 		s.mu.Unlock()
 		return nil
 	}
-	d := fileData{Days: map[string][]Rec{}, Limit: s.limit, Warned: s.warned}
+	d := fileData{Days: map[string][]Rec{}, Limit: s.limit, Warned: s.warned, Hours: map[string][3]int64{}}
+	for h, v := range s.hours {
+		d.Hours[h] = *v
+	}
 	for day, m := range s.days {
 		recs := make([]Rec, 0, len(m))
 		for k, v := range m {
@@ -154,6 +193,23 @@ func (s *store) save() error {
 		return err
 	}
 	return os.Rename(tmp, s.path)
+}
+
+// hour — байты часа t по путям; net — "all", "wifi" или "mobile".
+func (s *store) hour(t time.Time, net string) Day {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pfx := t.Format("2006-01-02T15") + "|"
+	var d Day
+	for k, v := range s.hours {
+		if len(k) < len(pfx) || k[:len(pfx)] != pfx || (net != "all" && k[len(pfx):] != net) {
+			continue
+		}
+		d.Server += v[0]
+		d.Direct += v[1]
+		d.Mesh += v[2]
+	}
+	return d
 }
 
 // recs — итоги дня (копия).
