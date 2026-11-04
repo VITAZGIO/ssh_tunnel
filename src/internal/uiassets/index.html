@@ -498,6 +498,10 @@
   /* Стрелка — справа сверху, прямо под кнопкой настроек. */
   #quickBtn{position:absolute;top:46px;right:14px;z-index:4}
   #quickBtn .mi{width:18px;height:18px}
+  /* Рамка у стрелки — только пока панель открыта. На телефоне :hover и
+     :focus «залипают» после касания, и рамка висела до тапа в другом месте. */
+  #quickBtn:hover:not(.open),#quickBtn:focus:not(.open){background:transparent;border-color:transparent;outline:none}
+  #quickBtn.open{background:var(--card2);border-color:var(--line)}
   #quickPanel{position:absolute;top:84px;right:10px;z-index:6;background:var(--card2);
               border:1px solid var(--line);border-radius:12px;padding:6px;min-width:170px;
               box-shadow:0 8px 24px rgba(0,0,0,.35);animation:quickIn .16s ease-out}
@@ -5219,7 +5223,13 @@ function placeQuick(){
   btn.style.width = btn.style.height = gr.width + 'px';
   p.style.top = (gr.bottom - host.top + 8 + gr.height + 6) + 'px';
 }
-function closeQuick(){ const p = $('quickPanel'); if(p) p.hidden = true; }
+// setQuick — открыть/закрыть панель; рамка стрелки — вместе с ней.
+function setQuick(open){
+  const p = $('quickPanel'), b = $('quickBtn');
+  if(p) p.hidden = !open;
+  if(b) b.classList.toggle('open', !!open);
+}
+function closeQuick(){ setQuick(false); }
 function renderQuick(list){
   let btn = $('quickBtn'), p = $('quickPanel');
   if(!list.length){
@@ -5233,7 +5243,7 @@ function renderQuick(list){
     btn.id = 'quickBtn';
     btn.title = tr('quick_title');
     btn.innerHTML = '<span class="mi" style="--i:url(icons/keyboard_double_arrow_left.svg)"></span>';
-    btn.onclick = ev => { ev.stopPropagation(); $('quickPanel').hidden = !$('quickPanel').hidden; };
+    btn.onclick = ev => { ev.stopPropagation(); setQuick($('quickPanel').hidden); btn.blur(); };
     p = document.createElement('div');
     p.id = 'quickPanel';
     p.hidden = true;
@@ -5256,7 +5266,7 @@ function renderQuick(list){
 }
 document.addEventListener('click', ev => {
   const p = $('quickPanel');
-  if(p && !p.hidden && !p.contains(ev.target)) p.hidden = true;
+  if(p && !p.hidden && !p.contains(ev.target)) closeQuick();
 });
 $('toAddons').onclick = () => showAddons();
 // Не подключилось — «Кто трогает трафик» (добавляется по этому нажатию).
