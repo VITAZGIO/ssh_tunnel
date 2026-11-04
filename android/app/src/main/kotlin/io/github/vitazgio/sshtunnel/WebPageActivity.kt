@@ -155,6 +155,16 @@ class WebPageActivity : AppCompatActivity() {
         @JavascriptInterface
         fun hasAllFiles(): Boolean = DeviceApps.hasAllFiles()
 
+        /** «Сканер сети» → Wi-Fi: сети вокруг, своя сеть сейчас, разрешение. */
+        @JavascriptInterface
+        fun wifiScan(): String = WifiScan.scanJson(this@WebPageActivity)
+
+        @JavascriptInterface
+        fun wifiInfo(): String = WifiScan.infoJson(this@WebPageActivity)
+
+        @JavascriptInterface
+        fun wifiAskPermission() = runOnUiThread { WifiScan.askPermission(this@WebPageActivity) }
+
         @JavascriptInterface
         fun requestAllFiles() = runOnUiThread { DeviceApps.requestAllFiles(this@WebPageActivity) }
 

@@ -22,10 +22,20 @@ func init() {
 			Name: map[string]string{"ru": "Сканер сети", "en": "Network scanner"},
 			Icon: "radar",
 			Hint: map[string]string{
-				"ru": "Кто сейчас в твоей Wi-Fi/проводной сети: адрес, MAC, имя, производитель, отклик. Открытые SSH и веб — кнопкой. Ничего не запоминает.",
-				"en": "Who is on your Wi-Fi/wired network right now: address, MAC, name, vendor, response time. Open SSH and web — one button. Remembers nothing.",
+				"ru": "Кто в твоей сети (адрес, MAC, имя, тип по портам), все Wi-Fi вокруг с загрузкой каналов и уровень сигнала, пока ходишь по дому.",
+				"en": "Who is on your network (address, MAC, name, type by ports), all Wi-Fi around with channel load, and signal level as you walk around.",
 			},
 			Book: "app-lanscan", Page: "addons/lanscan.html", Window: true, Permissions: []string{},
+		},
+		Manifest{
+			ID:   "wol",
+			Name: map[string]string{"ru": "Включить по сети", "en": "Wake on LAN"},
+			Icon: "power_settings_new",
+			Hint: map[string]string{
+				"ru": "Включить компьютер кнопкой (Wake-on-LAN): список своих машин по MAC. Работает в той же локальной сети; WoL должен быть включён в BIOS.",
+				"en": "Turn a computer on with a button (Wake-on-LAN): a list of your machines by MAC. Works on the same local network; WoL must be on in BIOS.",
+			},
+			Book: "app-wol", Page: "addons/wol.html", Permissions: []string{},
 		},
 		Manifest{
 			ID:   "clipboard",

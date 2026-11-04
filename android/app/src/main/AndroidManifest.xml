@@ -14,6 +14,12 @@
     <!-- Начиная с Android 13 уведомление нельзя показать без разрешения. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- «Сканер сети» → Wi-Fi: список сетей вокруг и уровень сигнала. Без
+         точной геолокации Android сетей не отдаёт (их адреса выдают место). -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- Список установленных приложений нужен для экрана исключений. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
