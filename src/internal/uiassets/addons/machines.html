@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Машины</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../pages.css">
+<style>
+  body{background:transparent}
+  .wrap{display:flex;flex-direction:column;gap:10px;padding:12px 14px 16px}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:6px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+  .m{display:flex;flex-direction:column;gap:7px}
+  .m .top{display:flex;align-items:center;gap:8px}
+  .m .top b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .m .src{font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--line);flex:none}
+  .dot.ok{background:var(--ok);box-shadow:0 0 6px var(--ok)}.dot.err{background:var(--err)}
+  .row{display:grid;grid-template-columns:64px 1fr auto;gap:8px;align-items:center;font-size:12.5px}
+  .row span:first-child{color:var(--dim)}
+  .row .v{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .meter{height:7px;border-radius:4px;background:var(--card2);overflow:hidden}
+  .meter i{display:block;height:100%;border-radius:4px;background:var(--ok);transition:width .4s}
+  .meter i.w{background:var(--warn)}.meter i.e{background:var(--err)}
+  .spark{width:100%;height:34px;display:block}
+  .chips{display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px;color:var(--dim)}
+  .chips b{color:var(--text);font-weight:600}
+  .err{color:var(--err);font-size:12.5px}
+  .ok{color:var(--ok)}
+  .acts{display:flex;gap:6px;flex-wrap:wrap}
+  .acts .btn{padding:5px 10px;font-size:12.5px}
+  h3{margin:6px 0 0;font-size:14px;display:flex;gap:8px;align-items:center}
+  .ck{display:flex;gap:10px;align-items:center;font-size:13.5px}
+  #dlg[hidden]{display:none}
+  #dlg{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:20;display:flex;align-items:flex-start;justify-content:center;padding:30px 14px;overflow:auto}
+  #dlg .card{width:100%;max-width:460px;display:flex;flex-direction:column;gap:8px}
+  .f{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .f label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim)}
+  .f .full{grid-column:1/-1}
+  .f input,.f select,.f textarea{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--text);font:inherit}
+  .f [hidden]{display:none}
+  details summary{cursor:pointer;font-size:13px;color:var(--dim)}
+  .q{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--line);color:var(--dim);font-size:11px;cursor:pointer;background:var(--card2);flex:none}
+  .tip{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:12.5px;color:var(--dim);line-height:1.5}
+  .tip[hidden]{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar"><button class="btn primary" id="add"></button><button class="ico" id="re"></button><span style="flex:1"></span><span class="q" data-tip="tipMain">?</span></div>
+  <div class="tip" id="tipMain" hidden></div>
+  <div class="grid" id="mine"></div>
+  <div id="net"></div>
+  <div class="card" style="display:flex;flex-direction:column;gap:8px">
+    <label class="ck"><input type="checkbox" id="share"><span id="lShare"></span><span class="q" data-tip="tipShare">?</span></label>
+    <div class="tip" id="tipShare" hidden></div>
+    <label class="ck" id="rowOff"><input type="checkbox" id="allowOff"><span id="lOff"></span><span class="q" data-tip="tipOff">?</span></label>
+    <div class="tip" id="tipOff" hidden></div>
+  </div>
+</div>
+
+<div id="dlg" hidden><div class="card">
+  <b id="dT"></b>
+  <div class="f">
+    <label class="full"><span id="lName"></span><input id="fName"></label>
+    <label class="full"><span id="lSrc"></span><select id="fSrc"></select></label>
+    <label data-for="ssh"><span id="lHost"></span><input id="fHost" spellcheck="false"></label>
+    <label data-for="ssh"><span id="lUser"></span><input id="fUser" spellcheck="false" autocomplete="off"></label>
+    <label class="full" data-for="ssh"><span id="lPass"></span><input id="fPass" type="password" autocomplete="new-password"></label>
+    <label class="full" data-for="netdata ha"><span id="lUrl"></span><input id="fUrl" spellcheck="false"></label>
+    <label class="full" data-for="ha"><span id="lTok"></span><input id="fTok" type="password" autocomplete="off"></label>
+    <label class="full" data-for="ha"><span id="lSens"></span><textarea id="fSens" rows="3" spellcheck="false"></textarea></label>
+  </div>
+  <details id="pw"><summary id="pwT"></summary>
+    <div class="f" style="margin-top:8px">
+      <label class="full"><span id="lMac"></span><input id="fMac" spellcheck="false"></label>
+      <label class="full"><span id="lPeer"></span><select id="fPeer"></select></label>
+    </div>
+  </details>
+  <div class="bar"><button class="btn primary" id="dSave"></button><button class="btn" id="dClose"></button><span style="flex:1"></span><button class="btn" id="dDel"></button></div>
+  <div class="hint" id="dNote"></div>
+</div></div>
+
+<script src="../pages.js"></script>
+<script>
+/* Машины: показания своих серверов и ПК + по желанию включить/выключить.
+   Всё читает и хранит ядро (/api/machines); здесь — карточки и форма. */
+let ST = null, EDIT = null;
+const SRC = {ssh: 'SSH', netdata: 'netdata', ha: 'Home Assistant', self: L('это устройство', 'this device'), '': L('без показаний', 'no readings')};
+const gb = b => b >= 1e12 ? (b / 1e12).toFixed(1) + L(' ТБ', ' TB') : (b / 1e9).toFixed(b >= 1e10 ? 0 : 1) + L(' ГБ', ' GB');
+const up = s => { const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600); return d ? `${d} ${L('д', 'd')} ${h} ${L('ч', 'h')}` : `${h} ${L('ч', 'h')} ${Math.floor(s % 3600 / 60)} ${L('мин', 'min')}`; };
+const lvl = p => p >= 90 ? 'e' : p >= 70 ? 'w' : '';
+function meter(name, pct, text){ return `<div class="row"><span>${esc(name)}</span><div class="meter"><i class="${lvl(pct)}" style="width:${Math.min(100, pct).toFixed(0)}%"></i></div><span class="v">${esc(text)}</span></div>`; }
+function spark(h){
+  if(!h || h.length < 2) return '';
+  const W = 260, H = 34, max = 100;
+  const pts = h.map((v, i) => `${(i * W / (h.length - 1)).toFixed(1)},${(H - 2 - (H - 4) * Math.min(v, max) / max).toFixed(1)}`).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg>`;
+}
+function card(m, own){
+  const r = m.reading, alive = r && !r.error && r.time;
+  const peerUp = own && m.peer && ST.online[m.peer];
+  let body = '';
+  if(!m.src) body = `<div class="hint">${esc(L('Показания не настроены.', 'No readings set up.'))}</div>`;
+  else if(!r) body = `<div class="hint">${esc(L('Читаю…', 'Reading…'))}</div>`;
+  else if(r.error) body = `<div class="err">${esc(r.error)}</div>`;
+  else {
+    if(m.src !== 'ha' || r.cpu) body += meter(L('процессор', 'CPU'), r.cpu, r.cpu.toFixed(0) + '%');
+    if(r.memTotal) body += meter(L('память', 'memory'), r.memUsed * 100 / r.memTotal, `${gb(r.memUsed)} / ${gb(r.memTotal)}`);
+    if(r.diskTotal) body += meter(L('диск', 'disk'), r.diskUsed * 100 / r.diskTotal, `${gb(r.diskUsed)} / ${gb(r.diskTotal)}`);
+    body += spark(r.hist);
+    const ch = [];
+    if(r.temp) ch.push(`🌡 <b>${r.temp.toFixed(0)}°C</b>`);
+    if(r.load) ch.push(`${esc(L('нагрузка', 'load'))} <b>${r.load.toFixed(2)}</b>${r.cores ? ' / ' + r.cores : ''}`);
+    if(r.uptime) ch.push(`⏱ <b>${esc(up(r.uptime))}</b>`);
+    if(ch.length) body += `<div class="chips">${ch.join('')}</div>`;
+    if(r.extra && r.extra.length) body += r.extra.filter(x => !(m.src === 'ha' && false)).map(x => `<div class="row"><span>${esc(x.name)}</span><span></span><span class="v">${esc(x.value)} ${esc(x.unit || '')}</span></div>`).join('');
+  }
+  const acts = [];
+  if(m.mac) acts.push(`<button class="btn" data-wake="${esc(m.id)}" data-mac="${esc(m.mac)}">⏻ ${esc(L('Включить', 'Wake'))}</button>`);
+  if(own && m.peer) acts.push(`<button class="btn" data-off="${esc(m.id)}">${esc(L('Выключить', 'Shut down'))}</button>`);
+  if(own) acts.push(`<button class="ico" data-ed="${esc(m.id)}" title="${esc(L('Изменить', 'Edit'))}">${icon('edit')}</button>`);
+  return `<div class="card m"><div class="top"><span class="dot ${alive || peerUp ? 'ok' : r && r.error ? 'err' : ''}"></span><b>${esc(m.name)}</b><span class="src">${esc(SRC[m.src || ''])}</span></div>
+    ${body}${acts.length ? `<div class="acts">${acts.join('')}</div>` : ''}<div class="hint" data-st="${esc(m.id)}"></div></div>`;
+}
+function bindCards(root){
+  root.querySelectorAll('[data-wake]').forEach(b => b.onclick = async () => {
+    const st = root.querySelector(`[data-st="${b.dataset.wake}"]`); st.textContent = L('Отправляю…', 'Sending…');
+    const r = await api('/api/machines', {op: 'wake', id: b.dataset.wake, mac: b.dataset.mac}).catch(e => ({error: String(e)}));
+    st.className = 'hint ' + (r.error ? 'err' : 'ok');
+    st.textContent = r.error || L('Отправили: ', 'Sent by: ') + r.sent.join(', ') + L(' — включится за 10–60 с.', ' — wakes in 10–60 s.');
+  });
+  root.querySelectorAll('[data-off]').forEach(b => b.onclick = async () => {
+    const m = ST.machines.find(x => x.id === b.dataset.off);
+    if(!confirm(L(`Выключить «${m.name}» через 30 секунд?`, `Shut down «${m.name}» in 30 s?`))) return;
+    const r = await api('/api/machines', {op: 'shutdown', id: m.id}).catch(e => ({error: String(e)}));
+    const st = root.querySelector(`[data-st="${m.id}"]`); st.className = 'hint ' + (r.error ? 'err' : 'ok');
+    st.textContent = r.error || L('Выключится через 30 секунд.', 'Shuts down in 30 s.');
+  });
+  root.querySelectorAll('[data-ed]').forEach(b => b.onclick = () => edit(b.dataset.ed));
+}
+async function load(){
+  const r = await api('/api/machines').catch(() => null);
+  if(!r) return;
+  ST = r; ST.machines = ST.machines || []; ST.peers = ST.peers || []; ST.online = ST.online || {};
+  $('mine').innerHTML = ST.machines.length ? ST.machines.map(m => card(m, true)).join('')
+    : `<div class="card hint">${esc(L('Машин пока нет — «Добавить машину».', 'No machines yet.'))}</div>`;
+  bindCards($('mine'));
+  const net = ST.network || [];
+  $('net').innerHTML = net.map(d => `<h3>${icon('hub')}${esc(L('Из сети: ', 'From the network: ') + d.device)}</h3><div class="grid">${d.machines.map(m => card(m, false)).join('')}</div>`).join('');
+  bindCards($('net'));
+  $('share').checked = ST.settings.share; $('allowOff').checked = ST.settings.allowShutdown;
+  $('rowOff').hidden = !ST.canShutdown;
+}
+const saveSet = () => api('/api/machines', {op: 'settings', settings: {share: $('share').checked, allowShutdown: $('allowOff').checked}});
+$('share').onchange = saveSet; $('allowOff').onchange = saveSet;
+
+function showFields(){
+  const s = $('fSrc').value;
+  document.querySelectorAll('#dlg [data-for]').forEach(el => el.hidden = !el.dataset.for.split(' ').includes(s));
+  $('fUrl').placeholder = s === 'ha' ? 'http://192.168.1.195:8123' : 'http://192.168.1.201:19999';
+}
+function edit(id){
+  EDIT = id;
+  const m = id ? ST.machines.find(x => x.id === id) : {src: 'ssh', port: 22};
+  $('dT').textContent = id ? L('Машина', 'Machine') : L('Новая машина', 'New machine');
+  $('fName').value = m.name || ''; $('fSrc').value = m.src || '';
+  $('fHost').value = (m.host || '') + (m.port && m.port !== 22 ? ':' + m.port : ''); $('fUser').value = m.user || 'root'; $('fPass').value = '';
+  $('fPass').placeholder = m.saved ? L('сохранён — оставь пустым', 'saved — leave empty') : L('пусто — ключ программы (плагин SSH)', 'empty — the app key (SSH plugin)');
+  $('fUrl').value = m.url || ''; $('fTok').value = ''; $('fTok').placeholder = m.saved ? L('сохранён — оставь пустым', 'saved — leave empty') : '';
+  $('fSens').value = (m.sensors || []).join('\n'); $('fMac').value = m.mac || '';
+  $('fPeer').innerHTML = `<option value="">${esc(L('— не выключать', '— no shutdown'))}</option>` + ST.peers.map(p => `<option value="${esc(p.ip)}"${p.ip === m.peer ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
+  $('pw').open = !!(m.mac || m.peer);
+  $('dDel').hidden = !id; $('dNote').textContent = '';
+  showFields(); $('dlg').hidden = false;
+}
+$('dSave').onclick = async () => {
+  const [host, port] = $('fHost').value.trim().split(':');
+  const body = {op: 'add', id: EDIT || '', name: $('fName').value.trim(), src: $('fSrc').value, host, port: +port || 0, user: $('fUser').value.trim(),
+    pass: $('fPass').value, url: $('fUrl').value.trim(), token: $('fTok').value.trim(), sensors: $('fSens').value.split(/[\s,]+/).filter(Boolean),
+    mac: $('fMac').value.trim(), peer: $('fPeer').value};
+  const r = await api('/api/machines', body).catch(e => ({error: String(e)}));
+  if(r.error){ $('dNote').className = 'hint err'; $('dNote').textContent = r.error; return; }
+  $('dlg').hidden = true; setTimeout(load, 2500); load();
+};
+$('dDel').onclick = async () => { if(!confirm(L('Убрать машину?', 'Remove?'))) return; await api('/api/machines', {op: 'remove', id: EDIT}); $('dlg').hidden = true; load(); };
+$('dClose').onclick = () => { $('dlg').hidden = true; };
+$('fSrc').onchange = showFields;
+document.querySelectorAll('.q[data-tip]').forEach(q => q.onclick = e => { e.preventDefault(); e.stopPropagation(); const t = $(q.dataset.tip); t.hidden = !t.hidden; });
+
+$('add').innerHTML = icon('add') + esc(L('Добавить машину', 'Add machine'));
+$('re').innerHTML = icon('refresh'); $('re').title = L('Обновить', 'Refresh');
+$('re').onclick = async () => { await api('/api/machines', {op: 'refresh'}); load(); };
+$('add').onclick = () => edit(null);
+$('tipMain').textContent = L('Показания обновляются раз в 30 секунд на том устройстве, где машина добавлена. SSH — Linux (Ubuntu, Proxmox, Orange Pi): вход ключом программы (плагин SSH → «Установить ключ») или паролем. netdata — адрес вида http://сервер:19999. Home Assistant — адрес, долгоживущий токен и список датчиков (entity_id).',
+  'Readings refresh every 30 s on the device where the machine is added. SSH — Linux, the app key or a password. netdata — http://server:19999. Home Assistant — URL, token and sensor entity_ids.');
+$('lShare').textContent = L('Показывать мои машины всем своим устройствам', 'Show my machines to all my devices');
+$('tipShare').textContent = L('Настрой машины один раз на домашнем сервере, поставь эту галку — и с телефона (даже на работе) в разделе «Из сети» видно всё. Пароли и токены не уходят — только показания.', 'Set up once on a home server and tick this — your phone sees everything under «From the network». Only readings are shared.');
+$('lOff').textContent = L('Разрешить своим устройствам выключать это', 'Let my devices shut this one down');
+$('tipOff').textContent = L('Чтобы выключать машину кнопкой: на ней тоже стоит ssh_tunnel с этим плагином и эта галка; в карточке машины — «Изменить» → «Включение и выключение» → «Выключать как» → её имя в сети устройств.', 'To shut a machine down: it runs ssh_tunnel with this plugin and this box ticked; then pick it in «Shut down as».');
+$('lName').textContent = L('Имя', 'Name'); $('fName').placeholder = L('например «Ubuntu»', 'e.g. «Ubuntu»');
+$('lSrc').textContent = L('Как читать показания', 'How to read');
+$('fSrc').innerHTML = Object.entries(SRC).map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('');
+$('lHost').textContent = L('Адрес', 'Address'); $('fHost').placeholder = '192.168.1.201';
+$('lUser').textContent = L('Пользователь', 'User');
+$('lPass').textContent = L('Пароль', 'Password');
+$('lUrl').textContent = L('Адрес', 'URL');
+$('lTok').textContent = L('Токен Home Assistant', 'Home Assistant token');
+$('lSens').textContent = L('Датчики (entity_id, по одному в строке)', 'Sensors (entity_id, one per line)'); $('fSens').placeholder = 'sensor.processor_use\nsensor.memory_use_percent';
+$('pwT').textContent = L('Включение и выключение (по желанию)', 'Wake and shutdown (optional)');
+$('lMac').textContent = L('MAC для включения по сети', 'MAC for Wake-on-LAN'); $('fMac').placeholder = 'AA:BB:CC:DD:EE:FF';
+$('lPeer').textContent = L('Выключать как (машина в сети устройств)', 'Shut down as (device network)');
+$('dSave').textContent = L('Сохранить', 'Save'); $('dClose').textContent = L('Закрыть', 'Close'); $('dDel').textContent = L('Убрать', 'Remove');
+load();
+setInterval(() => { if(!document.hidden && $('dlg').hidden) load(); }, 30000);
+</script>
+</body>
+</html>

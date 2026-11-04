@@ -28,14 +28,14 @@ func init() {
 			Book: "app-lanscan", Page: "addons/lanscan.html", Window: true, Permissions: []string{},
 		},
 		Manifest{
-			ID:   "wol",
-			Name: map[string]string{"ru": "Включить по сети", "en": "Wake on LAN"},
-			Icon: "power_settings_new",
+			ID:   "machines",
+			Name: map[string]string{"ru": "Машины", "en": "Machines"},
+			Icon: "dns",
 			Hint: map[string]string{
-				"ru": "Включить компьютер кнопкой (Wake-on-LAN) — и из дома, и с работы: пакет шлют твои устройства в той же локалке (через сеть устройств). WoL должен быть включён в BIOS.",
-				"en": "Turn a computer on with a button (Wake-on-LAN): a list of your machines by MAC. Works on the same local network; WoL must be on in BIOS.",
+				"ru": "Показания своих серверов и ПК: процессор, память, диск, температура, время работы — по SSH, через netdata или Home Assistant. Настроил на домашнем сервере — видно со всех своих устройств. По желанию — включить (Wake-on-LAN) и выключить.",
+				"en": "Readings of your servers and PCs: CPU, memory, disk, temperature, uptime — over SSH, netdata or Home Assistant. Set up on a home server — visible on all your devices. Optional wake and shutdown.",
 			},
-			Book: "app-wol", Page: "addons/wol.html", Background: true, Permissions: []string{},
+			Book: "app-machines", Page: "addons/machines.html", Background: true, Permissions: []string{},
 		},
 		Manifest{
 			ID:   "clipboard",
