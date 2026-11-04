@@ -142,6 +142,14 @@ const entry = id => ST.added.find(e => e.id === id);
 const inWin = id => { const e = entry(id), m = manifest(id); return e && e.win != null ? e.win : !!(m && m.window); };
 
 function show(v){ ['vList','vCat','vApp','vPerm'].forEach(x => $(x).classList.toggle('on', x === v)); }
+// sshtunnelBack — системная «Назад» телефона (её ловит главная страница):
+// из плагина, каталога или разрешений — на шаг назад здесь же, к списку
+// плагинов. false — уже в списке, дальше решает главная (Настройки/главная).
+window.sshtunnelBack = () => {
+  for(const [v, b] of [['vApp', 'backApp'], ['vCat', 'backCat'], ['vPerm', 'backPerm']])
+    if($(v).classList.contains('on')){ $(b).click(); return true; }
+  return false;
+};
 
 function setIcons(){
   $('backList').innerHTML = $('backCat').innerHTML = $('backApp').innerHTML = $('backPerm').innerHTML = icon('arrow_back');

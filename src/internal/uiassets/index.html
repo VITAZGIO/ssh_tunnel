@@ -5410,7 +5410,12 @@ if(ANDROID){
     }
     if(menuEl){ closeMenu(); return true; }
     if($('quickPanel') && !$('quickPanel').hidden){ closeQuick(); return true; }
-    if(current === 'viewAddons'){ show(addonsReturnView); loadAddons(); return true; }
+    if(current === 'viewAddons'){
+      // Сначала шаг назад внутри «Плагинов» (из плагина — в их список),
+      // и только из списка — туда, откуда их открыли.
+      try { const w = $('addonsFrame').contentWindow; if(w && w.sshtunnelBack && w.sshtunnelBack()) return true; } catch(e) {}
+      show(addonsReturnView); loadAddons(); return true;
+    }
     if(current !== 'viewMain'){
       const back = $(current).querySelector('.head .ico');
       if(back) back.click(); else show('viewMain');
