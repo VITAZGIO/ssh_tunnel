@@ -12,3 +12,5 @@ network card settings, and usually a cable: most machines do not wake over
 Wi-Fi.
 
 Not at home: choose «via the device network» — your devices that have this plugin (e.g. a home server) send the packet into their local network.
+
+Shutdown (optional): install ssh_tunnel on the machine, add this plugin there and allow shutdown; here pick it in «shut down as». Then you see if it is on and can shut it down.

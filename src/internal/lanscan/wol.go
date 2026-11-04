@@ -13,7 +13,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,7 +34,7 @@ func init() {
 	addons.Register(WolID, func() addons.Module { return wolModule{} })
 	addons.RegisterRoutes(WolID, addons.Route{
 		Path: "/api/wol", Methods: "GET, POST",
-		Desc: "Включить по сети (Wake-on-LAN): GET — список машин {name, mac}; POST {\"op\":\"add|remove|wake\",\"name\",\"mac\"} — добавить, убрать, разбудить (wake можно и с mac не из списка).",
+		Desc: "Включить по сети (Wake-on-LAN): GET — список машин {name, mac}; POST {\"op\":\"add|remove|wake|shutdown|settings\",\"name\",\"mac\",\"via\",\"peer\"} — добавить, убрать, разбудить (via: local|mesh|пусто), выключить (через peer в сети устройств), настройки {allowShutdown}.",
 		H:    handleWol,
 	})
 }
@@ -45,6 +47,25 @@ type WolHost struct {
 	// попросить все свои устройства в сети устройств (у кого добавлен этот
 	// плагин) — каждое шлёт пакет в свою локалку; "" — и так, и так.
 	Via string `json:"via,omitempty"`
+	// Peer — эта же машина в сети устройств (IP 198.19.x.y), если на ней
+	// стоит ssh_tunnel с этим плагином: тогда видно, включена ли она, и её
+	// можно выключить (если на ней разрешено).
+	Peer string `json:"peer,omitempty"`
+}
+
+// wolSettings — настройки этого устройства.
+type wolSettings struct {
+	AllowShutdown bool `json:"allowShutdown"` // выключать это устройство по просьбе своих
+}
+
+func wolSetPath() string { return filepath.Join(addons.DataDir(), "wol-settings.json") }
+
+func wolSettingsLoad() wolSettings {
+	var s wolSettings
+	if b, err := os.ReadFile(wolSetPath()); err == nil {
+		_ = json.Unmarshal(b, &s)
+	}
+	return s
 }
 
 // WolPort — порт плагина в сети устройств: «разбуди MAC в своей локалке».
@@ -57,14 +78,20 @@ func (wolModule) Start() error {
 		defer c.Close()
 		_ = c.SetDeadline(time.Now().Add(10 * time.Second))
 		var req struct {
+			Op  string `json:"op"`
 			MAC string `json:"mac"`
 		}
 		if json.NewDecoder(io.LimitReader(c, 512)).Decode(&req) != nil {
 			return
 		}
-		_, hw, err := normMAC(req.MAC)
-		if err == nil {
-			err = wake(hw)
+		var err error
+		if req.Op == "shutdown" {
+			err = shutdownSelf()
+		} else {
+			var hw net.HardwareAddr
+			if _, hw, err = normMAC(req.MAC); err == nil {
+				err = wake(hw)
+			}
 		}
 		ans := "ok"
 		if err != nil {
@@ -76,6 +103,44 @@ func (wolModule) Start() error {
 }
 
 func (wolModule) Stop() { mesh.Serve(WolPort, nil) }
+
+// shutdownSelf — выключить это устройство (если на нём разрешено) через 30 с:
+// успеет закрыться то, что открыто.
+func shutdownSelf() error {
+	if !wolSettingsLoad().AllowShutdown {
+		return errors.New("на этом устройстве выключение по сети не разрешено — галка в плагине «Включить по сети»")
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("shutdown", "/s", "/t", "30", "/c", "ssh_tunnel: выключение по просьбе с другого устройства")
+	case "linux":
+		cmd = exec.Command("shutdown", "-h", "+1")
+	default:
+		return errors.New("это устройство так выключить нельзя")
+	}
+	return cmd.Start()
+}
+
+// askPeer — просьба устройству сети: «выключись» и т. п.
+func askPeer(peer, op string) error {
+	c, err := devnet.DialPeer(net.JoinHostPort(peer, strconv.Itoa(WolPort)))
+	if err != nil {
+		return errors.New("машина не отвечает в сети устройств — выключена или на ней нет этого плагина")
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(8 * time.Second))
+	b, _ := json.Marshal(map[string]string{"op": op})
+	_, _ = c.Write(b)
+	r, _ := io.ReadAll(io.LimitReader(c, 300))
+	if string(r) != "ok" {
+		if len(r) == 0 {
+			return errors.New("машина не ответила")
+		}
+		return errors.New(string(r))
+	}
+	return nil
+}
 
 // wakeViaMesh просит все свои устройства в сети разбудить MAC; ответ — кто
 // отправил (имена) и кто не смог.
@@ -214,17 +279,49 @@ func handleWol(w http.ResponseWriter, r *http.Request) {
 	defer wolMu.Unlock()
 	hs := wolLoad()
 	if r.Method != http.MethodPost {
-		writeJSON(w, map[string]any{"hosts": hs})
+		type peer struct {
+			IP     string `json:"ip"`
+			Name   string `json:"name"`
+			Online bool   `json:"online"`
+		}
+		var ps []peer
+		online := map[string]bool{}
+		for _, p := range devnet.Status().Peers {
+			if p.Self || !p.IP.IsValid() {
+				continue
+			}
+			n := p.Name
+			if n == "" {
+				n = p.Host
+			}
+			ps = append(ps, peer{p.IP.String(), n, p.Online})
+			online[p.IP.String()] = p.Online
+		}
+		writeJSON(w, map[string]any{"hosts": hs, "peers": ps, "online": online, "settings": wolSettingsLoad(),
+			"canShutdown": runtime.GOOS == "windows" || runtime.GOOS == "linux"})
 		return
 	}
 	var req struct {
-		Op   string `json:"op"`
-		Name string `json:"name"`
-		MAC  string `json:"mac"`
-		Via  string `json:"via"`
+		Op            string `json:"op"`
+		Name          string `json:"name"`
+		MAC           string `json:"mac"`
+		Via           string `json:"via"`
+		Peer          string `json:"peer"`
+		AllowShutdown *bool  `json:"allowShutdown"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, map[string]string{"error": "нужен JSON {\"op\"}"})
+		return
+	}
+	if req.Op == "settings" {
+		if req.AllowShutdown != nil {
+			b, _ := json.MarshalIndent(wolSettings{AllowShutdown: *req.AllowShutdown}, "", "  ")
+			if err := os.WriteFile(wolSetPath(), b, 0o600); err != nil {
+				writeJSON(w, map[string]string{"error": err.Error()})
+				return
+			}
+		}
+		writeJSON(w, map[string]bool{"ok": true})
 		return
 	}
 	mac, hw, err := normMAC(req.MAC)
@@ -244,7 +341,19 @@ func handleWol(w http.ResponseWriter, r *http.Request) {
 				out = append(out, h)
 			}
 		}
-		err = wolSave(append(out, WolHost{Name: name, MAC: mac, Via: req.Via}))
+		err = wolSave(append(out, WolHost{Name: name, MAC: mac, Via: req.Via, Peer: strings.TrimSpace(req.Peer)}))
+	case "shutdown":
+		peer := req.Peer
+		for _, h := range hs {
+			if h.MAC == mac && peer == "" {
+				peer = h.Peer
+			}
+		}
+		if peer == "" {
+			err = errors.New("не выбрано, какое это устройство в сети устройств — смотри «Как включить выключение»")
+			break
+		}
+		err = askPeer(peer, "shutdown")
 	case "remove":
 		out := hs[:0]
 		for _, h := range hs {
@@ -283,7 +392,7 @@ func handleWol(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, res)
 		return
 	default:
-		err = errors.New("op: add, remove или wake")
+		err = errors.New("op: add, remove, wake, shutdown или settings")
 	}
 	if err != nil {
 		writeJSON(w, map[string]string{"error": err.Error()})
