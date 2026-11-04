@@ -144,7 +144,10 @@ func loadSettings() Settings { return loadConf().Settings }
 // ---------------------------------------------------------------------------
 // Чтение.
 
-// script — показания Linux одним заходом: нагрузка, ядра, два снимка
+// script — показания Linux одним заходом. Только то, что ядро держит в
+// памяти (/proc, /sys, statfs корня): спящие диски не будит; других
+// разделов, smartctl и hdparm не трогаем.
+// Что внутри: нагрузка, ядра, два снимка
 // /proc/stat через секунду (процессор), память, корень диска, самая горячая
 // зона, время работы.
 const script = `cat /proc/loadavg; echo ---; nproc; echo ---; head -1 /proc/stat; sleep 1; head -1 /proc/stat; echo ---; ` +
@@ -218,7 +221,79 @@ func cpuTimes(line string) []int64 {
 	return out
 }
 
+// Соединения SSH держим открытыми: каждый новый вход пишет в журналы
+// машины (auth.log, wtmp), и раз в 30 с это будило бы диск, если система на
+// HDD. Показания читаются новым каналом в том же соединении — без входа.
+var (
+	sshMu    sync.Mutex
+	sshConns = map[string]*ssh.Client{}
+)
+
+func sshKeyOf(m Machine) string {
+	return m.ID + "|" + m.Host + "|" + strconv.Itoa(m.Port) + "|" + m.User
+}
+
+func runSSH(m Machine) (string, string, error) {
+	k := sshKeyOf(m)
+	sshMu.Lock()
+	cl := sshConns[k]
+	sshMu.Unlock()
+	newKey := ""
+	if cl == nil {
+		var err error
+		if cl, newKey, err = dialSSH(m); err != nil {
+			return "", "", err
+		}
+		sshMu.Lock()
+		sshConns[k] = cl
+		sshMu.Unlock()
+	}
+	s, err := cl.NewSession()
+	if err != nil {
+		// Соединение умерло (машину перезагрузили) — один раз заново.
+		cl.Close()
+		sshMu.Lock()
+		delete(sshConns, k)
+		sshMu.Unlock()
+		if cl, newKey, err = dialSSH(m); err != nil {
+			return "", "", err
+		}
+		sshMu.Lock()
+		sshConns[k] = cl
+		sshMu.Unlock()
+		if s, err = cl.NewSession(); err != nil {
+			return "", newKey, err
+		}
+	}
+	defer s.Close()
+	out, err := s.Output(script)
+	if err != nil && len(out) == 0 {
+		return "", newKey, errors.New("машина не ответила показаниями (это Linux?)")
+	}
+	return string(out), newKey, nil
+}
+
+// dropSSH закрывает соединения машины (изменили или убрали).
+func dropSSH(id string) {
+	sshMu.Lock()
+	defer sshMu.Unlock()
+	for k, c := range sshConns {
+		if strings.HasPrefix(k, id+"|") {
+			c.Close()
+			delete(sshConns, k)
+		}
+	}
+}
+
 func readSSH(m Machine) (Reading, string, error) {
+	out, key, err := runSSH(m)
+	if err != nil {
+		return Reading{}, key, err
+	}
+	return parseScript(out), key, nil
+}
+
+func dialSSH(m Machine) (*ssh.Client, string, error) {
 	var auth []ssh.AuthMethod
 	if m.Pass != "" {
 		auth = append(auth, ssh.Password(m.Pass))
@@ -247,29 +322,19 @@ func readSSH(m Machine) (Reading, string, error) {
 	addr := net.JoinHostPort(m.Host, strconv.Itoa(port))
 	conn, err := devnet.Dial("tcp", addr)
 	if err != nil {
-		return Reading{}, "", fmt.Errorf("нет связи с %s", addr)
+		return nil, "", fmt.Errorf("нет связи с %s", addr)
 	}
 	_ = conn.SetDeadline(time.Now().Add(25 * time.Second))
 	c, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
 	if err != nil {
 		conn.Close()
 		if strings.Contains(err.Error(), "unable to authenticate") {
-			return Reading{}, "", errors.New("машина не пустила: неверный пароль или ключ программы не установлен (плагин SSH → «Установить ключ»)")
+			return nil, "", errors.New("машина не пустила: неверный пароль или ключ программы не установлен (плагин SSH → «Установить ключ»)")
 		}
-		return Reading{}, "", err
+		return nil, "", err
 	}
-	cl := ssh.NewClient(c, chans, reqs)
-	defer cl.Close()
-	s, err := cl.NewSession()
-	if err != nil {
-		return Reading{}, "", err
-	}
-	defer s.Close()
-	out, err := s.Output(script)
-	if err != nil && len(out) == 0 {
-		return Reading{}, newKey, errors.New("машина не ответила показаниями (это Linux?)")
-	}
-	return parseScript(string(out)), newKey, nil
+	_ = conn.SetDeadline(time.Time{})
+	return ssh.NewClient(c, chans, reqs), newKey, nil
 }
 
 func readSelf() (Reading, error) {
@@ -525,6 +590,12 @@ func (m *module) Start() error {
 }
 
 func (m *module) Stop() {
+	sshMu.Lock()
+	for k, c := range sshConns {
+		c.Close()
+		delete(sshConns, k)
+	}
+	sshMu.Unlock()
 	mesh.Serve(WolPort, nil)
 	mesh.Serve(SharePort, nil)
 	if m.stop != nil {
@@ -678,6 +749,7 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		err = saveConf(c)
 		mu.Unlock()
+		dropSSH(m.ID)
 		go refresh()
 	case "remove":
 		out := c.Machines[:0]
@@ -691,6 +763,7 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		err = saveConf(c)
 		delete(readings, req.ID)
 		mu.Unlock()
+		dropSSH(req.ID)
 	case "settings":
 		if req.Settings != nil {
 			c.Settings = *req.Settings
