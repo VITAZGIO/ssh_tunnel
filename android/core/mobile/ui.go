@@ -11,6 +11,9 @@ import (
 	"encoding/base64"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -29,6 +32,19 @@ func StartUI(dir string) (string, error) {
 	uiMu.Lock()
 	defer uiMu.Unlock()
 	if uiHost == nil {
+		// Падение ядра (panic, fatal error) — в файл: иначе оно уходит только
+		// в logcat, и «приложение вылетает» не разобрать. Показывает и
+		// удаляет записку Kotlin (CrashLog) при следующем запуске.
+		// Записка прошлого падения — в crash-go-prev.txt, пока её не прочли:
+		// новый файл открывается пустым.
+		cur := filepath.Join(dir, "crash-go.txt")
+		if st, err := os.Stat(cur); err == nil && st.Size() > 0 {
+			_ = os.Rename(cur, filepath.Join(dir, "crash-go-prev.txt"))
+		}
+		if f, err := os.OpenFile(cur, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err == nil {
+			_ = debug.SetCrashOutput(f, debug.CrashOptions{})
+			f.Close()
+		}
 		h, err := uihost.Start(dir)
 		if err != nil {
 			return "", err

@@ -18,6 +18,13 @@
   .srv .n{font-weight:600}
   .srv .a{color:var(--dim);font-family:var(--mono);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .srv .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .srv .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* Узкий экран (телефон): кнопки — своей строкой под именем, а не поверх него. */
+  @media (max-width:600px){
+    .srv{flex-wrap:wrap}
+    .srv .tx{flex:1 1 calc(100% - 40px)}
+    .srv .acts{flex:1 1 100%;justify-content:flex-start}
+  }
   .btn{display:inline-flex;align-items:center;gap:6px}
   .btn .mi{width:18px;height:18px}
   form.card{display:grid;gap:10px}

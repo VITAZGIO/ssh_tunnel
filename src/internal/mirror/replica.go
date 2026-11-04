@@ -49,6 +49,9 @@ type Replica struct {
 	loaded bool
 	gone   bool // папку отключили
 	cache  map[string]cached
+	// status — под своим замком smu: Sync держит mu весь проход (с долгим
+	// ожиданием сервера), и Status ждал его — страница папок висела пустой.
+	smu    sync.Mutex
 	status Status
 }
 
@@ -112,8 +115,8 @@ func (r *Replica) event(kind, text string) {
 
 // Status — состояние после последней сверки.
 func (r *Replica) Status() Status {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.smu.Lock()
+	defer r.smu.Unlock()
 	s := r.status
 	if s.State == "" {
 		s.State = "pending"
@@ -122,6 +125,12 @@ func (r *Replica) Status() Status {
 		s.Conflicts = []Conflict{}
 	}
 	return s
+}
+
+func (r *Replica) setStatus(s Status) {
+	r.smu.Lock()
+	r.status = s
+	r.smu.Unlock()
 }
 
 func (r *Replica) load() {
@@ -156,8 +165,9 @@ func (r *Replica) Sync(ctx context.Context, wait time.Duration, full bool) (bool
 	}
 	r.load()
 	if st, err := os.Stat(r.Path); err != nil || !st.IsDir() {
-		r.status = Status{State: "error", Error: "папки " + r.Path + " нет", LastOK: r.st.LastOK}
-		return false, errors.New(r.status.Error)
+		st := Status{State: "error", Error: "папки " + r.Path + " нет", LastOK: r.st.LastOK}
+		r.setStatus(st)
+		return false, errors.New(st.Error)
 	}
 	r.recover()
 
@@ -195,7 +205,7 @@ func (r *Replica) Sync(ctx context.Context, wait time.Duration, full bool) (bool
 
 	disk, serr := scanDir(r.Path, ig)
 	if serr != nil {
-		r.status = Status{State: "error", Error: serr.Error(), LastOK: r.st.LastOK, Conflicts: r.st.Conflicts}
+		r.setStatus(Status{State: "error", Error: serr.Error(), LastOK: r.st.LastOK, Conflicts: r.st.Conflicts})
 		return false, serr
 	}
 	local := map[string]string{}
@@ -223,8 +233,8 @@ func (r *Replica) Sync(ctx context.Context, wait time.Duration, full bool) (bool
 			}
 		}
 		_ = r.save()
-		r.status = Status{State: "offline", Pending: n, Error: err.Error(), LastOK: r.st.LastOK,
-			Conflicts: r.st.Conflicts, Files: len(local)}
+		r.setStatus(Status{State: "offline", Pending: n, Error: err.Error(), LastOK: r.st.LastOK,
+			Conflicts: r.st.Conflicts, Files: len(local)})
 		return false, err
 	}
 
@@ -286,7 +296,7 @@ func (r *Replica) Sync(ctx context.Context, wait time.Duration, full bool) (bool
 	case pending > 0:
 		st.State = "pending"
 	}
-	r.status = st
+	r.setStatus(st)
 	return did, firstErr
 }
 
