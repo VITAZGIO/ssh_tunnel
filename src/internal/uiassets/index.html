@@ -511,8 +511,15 @@
   body.android #quickBtn .mi{width:30px;height:30px}
   /* Рамка у стрелки — только пока панель открыта. На телефоне :hover и
      :focus «залипают» после касания, и рамка висела до тапа в другом месте. */
-  #quickBtn:hover:not(.open),#quickBtn:focus:not(.open){background:transparent;border-color:transparent;outline:none}
-  #quickBtn.open{background:var(--card2);border-color:var(--line)}
+  #quickBtn:hover:not(.open),#quickBtn:focus:not(.open){background:transparent;border-color:transparent;outline:none;color:var(--dim)}
+  #quickBtn.open{background:var(--card2);border-color:var(--line);color:var(--text)}
+  /* Сенсорный экран: «наведение» после касания залипает, и значок оставался
+     подсвеченным (белым), пока не тапнешь в другое место. Там подсветки
+     по наведению нет вовсе — только своё состояние кнопки (.open/.on). */
+  @media (hover: none){
+    .ico:hover:not(.open):not(.on){background:transparent;color:var(--dim)}
+    .ico{-webkit-tap-highlight-color:transparent}
+  }
   #quickPanel{position:absolute;top:60px;right:10px;z-index:6;background:var(--card2);
               border:1px solid var(--line);border-radius:12px;padding:6px;min-width:170px;
               box-shadow:0 8px 24px rgba(0,0,0,.35);animation:quickIn .16s ease-out}
