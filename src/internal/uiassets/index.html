@@ -106,6 +106,12 @@
   #meshBtn.on{border-color:var(--ok);color:var(--ok)}
   #meshBtn.on .dot{background:var(--ok);box-shadow:0 0 6px var(--ok)}
   #meshBtn:disabled{opacity:.55;cursor:default}
+  /* Своё состояние у «Сети устройств», как у большой кнопки: подключаюсь —
+     жёлтая и «дышит», ошибка — красная. Зелёная — только когда правда работает. */
+  #meshBtn.busy{border-color:var(--warn);color:var(--warn)}
+  #meshBtn.busy .dot{background:var(--warn);animation:breathe 1.5s infinite}
+  #meshBtn.bad{border-color:var(--err);color:var(--err)}
+  #meshBtn.bad .dot{background:var(--err)}
 
   /* Главный экран — две «страницы» одна под другой, каждая ровно в высоту
      окна: первая — кнопка и сведения, вторая — список устройств. Колесом,
@@ -1902,6 +1908,7 @@ const I18N = {
     log:'Журнал', settings:'Настройки', back:'Назад', back_to_settings:'Назад в настройки',
     connect:'Подключить', disconnect:'Отключить', cancel:'Отмена',
     mesh_btn_on:'Сеть устройств: вкл', mesh_btn_off:'Сеть устройств: выкл',
+    mesh_btn_wait:'Сеть устройств: подключаюсь…', mesh_btn_err:'Сеть устройств: ошибка',
     mesh_btn_hint:'Виртуальная сеть между твоими устройствами (имена .mesh, RDP). Включается и выключается отдельно от обхода блокировок — большая кнопка её не трогает.',
     state_mesh_only:'Только сеть устройств',
     state_stopped:'Отключено', state_connecting:'Подключаюсь…', state_connected:'Защищено',
@@ -2234,6 +2241,7 @@ const I18N = {
     log:'Log', settings:'Settings', back:'Back', back_to_settings:'Back to settings',
     connect:'Connect', disconnect:'Disconnect', cancel:'Cancel',
     mesh_btn_on:'Device network: on', mesh_btn_off:'Device network: off',
+    mesh_btn_wait:'Device network: connecting…', mesh_btn_err:'Device network: error',
     mesh_btn_hint:'Virtual network between your devices (.mesh names, RDP). Turned on and off separately from unblocking — the big button leaves it alone.',
     state_mesh_only:'Device network only',
     state_stopped:'Disconnected', state_connecting:'Connecting…', state_connected:'Protected',
@@ -3102,6 +3110,15 @@ const STATES = {
 let lastState = 'stopped';
 function setState(s, detail){
   lastState = s;
+  // Есть состояние ядра — кнопки рисует только оно (renderCore): иначе
+  // «подключаюсь» связи красило большую кнопку в жёлтый, даже когда
+  // включали одну сеть устройств.
+  if(core){
+    if(detail !== undefined && core.link === 'connected') $('stateDetail').textContent = detail || '';
+    if(s !== 'connected') showPing(0);
+    renderCore(core);
+    return;
+  }
   const [textKey, capKey, cls] = STATES[s] || ['state_stopped', 'connect', ''];
   const text = tr(textKey), cap = tr(capKey);
   $('stateText').textContent = text;
@@ -3126,12 +3143,17 @@ function renderCore(st){
   if(core && st.seq && core.seq && st.seq < core.seq) return;
   core = st;
   netModes = {bypass: st.tunnel.phase === 'on', mesh: st.mesh.phase === 'on', meshConfigured: st.meshAvailable};
-  const t = st.tunnel.phase, reconnecting = st.link === 'reconnecting';
+  // Связь с сервером рвётся или ещё не поднялась — «включено» по ядру ещё
+  // не значит «работает»: обе кнопки показываем «подключаюсь».
+  const linkDown = st.link === 'reconnecting' || st.link === 'connecting';
+  const live = ph => ph === 'on' && linkDown ? 'connecting' : ph;
+  const t = live(st.tunnel.phase), reconnecting = st.link === 'reconnecting', mp = live(st.mesh.phase);
   const look = {off:['connect',''], connecting:['cancel','busy'], on:['disconnect','on'], error:['connect','bad']}[t] || ['connect',''];
-  $('powerCap').textContent = tr(look[0]);
-  $('power').className = (t === 'on' && reconnecting) ? 'busy' : look[1];
+  // Связь переподключается, а туннель включён — кнопка по-прежнему «Отключить».
+  $('powerCap').textContent = tr(t === 'connecting' && st.tunnel.phase === 'on' ? 'disconnect' : look[0]);
+  $('power').className = look[1];
   let key = {off:'state_stopped', connecting:'state_connecting', on:'state_connected', error:'state_error'}[t] || 'state_stopped';
-  if(t === 'on' && reconnecting) key = 'state_reconnecting';
+  if(t === 'connecting' && reconnecting) key = 'state_reconnecting';
   else if(t !== 'on' && t !== 'connecting' && st.mode === 'mesh') key = 'state_mesh_only';
   $('stateText').textContent = tr(key);
   $('stateDetail').textContent = st.link === 'connected' ? (st.detail || '') : '';
@@ -3139,9 +3161,11 @@ function renderCore(st){
   $('speedtest').disabled = !running || speedRunning;
   const b = $('meshBtn');
   b.hidden = !st.meshAvailable;
-  b.classList.toggle('on', st.mesh.phase === 'on');
-  b.classList.toggle('busy', st.mesh.phase === 'connecting');
-  $('meshBtnCap').textContent = tr(st.mesh.want ? 'mesh_btn_on' : 'mesh_btn_off');
+  b.classList.toggle('on', mp === 'on');
+  b.classList.toggle('busy', mp === 'connecting');
+  b.classList.toggle('bad', mp === 'error');
+  $('meshBtnCap').textContent = tr({on: 'mesh_btn_on', connecting: 'mesh_btn_wait', error: 'mesh_btn_err'}[mp] || 'mesh_btn_off');
+  b.title = tr('mesh_btn_hint');
   const failed = t === 'error' ? st.tunnel : st.mesh.phase === 'error' ? st.mesh : null;
   showError(failed ? connErrorText(failed.errorKind, failed.error) : '');
   $('meddleOffer').hidden = t !== 'error';
@@ -3158,6 +3182,7 @@ async function wantCore(body){
    internal/app/modes.go). Туннель живёт, пока включена хотя бы одна. */
 let netModes = {bypass:false, mesh:false, meshConfigured:false};
 function renderNetModes(){
+  if(core) return; // кнопки рисует renderCore по состоянию ядра
   const b = $('meshBtn');
   b.hidden = !netModes.meshConfigured;
   b.classList.toggle('on', !!netModes.mesh);
