@@ -495,17 +495,18 @@
   #viewAddons{padding:0;overflow:hidden}
   #viewAddons.on{display:flex}
   #addonsFrame{flex:1;border:0;width:100%;height:100%;background:transparent}
-  /* Стрелка — справа сверху, прямо под кнопкой настроек. */
-  #quickBtn{position:absolute;top:46px;right:14px;z-index:4}
-  #quickBtn .mi{width:18px;height:18px}
+  /* Стрелка вниз — в шапке, слева от журнала; панель выезжает сверху вниз
+     под шапкой и кнопок шапки не закрывает. */
+  #quickBtn .mi{width:20px;height:20px}
+  body.android #quickBtn .mi{width:30px;height:30px}
   /* Рамка у стрелки — только пока панель открыта. На телефоне :hover и
      :focus «залипают» после касания, и рамка висела до тапа в другом месте. */
   #quickBtn:hover:not(.open),#quickBtn:focus:not(.open){background:transparent;border-color:transparent;outline:none}
   #quickBtn.open{background:var(--card2);border-color:var(--line)}
-  #quickPanel{position:absolute;top:84px;right:10px;z-index:6;background:var(--card2);
+  #quickPanel{position:absolute;top:60px;right:10px;z-index:6;background:var(--card2);
               border:1px solid var(--line);border-radius:12px;padding:6px;min-width:170px;
               box-shadow:0 8px 24px rgba(0,0,0,.35);animation:quickIn .16s ease-out}
-  @keyframes quickIn{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}
+  @keyframes quickIn{from{transform:translateY(-12px);opacity:0}to{transform:none;opacity:1}}
   #quickPanel button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;
                      border:0;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--text);font:inherit}
   #quickPanel button:hover{background:var(--card)}
@@ -5209,19 +5210,16 @@ async function loadAddons(){
 // Быстрый доступ: пусто в избранном — стрелки и панели нет в странице вовсе
 // (раньше кнопка была в разметке с hidden, а display:grid у .ico его
 // перебивал — стрелка торчала всегда). Иначе создаём их и заполняем.
-// placeQuick — стрелка под шестерёнкой с зазором, а не на глаз: на телефоне
-// значки шапки крупнее (48 px), и при top:46px рамка нажатой стрелки
-// наезжала на шестерёнку. Зазор 8 px — рамка ровно посередине между ними.
+// placeQuick — панель под шапкой (высота шапки на телефоне больше), правым
+// краем по шестерёнке: выезжает вниз и кнопок шапки не закрывает.
 function placeQuick(){
-  const btn = $('quickBtn'), p = $('quickPanel'), g = $('btnSettings');
-  if(!btn || !g) return;
-  const host = btn.offsetParent ? btn.offsetParent.getBoundingClientRect() : {top: 0, right: innerWidth};
-  const gr = g.getBoundingClientRect();
-  if(!gr.height) return;
-  btn.style.top = (gr.bottom - host.top + 8) + 'px';
-  btn.style.right = (host.right - gr.right) + 'px';
-  btn.style.width = btn.style.height = gr.width + 'px';
-  p.style.top = (gr.bottom - host.top + 8 + gr.height + 6) + 'px';
+  const p = $('quickPanel'), g = $('btnSettings');
+  if(!p || !g) return;
+  const host = p.offsetParent ? p.offsetParent.getBoundingClientRect() : {top: 0, right: innerWidth};
+  const hr = g.parentNode.getBoundingClientRect(), gr = g.getBoundingClientRect();
+  if(!hr.height) return;
+  p.style.top = (hr.bottom - host.top + 6) + 'px';
+  p.style.right = (host.right - gr.right) + 'px';
 }
 // setQuick — открыть/закрыть панель; рамка стрелки — вместе с ней.
 function setQuick(open){
@@ -5242,12 +5240,13 @@ function renderQuick(list){
     btn.className = 'ico';
     btn.id = 'quickBtn';
     btn.title = tr('quick_title');
-    btn.innerHTML = '<span class="mi" style="--i:url(icons/keyboard_double_arrow_left.svg)"></span>';
+    btn.innerHTML = '<span class="mi" style="--i:url(icons/keyboard_double_arrow_down.svg)"></span>';
     btn.onclick = ev => { ev.stopPropagation(); setQuick($('quickPanel').hidden); btn.blur(); };
     p = document.createElement('div');
     p.id = 'quickPanel';
     p.hidden = true;
-    $('btnSettings').parentNode.after(btn, p); // там, где была в разметке
+    $('btnLog').before(btn); // в шапке, слева от журнала
+    $('btnSettings').parentNode.after(p);
     addEventListener('resize', placeQuick);
   }
   placeQuick();
