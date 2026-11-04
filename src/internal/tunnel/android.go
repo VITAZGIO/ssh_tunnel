@@ -50,7 +50,7 @@ func (t *Tunnel) ServeConn(conn net.Conn, target string, byIP bool) {
 	var sniffed string
 	if byIP && t.sniffWanted(target) {
 		var head []byte
-		sniffed, head = sniffConn(conn)
+		sniffed, head = sniffConn(conn, sniffTime(target))
 		src = io.MultiReader(bytes.NewReader(head), conn)
 	}
 	route, c := t.decideNamed(proc, target, sniffed)
