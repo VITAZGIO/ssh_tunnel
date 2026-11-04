@@ -681,12 +681,8 @@
     </button>
   </div>
 
-  <!-- Быстрый доступ: стрелка под настройками, если у приложений есть
-       звёздочки; выезжает панель с отмеченными. -->
-  <button class="ico" id="quickBtn" hidden title="Быстрый доступ" data-i18n-title="quick_title">
-    <span class="mi" style="--i:url(icons/keyboard_double_arrow_left.svg)"></span>
-  </button>
-  <div id="quickPanel" hidden></div>
+  <!-- Быстрый доступ (стрелка под настройками и панель) в разметке нет:
+       его создаёт renderQuick, только когда в избранном что-то есть. -->
 
   <!-- Вход по паролю (Linux, панель по локальной сети): пока не вошёл —
        только это окно. -->
@@ -1770,6 +1766,14 @@ const T = new URLSearchParams(location.search).get('t') || '';
 // через мост SSHTunnelAndroid (MainActivity), данные — через то же API.
 const ANDROID = !!window.SSHTunnelAndroid;
 if(ANDROID) document.body.classList.add('android');
+// Ответ телефона на «Обзор» (выбор папки) приходит сюда, в главную страницу,
+// а ждёт его плагин во фрейме «Плагинов» — передаём вниз (apps.html своим
+// pages.js передаст дальше). Без этого выбранная папка терялась.
+if(ANDROID) window.sshtunnelPicked = (id, path) => {
+  for(const f of document.querySelectorAll('iframe')){
+    try { if(f.contentWindow.sshtunnelPicked) f.contentWindow.sshtunnelPicked(id, path); } catch(e) {}
+  }
+};
 const $ = id => document.getElementById(id);
 /* raw=true — тело уходит как есть, без JSON.stringify: так отправляется
    вставленный человеком текст выгрузки настроек, который сервер разбирает
@@ -5180,7 +5184,7 @@ function showAddons(open){
 }
 const addonName = m => (m.name && (m.name[LANG] || m.name.ru)) || m.id;
 async function openQuick(id){
-  $('quickPanel').hidden = true;
+  closeQuick();
   const m = addonsState.catalog.find(x => x.id === id);
   const e = addonsState.added.find(x => x.id === id);
   const win = e && e.win != null ? e.win : !!(m && m.window);
@@ -5192,14 +5196,37 @@ async function loadAddons(){
   const r = await api('/api/addons?lang=' + LANG).catch(() => null);
   if(!r || !r.added) return;
   addonsState = r;
-  const starred = r.added.filter(e => e.star && e.active);
-  $('quickBtn').hidden = !starred.length;
-  if(!starred.length) $('quickPanel').hidden = true;
-  const p = $('quickPanel');
+  // Избранное — включённые со звёздочкой, которые есть в каталоге этой
+  // сборки (звёздочка у плагина, которого тут нет, — не повод для стрелки).
+  const starred = r.added.filter(e => e.star && e.active)
+    .map(e => r.catalog.find(x => x.id === e.id)).filter(Boolean);
+  renderQuick(starred);
+}
+// Быстрый доступ: пусто в избранном — стрелки и панели нет в странице вовсе
+// (раньше кнопка была в разметке с hidden, а display:grid у .ico его
+// перебивал — стрелка торчала всегда). Иначе создаём их и заполняем.
+function closeQuick(){ const p = $('quickPanel'); if(p) p.hidden = true; }
+function renderQuick(list){
+  let btn = $('quickBtn'), p = $('quickPanel');
+  if(!list.length){
+    if(btn) btn.remove();
+    if(p) p.remove();
+    return;
+  }
+  if(!btn){
+    btn = document.createElement('button');
+    btn.className = 'ico';
+    btn.id = 'quickBtn';
+    btn.title = tr('quick_title');
+    btn.innerHTML = '<span class="mi" style="--i:url(icons/keyboard_double_arrow_left.svg)"></span>';
+    btn.onclick = ev => { ev.stopPropagation(); $('quickPanel').hidden = !$('quickPanel').hidden; };
+    p = document.createElement('div');
+    p.id = 'quickPanel';
+    p.hidden = true;
+    $('btnSettings').parentNode.after(btn, p); // там, где была в разметке
+  }
   p.innerHTML = '';
-  for(const e of starred){
-    const m = r.catalog.find(x => x.id === e.id);
-    if(!m) continue;
+  for(const m of list){
     const b = document.createElement('button');
     const ic = document.createElement('span');
     ic.className = 'mi';
@@ -5211,9 +5238,9 @@ async function loadAddons(){
     p.appendChild(b);
   }
 }
-$('quickBtn').onclick = ev => { ev.stopPropagation(); $('quickPanel').hidden = !$('quickPanel').hidden; };
 document.addEventListener('click', ev => {
-  if(!$('quickPanel').hidden && !$('quickPanel').contains(ev.target)) $('quickPanel').hidden = true;
+  const p = $('quickPanel');
+  if(p && !p.hidden && !p.contains(ev.target)) p.hidden = true;
 });
 $('toAddons').onclick = () => showAddons();
 // Не подключилось — «Кто трогает трафик» (добавляется по этому нажатию).
@@ -5366,7 +5393,7 @@ if(ANDROID){
       }
     }
     if(menuEl){ closeMenu(); return true; }
-    if(!$('quickPanel').hidden){ $('quickPanel').hidden = true; return true; }
+    if($('quickPanel') && !$('quickPanel').hidden){ closeQuick(); return true; }
     if(current === 'viewAddons'){ show(addonsReturnView); loadAddons(); return true; }
     if(current !== 'viewMain'){
       const back = $(current).querySelector('.head .ico');

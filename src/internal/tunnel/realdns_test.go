@@ -84,7 +84,7 @@ func TestSniffConnKeepsBytes(t *testing.T) {
 		c.Handshake()
 		got <- sent
 	}()
-	host, head := sniffConn(us)
+	host, head := sniffConn(us, sniffWait)
 	if host != "blocked.example" {
 		t.Fatalf("имя %q", host)
 	}
@@ -99,7 +99,7 @@ func TestSniffConnKeepsBytes(t *testing.T) {
 	defer a2.Close()
 	defer b2.Close()
 	start := time.Now()
-	if host, head := sniffConn(b2); host != "" || len(head) != 0 || time.Since(start) > 2*sniffWait {
+	if host, head := sniffConn(b2, sniffWait); host != "" || len(head) != 0 || time.Since(start) > 2*sniffWait {
 		t.Errorf("молчащее соединение: %q, %d байт, %v", host, len(head), time.Since(start))
 	}
 }

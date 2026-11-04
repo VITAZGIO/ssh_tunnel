@@ -111,6 +111,7 @@ function msg(t, cls){
 // телефоне — выбор папки Android. null — отмена или не умеем (тогда пишут путь).
 let pickSeq = 0;
 const pickWait = {};
+const drafts = {}; // «peer|папка» → {path, mode} в карточке «Найден сервер»
 window.sshtunnelPicked = (id, path) => { const f = pickWait[id]; delete pickWait[id]; if(f) f(path || null); };
 async function pickFolder(){
   if(ANDROID){
@@ -129,7 +130,7 @@ function bindPick(root){
     b.onclick = async () => {
       const inp = b.dataset.pick === '.' ? b.parentNode.querySelector('input') : $(b.dataset.pick);
       const p = await pickFolder();
-      if(p) inp.value = p;
+      if(p){ inp.value = p; inp.dispatchEvent(new Event('input')); }
     };
   });
 }
@@ -186,9 +187,14 @@ function draw(r){
   const n = allConflicts().length;
   $('tabConf').innerHTML = esc(L('Конфликты', 'Conflicts')) + (n ? `<span class="badge">${n}</span>` : '');
 
-  // Найденные серверы: «Найден сервер, подключиться?»
-  const fb = $('found'); fb.innerHTML = '';
-  for(const f of r.found){
+  // Найденные серверы: «Найден сервер, подключиться?» Список перерисовывается
+  // каждые 5 с — вписанный или выбранный путь и режим держим в drafts, иначе
+  // их затирало значением по умолчанию.
+  // Пока человек печатает в строке пути — не трогаем её (клавиатура не прячется).
+  const fb = $('found');
+  const typing = fb.contains(document.activeElement);
+  if(!typing) fb.innerHTML = '';
+  for(const f of typing ? [] : r.found){
     const free = f.folders.filter(x => !f.joined[x.id]);
     if(!free.length) continue;
     const c = document.createElement('div');
@@ -200,12 +206,19 @@ function draw(r){
       row.className = 'bar';
       row.style.marginTop = '8px';
       const def = (r.suggest ? r.suggest + (r.platform === 'windows' ? '\\' : '/') : '') + x.name;
+      const key = f.peer + '|' + x.id;
+      const d = drafts[key] || (drafts[key] = {path: def, mode: Object.keys(MODES)[0]});
       row.innerHTML = `<b style="min-width:110px">${esc(x.name)}</b>
-        <span class="pathRow"><input class="jp" value="${esc(def)}"><button class="btn" type="button" data-pick="."></button></span>
-        <select class="jm">${Object.entries(MODES).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select>
+        <span class="pathRow"><input class="jp" value="${esc(d.path)}"><button class="btn" type="button" data-pick="."></button></span>
+        <select class="jm">${Object.entries(MODES).map(([k, v]) => `<option value="${k}"${k === d.mode ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>
         <button class="btn primary">${icon('sync')}${esc(L('Подключить', 'Connect'))}</button>`;
-      row.querySelector('button').onclick = () => post({op: 'join', peer: f.peer, host: f.host, folder: x.id, name: x.name,
-        path: row.querySelector('.jp').value.trim(), mode: row.querySelector('.jm').value});
+      row.querySelector('.jp').oninput = ev => { d.path = ev.target.value; };
+      row.querySelector('.jm').onchange = ev => { d.mode = ev.target.value; };
+      // Кнопка «Подключить» — .primary: первая кнопка в строке — «Обзор».
+      row.querySelector('button.primary').onclick = async () => {
+        if(await post({op: 'join', peer: f.peer, host: f.host, folder: x.id, name: x.name, path: d.path.trim(), mode: d.mode}))
+          delete drafts[key];
+      };
       c.appendChild(row);
     }
     bindPick(c);

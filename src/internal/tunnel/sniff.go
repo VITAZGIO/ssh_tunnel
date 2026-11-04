@@ -16,6 +16,25 @@ import (
 // известных таких портов не ждём вовсе (serverFirst).
 const sniffWait = 300 * time.Millisecond
 
+// sniffWaitWeb — то же для HTTPS и HTTP, где первым всегда говорит клиент.
+// Браузер открывает соединения про запас (preconnect) и шлёт в них запрос
+// через секунды. Через 300 мс имени ещё нет, а с DoH в браузере нет его и
+// в таблице DNS, поэтому соединение уходило через сервер, и сайт из «Всегда
+// напрямую» видел чужую страну: Rutube «через раз» не отдавал лицензионное
+// видео. Ждать тут не страшно: приложение само молчит, пока не заговорит.
+const sniffWaitWeb = 10 * time.Second
+
+// clientFirst — порты, где первым всегда говорит клиент (HTTPS, HTTP).
+var clientFirst = map[string]bool{"443": true, "80": true, "8443": true, "8080": true}
+
+// sniffTime — сколько ждать имени для соединения на target.
+func sniffTime(target string) time.Duration {
+	if _, port, err := net.SplitHostPort(target); err == nil && clientFirst[port] {
+		return sniffWaitWeb
+	}
+	return sniffWait
+}
+
 // serverFirst — порты, где первым говорит сервер (FTP, SSH, почта, базы):
 // приложение будет ждать его, а мы — приложение, так что имя там не узнать.
 var serverFirst = map[string]bool{
@@ -35,10 +54,10 @@ func (t *Tunnel) sniffWanted(target string) bool {
 }
 
 // sniffConn читает начало соединения, пока в нём не найдётся имя (или не
-// станет ясно, что его нет), но не дольше sniffWait. head — прочитанное:
+// станет ясно, что его нет), но не дольше wait. head — прочитанное:
 // его надо отдать дальше раньше остального потока.
-func sniffConn(conn net.Conn) (host string, head []byte) {
-	deadline := time.Now().Add(sniffWait)
+func sniffConn(conn net.Conn, wait time.Duration) (host string, head []byte) {
+	deadline := time.Now().Add(wait)
 	conn.SetReadDeadline(deadline)
 	defer conn.SetReadDeadline(time.Time{})
 	buf := make([]byte, 4096)
