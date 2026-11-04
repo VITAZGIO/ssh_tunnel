@@ -39,7 +39,7 @@
   body.android .ico{width:48px;height:48px}
   body.android .ico svg{width:26px;height:26px}
 
-  .view{flex:1;overflow-y:auto;padding:0 16px 16px;display:none}
+  .view{flex:1;overflow-y:auto;padding:0 16px 16px;display:none;scrollbar-gutter:stable}
   .view.on{display:block}
   .view::-webkit-scrollbar{width:8px}
   .view::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
@@ -625,6 +625,11 @@
   .srvTools .tb{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 6px;
        border:1px solid var(--line);background:transparent;color:var(--text);font:inherit;font-size:12.5px;cursor:pointer}
   .srvTools .tb:hover{border-color:var(--accent)}
+  /* Подписи кнопок — в одну строку: когда раскрывали сервер и появлялась
+     полоса прокрутки, «QR-код» и «Экспорт всех» ломались на две строки.
+     Не влезают — кнопки целиком уходят на вторую строку. */
+  .srvTools{flex-wrap:wrap}
+  .srvTools .tb{flex:1 0 auto;white-space:nowrap}
   .srvTools svg,.srv .mi svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;
        stroke-linecap:round;stroke-linejoin:round;flex:none}
   .srvlist{border-top:1px solid var(--line)}
