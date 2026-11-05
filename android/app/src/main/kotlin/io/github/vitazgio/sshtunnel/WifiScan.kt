@@ -21,6 +21,11 @@ import org.json.JSONObject
 object WifiScan {
     private var lastScanAt = 0L
 
+    /** Сети за последние 3 минуты (BSSID → сеть и когда видели): один скан
+     * Android нередко отдаёт неполным (2 сети вместо 10) — копим и
+     * показываем всё, что видели недавно. */
+    private val seen = java.util.LinkedHashMap<String, Pair<JSONObject, Long>>()
+
     private fun wm(ctx: Context) = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
 
     fun hasPermission(ctx: Context) =
@@ -90,7 +95,17 @@ object WifiScan {
                 .put("sec", r.capabilities ?: "")
                 .put("ageMs", (android.os.SystemClock.elapsedRealtime() - r.timestamp / 1000).coerceAtLeast(0))
             if (Build.VERSION.SDK_INT >= 30) n.put("std", r.wifiStandard)
-            if (cur != null && cur == n.getString("bssid")) n.put("current", true)
+            val bssid = n.getString("bssid")
+            val at = System.currentTimeMillis() - n.optLong("ageMs")
+            val prev = seen[bssid]
+            if (prev == null || prev.second <= at) seen[bssid] = n to at
+        }
+        val now2 = System.currentTimeMillis()
+        seen.entries.removeAll { now2 - it.value.second > 180_000 }
+        for ((b, v) in seen) {
+            val n = JSONObject(v.first.toString())
+            n.put("ageMs", now2 - v.second)
+            if (cur != null && cur == b) n.put("current", true)
             list.put(n)
         }
         return o.put("networks", list).put("nextScanMs", (30_000 - (now - lastScanAt)).coerceAtLeast(0)).toString()

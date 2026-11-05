@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -169,6 +170,11 @@ func (m *module) Start() error {
 	m.ln = &chanListener{ch: make(chan net.Conn), done: make(chan struct{})}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ev", receive)
+	// /hello — «я здесь, плагин есть, я телефон/компьютер»: по нему страница
+	// показывает только свои устройства с этим плагином, без выбора.
+	mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]string{"role": role()})
+	})
 	m.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second,
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 			if cc, ok := c.(callerConn); ok {
@@ -203,6 +209,31 @@ func (m *module) Stop() {
 	mu.Lock()
 	running = false
 	mu.Unlock()
+}
+
+// role — телефон или компьютер (что показывать на карточке).
+func role() string {
+	if runtime.GOOS == "android" {
+		return "phone"
+	}
+	return "computer"
+}
+
+// hello — у устройства есть этот плагин? Его роль, "" — нет.
+func hello(ip string) string {
+	c := &http.Client{Timeout: 3 * time.Second, Transport: peerClient.Transport}
+	resp, err := c.Get("http://" + net.JoinHostPort(ip, "47839") + "/hello")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	var v struct {
+		Role string `json:"role"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 512)).Decode(&v) != nil {
+		return ""
+	}
+	return v.Role
 }
 
 func peerName(ip, fallback string) string {
@@ -337,29 +368,46 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 			IP      string   `json:"ip"`
 			Name    string   `json:"name"`
 			Online  bool     `json:"online"`
+			Role    string   `json:"role"`
 			Battery *battery `json:"battery,omitempty"`
 		}
-		mu.Lock()
-		loadSettings()
+		// Только свои устройства, где тоже есть этот плагин (спрашиваем
+		// /hello разом): выбирать, к кому подключаться, не нужно.
 		var ps []peer
+		var pmu sync.Mutex
+		var wg sync.WaitGroup
 		for _, p := range st.Peers {
-			if p.Self || !p.IP.IsValid() {
+			if p.Self || !p.IP.IsValid() || !p.Online {
 				continue
 			}
 			pp := peer{IP: p.IP.String(), Name: p.Name, Online: p.Online}
 			if pp.Name == "" {
 				pp.Name = p.Host
 			}
-			if b, ok := bats[pp.IP]; ok {
+			wg.Add(1)
+			go func(pp peer) {
+				defer wg.Done()
+				if pp.Role = hello(pp.IP); pp.Role == "" {
+					return
+				}
+				pmu.Lock()
+				ps = append(ps, pp)
+				pmu.Unlock()
+			}(pp)
+		}
+		wg.Wait()
+		mu.Lock()
+		loadSettings()
+		for i := range ps {
+			if b, ok := bats[ps[i].IP]; ok {
 				b := b
-				pp.Battery = &b
+				ps[i].Battery = &b
 			}
-			ps = append(ps, pp)
 		}
 		sort.Slice(ps, func(i, j int) bool {
 			return ps[i].Online && !ps[j].Online || ps[i].Online == ps[j].Online && ps[i].Name < ps[j].Name
 		})
-		out := map[string]any{"devnet": st.State, "peers": ps, "notifs": append([]Ev{}, notifs...), "settings": settings}
+		out := map[string]any{"devnet": st.State, "peers": ps, "role": role(), "notifs": append([]Ev{}, notifs...), "settings": settings}
 		mu.Unlock()
 		writeJSON(w, out)
 		return

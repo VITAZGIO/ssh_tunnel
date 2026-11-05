@@ -64,9 +64,10 @@
 <div id="dlg" hidden><div class="card">
   <b id="dT"></b>
   <div class="f">
+    <label class="full"><span id="lPick"></span><select id="fPick"></select></label>
     <label class="full"><span id="lName"></span><input id="fName"></label>
     <label class="full"><span id="lSrc"></span><select id="fSrc"></select></label>
-    <label data-for="ssh"><span id="lHost"></span><input id="fHost" spellcheck="false"></label>
+    <label data-for="ssh none"><span id="lHost"></span><input id="fHost" spellcheck="false"></label>
     <label data-for="ssh"><span id="lUser"></span><input id="fUser" spellcheck="false" autocomplete="off"></label>
     <label class="full" data-for="ssh"><span id="lPass"></span><input id="fPass" type="password" autocomplete="new-password"></label>
     <label class="full" data-for="netdata ha"><span id="lUrl"></span><input id="fUrl" spellcheck="false"></label>
@@ -88,7 +89,8 @@
 /* Машины: показания своих серверов и ПК + по желанию включить/выключить.
    Всё читает и хранит ядро (/api/machines); здесь — карточки и форма. */
 let ST = null, EDIT = null;
-const SRC = {ssh: 'SSH', netdata: 'netdata', ha: 'Home Assistant', self: L('это устройство', 'this device'), '': L('без показаний', 'no readings')};
+const SRC = {'': L('только «в сети или нет» (пинг)', 'only online or not (ping)'), ssh: 'SSH', netdata: 'netdata', ha: 'Home Assistant', self: L('это устройство', 'this device')};
+const SRCSHORT = {'': L('пинг', 'ping'), ssh: 'SSH', netdata: 'netdata', ha: 'HA', self: L('это устройство', 'this device')};
 const gb = b => b >= 1e12 ? (b / 1e12).toFixed(1) + L(' ТБ', ' TB') : (b / 1e9).toFixed(b >= 1e10 ? 0 : 1) + L(' ГБ', ' GB');
 const up = s => { const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600); return d ? `${d} ${L('д', 'd')} ${h} ${L('ч', 'h')}` : `${h} ${L('ч', 'h')} ${Math.floor(s % 3600 / 60)} ${L('мин', 'min')}`; };
 const lvl = p => p >= 90 ? 'e' : p >= 70 ? 'w' : '';
@@ -100,10 +102,10 @@ function spark(h){
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg>`;
 }
 function card(m, own){
-  const r = m.reading, alive = r && !r.error && r.time;
+  const r = m.reading, alive = r && r.online;
   const peerUp = own && m.peer && ST.online[m.peer];
-  let body = '';
-  if(!m.src) body = `<div class="hint">${esc(L('Показания не настроены.', 'No readings set up.'))}</div>`;
+  let body = r ? `<div class="hint ${alive ? 'ok' : ''}">${alive ? '● ' + esc(L('в сети', 'online')) + (r.ping ? ` · ${r.ping < 10 ? r.ping.toFixed(1) : r.ping.toFixed(0)} ${L('мс', 'ms')}` : '') : '○ ' + esc(L('не отвечает — выключена или не в сети', 'not answering — off or offline'))}</div>` : '';
+  if(!m.src){}
   else if(!r) body = `<div class="hint">${esc(L('Читаю…', 'Reading…'))}</div>`;
   else if(r.error) body = `<div class="err">${esc(r.error)}</div>`;
   else {
@@ -122,7 +124,7 @@ function card(m, own){
   if(m.mac) acts.push(`<button class="btn" data-wake="${esc(m.id)}" data-mac="${esc(m.mac)}">⏻ ${esc(L('Включить', 'Wake'))}</button>`);
   if(own && m.peer) acts.push(`<button class="btn" data-off="${esc(m.id)}">${esc(L('Выключить', 'Shut down'))}</button>`);
   if(own) acts.push(`<button class="ico" data-ed="${esc(m.id)}" title="${esc(L('Изменить', 'Edit'))}">${icon('edit')}</button>`);
-  return `<div class="card m"><div class="top"><span class="dot ${alive || peerUp ? 'ok' : r && r.error ? 'err' : ''}"></span><b>${esc(m.name)}</b><span class="src">${esc(SRC[m.src || ''])}</span></div>
+  return `<div class="card m"><div class="top"><span class="dot ${alive || peerUp ? 'ok' : r && r.error ? 'err' : ''}"></span><b>${esc(m.name)}</b><span class="src">${esc(SRCSHORT[m.src || ''])}</span></div>
     ${body}${acts.length ? `<div class="acts">${acts.join('')}</div>` : ''}<div class="hint" data-st="${esc(m.id)}"></div></div>`;
 }
 function bindCards(root){
@@ -158,7 +160,7 @@ const saveSet = () => api('/api/machines', {op: 'settings', settings: {share: $(
 $('share').onchange = saveSet; $('allowOff').onchange = saveSet;
 
 function showFields(){
-  const s = $('fSrc').value;
+  const s = $('fSrc').value || 'none';
   document.querySelectorAll('#dlg [data-for]').forEach(el => el.hidden = !el.dataset.for.split(' ').includes(s));
   $('fUrl').placeholder = s === 'ha' ? 'http://192.168.1.195:8123' : 'http://192.168.1.201:19999';
 }
@@ -173,6 +175,7 @@ function edit(id){
   $('fSens').value = (m.sensors || []).join('\n'); $('fMac').value = m.mac || '';
   $('fPeer').innerHTML = `<option value="">${esc(L('— не выключать', '— no shutdown'))}</option>` + ST.peers.map(p => `<option value="${esc(p.ip)}"${p.ip === m.peer ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
   $('pw').open = !!(m.mac || m.peer);
+  $('fPick').innerHTML = `<option value="">${esc(L('вручную', 'manually'))}</option>` + ST.peers.map(p => `<option value="${esc(p.ip)}" data-n="${esc(p.name)}">${esc(p.name + (p.online ? '' : L(' (не в сети)', ' (offline)')))}</option>`).join('');
   $('dDel').hidden = !id; $('dNote').textContent = '';
   showFields(); $('dlg').hidden = false;
 }
@@ -200,6 +203,10 @@ $('lShare').textContent = L('Показывать мои машины всем �
 $('tipShare').textContent = L('Настрой машины один раз на домашнем сервере, поставь эту галку — и с телефона (даже на работе) в разделе «Из сети» видно всё. Пароли и токены не уходят — только показания.', 'Set up once on a home server and tick this — your phone sees everything under «From the network». Only readings are shared.');
 $('lOff').textContent = L('Разрешить своим устройствам выключать это', 'Let my devices shut this one down');
 $('tipOff').textContent = L('Чтобы выключать машину кнопкой: на ней тоже стоит ssh_tunnel с этим плагином и эта галка; в карточке машины — «Изменить» → «Включение и выключение» → «Выключать как» → её имя в сети устройств.', 'To shut a machine down: it runs ssh_tunnel with this plugin and this box ticked; then pick it in «Shut down as».');
+$('lPick').textContent = L('Из сети устройств', 'From the device network');
+// Выбрал своё устройство — адрес, имя и «выключать как» подставятся.
+$('fPick').onchange = () => { const o = $('fPick').selectedOptions[0]; if(!o || !o.value) return;
+  $('fHost').value = o.value; if(!$('fName').value) $('fName').value = o.dataset.n; $('fPeer').value = o.value; };
 $('lName').textContent = L('Имя', 'Name'); $('fName').placeholder = L('например «Ubuntu»', 'e.g. «Ubuntu»');
 $('lSrc').textContent = L('Как читать показания', 'How to read');
 $('fSrc').innerHTML = Object.entries(SRC).map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('');

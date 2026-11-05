@@ -21,6 +21,8 @@
     .app{max-width:560px;margin:0 auto;border-left:1px solid var(--line);border-right:1px solid var(--line)}
   }
   .bar{display:flex;align-items:flex-start;gap:8px;padding:12px 14px 6px;flex:none}
+  /* Плагин на весь экран (удалённый стол): без логотипа и шапки. */
+  body.immersive .bar{display:none}
   .bar .sp{flex:1}
 
   /* Логотип в левом верхнем углу, без подписи: название и так стоит в
@@ -39,7 +41,7 @@
   body.android .ico{width:48px;height:48px}
   body.android .ico svg{width:26px;height:26px}
 
-  .view{flex:1;overflow-y:auto;padding:0 16px 16px;display:none;scrollbar-gutter:stable}
+  .view{flex:1;overflow-y:auto;padding:0 16px 16px;display:none}
   .view.on{display:block}
   .view::-webkit-scrollbar{width:8px}
   .view::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
@@ -5352,11 +5354,13 @@ $('toBook').onclick = () => openWindow('book', tr('book_title') + ' — ssh_tunn
 window.addEventListener('message', ev => {
   if(ev.source !== $('addonsFrame').contentWindow || !ev.data) return;
   if(ev.data.sshtunnel === 'close'){
+    document.body.classList.remove('immersive');
     $('addonsFrame').src = 'about:blank';
     show(addonsReturnView);
     loadAddons();
   }
   if(ev.data.sshtunnel === 'changed') loadAddons();
+  if(ev.data.sshtunnel === 'immersive') document.body.classList.toggle('immersive', !!ev.data.on);
 });
 loadAddons();
 

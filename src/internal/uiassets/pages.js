@@ -94,6 +94,12 @@ function changed(){
   if(EMBED) window.parent.postMessage({sshtunnel: 'changed'}, '*');
 }
 
+// immersive — плагину нужен весь экран (сеанс удалённого стола): убрать
+// шапку программы и строку плагина; false — вернуть.
+function immersive(on){
+  if(EMBED) window.parent.postMessage({sshtunnel: 'immersive', on: !!on}, '*');
+}
+
 // openBook — Книга на нужной главе: на ПК отдельным окном, на телефоне тут же.
 function openBook(chapter){
   const url = pageURL('book.html', chapter ? {ch: chapter, solo: '1', key: 'book'} : {solo: '1', key: 'book'});

@@ -9,22 +9,19 @@
 <style>
   body{background:transparent}
   .wrap{display:flex;flex-direction:column;gap:10px;padding:12px 14px 16px}
-  .devs{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
-  .dev{flex:none;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:10px 14px;cursor:pointer;min-width:120px;text-align:left;color:var(--text);font:inherit}
-  .dev.on{border-color:var(--accent);background:var(--card2)}
-  .dev.off{opacity:.5}
-  .dev b{display:block}
-  .dev small{color:var(--dim)}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
-  .tile{display:flex;flex-direction:column;gap:8px}
-  .tile h3{margin:0;font-size:14px;display:flex;gap:8px;align-items:center}
-  .tile h3 .mi{width:18px;height:18px;color:var(--accent)}
-  .media{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-  .media button,.big{border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:10px;padding:10px 0;font-size:18px;cursor:pointer;-webkit-tap-highlight-color:transparent}
-  .media button:active,.big:active{background:var(--accent-muted)}
-  .big{font-size:15px;padding:12px}
-  #pad{height:200px;border:1px dashed var(--line);border-radius:12px;background:var(--card2);touch-action:none;display:grid;place-items:center;color:var(--dim);font-size:12.5px;user-select:none;-webkit-user-select:none}
-  .padbtns{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .dev{display:flex;flex-direction:column;gap:10px}
+  .dev .top{display:flex;align-items:center;gap:10px}
+  .dev .top .mi{width:28px;height:28px;color:var(--accent)}
+  .dev .top b{flex:1;font-size:16px}
+  .dev .top small{color:var(--dim)}
+  .row{display:flex;gap:6px;flex-wrap:wrap}
+  .row button,.media button{border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:10px;padding:9px 12px;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .row button:active,.media button:active{background:var(--accent-muted)}
+  .media{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+  .media button{padding:9px 0;font-size:17px}
+  .pad{height:190px;border:1px dashed var(--line);border-radius:12px;background:var(--card2);touch-action:none;display:grid;place-items:center;color:var(--dim);font-size:12.5px;user-select:none;-webkit-user-select:none}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .two button{border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:10px;padding:10px;font:inherit;cursor:pointer}
   .bar{display:flex;gap:8px;align-items:center}
   .bar input{flex:1;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--text);font:inherit;min-width:0}
   .n{padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
@@ -33,55 +30,102 @@
   .n b{display:block;margin-top:2px}
   .ok{color:var(--ok)}.err{color:var(--err)}
   .ck{display:flex;gap:10px;align-items:center;font-size:13.5px}
+  h3{margin:4px 0 0;font-size:14px}
+  .q{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--line);color:var(--dim);font-size:11px;cursor:pointer;background:var(--card2);flex:none}
+  .tip{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:12.5px;color:var(--dim);line-height:1.5}
+  .tip[hidden]{display:none}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="devs" id="devs"></div>
+  <div id="devs"></div>
   <div class="hint" id="msg"></div>
-  <div class="grid">
-    <div class="card tile"><h3 id="tFind"></h3><button class="big" id="ring"></button><div class="hint" id="hFind"></div></div>
-    <div class="card tile"><h3 id="tMedia"></h3>
-      <div class="media"><button data-k="prev">⏮</button><button data-k="playpause">⏯</button><button data-k="next">⏭</button>
-        <button data-k="voldown">🔉</button><button data-k="mute">🔇</button><button data-k="volup">🔊</button></div></div>
-  </div>
-  <div class="card tile" id="padCard"><h3 id="tPad"></h3>
-    <div id="pad"></div>
-    <div class="padbtns"><button class="big" id="lc"></button><button class="big" id="rc"></button></div>
-    <div class="bar"><input id="txt"><button class="btn" id="send"></button></div>
-  </div>
-  <div class="card tile"><h3 id="tNot"></h3><div id="nots"></div></div>
-  <div class="card tile"><h3 id="tSet"></h3>
+  <h3 id="tNot"></h3>
+  <div class="card" id="nots"></div>
+  <div class="card" style="display:flex;flex-direction:column;gap:8px">
     <label class="ck" id="rowSend"><input type="checkbox" id="sSend"><span id="lSend"></span></label>
     <div id="access"></div>
-    <label class="ck"><input type="checkbox" id="sCtl"><span id="lCtl"></span></label>
+    <label class="ck"><input type="checkbox" id="sCtl"><span id="lCtl"></span><span class="q" id="qCtl">?</span></label>
+    <div class="tip" id="tCtl" hidden></div>
   </div>
 </div>
 <script src="../pages.js"></script>
 <script>
-/* Связь с телефоном: выбрал устройство — найти его, музыка, мышь и текст
-   (на ПК), уведомления с других устройств, заряд. Всё — /api/phonelink. */
-let ST = null, PEER = '';
+/* Связь с телефоном. Устройства с этим плагином видны сами (без выбора,
+   к кому подключаться): у телефона — найти, музыка, заряд; у компьютера —
+   ещё тачпад и клавиатура (с телефона). Уведомления телефона — на ПК. */
+let ST = null;
 const say = (t, cls) => { $('msg').textContent = t || ''; $('msg').className = 'hint ' + (cls || ''); };
-async function act(op, extra){
-  if(!PEER){ say(L('Выбери устройство сверху.', 'Pick a device above.'), 'err'); return; }
-  const r = await api('/api/phonelink', {op, peer: PEER, ...extra}).catch(e => ({error: String(e)}));
+async function act(peer, op, extra){
+  const r = await api('/api/phonelink', {op, peer, ...extra}).catch(e => ({error: String(e)}));
   if(r.error) say(r.error, 'err'); else if(op !== 'mouse') say(L('Готово', 'Done'), 'ok');
   return r;
 }
+function devCard(p){
+  const phone = p.role === 'phone', me = ST.role;
+  const bat = p.battery ? `🔋 ${p.battery.level}%${p.battery.charging ? ' ⚡' : ''}` : '';
+  let h = `<div class="card dev" data-ip="${esc(p.ip)}"><div class="top">${icon(phone ? 'smartphone' : 'desktop_windows')}<b>${esc(p.name)}</b><small>${esc(bat)}</small></div>
+    <div class="row"><button data-a="ring">📢 ${esc(phone ? L('Найти телефон', 'Find phone') : L('Подать сигнал', 'Beep'))}</button></div>
+    <div class="media"><button data-k="prev">⏮</button><button data-k="playpause">⏯</button><button data-k="next">⏭</button><button data-k="voldown">🔉</button><button data-k="mute">🔇</button><button data-k="volup">🔊</button></div>`;
+  // Тачпад и клавиатура — для компьютера; удобнее всего с телефона.
+  if(!phone) h += `<div class="pad">${esc(L('Тачпад: веди пальцем — курсор, тап — щелчок, двумя — прокрутка', 'Touchpad: move, tap to click, two fingers to scroll'))}</div>
+    <div class="two"><button data-b="left">${esc(L('Левая', 'Left'))}</button><button data-b="right">${esc(L('Правая', 'Right'))}</button></div>
+    <div class="bar"><input placeholder="${esc(L('напечатать на компьютере…', 'type on the computer…'))}"><button class="btn" data-a="send">${esc(L('Отправить', 'Send'))}</button></div>`;
+  return h + '</div>';
+}
+function bindPad(card, ip){
+  const pad = card.querySelector('.pad');
+  if(!pad) return;
+  let last = null, moved = 0, acc = {x: 0, y: 0}, timer = 0, two = null, t0 = 0;
+  const flush = () => { timer = 0; const dx = Math.round(acc.x), dy = Math.round(acc.y); if(!dx && !dy) return; acc = {x: 0, y: 0}; act(ip, 'mouse', {dx, dy}); };
+  pad.addEventListener('pointerdown', e => { pad.setPointerCapture(e.pointerId); last = {x: e.clientX, y: e.clientY}; moved = 0; t0 = Date.now(); });
+  pad.addEventListener('pointermove', e => {
+    if(!last || two !== null) return;
+    const dx = e.clientX - last.x, dy = e.clientY - last.y; last = {x: e.clientX, y: e.clientY};
+    const k = Math.min(4, 1.2 + Math.hypot(dx, dy) / 8);
+    acc.x += dx * k; acc.y += dy * k; moved += Math.abs(dx) + Math.abs(dy);
+    if(!timer) timer = setTimeout(flush, 33);
+  });
+  pad.addEventListener('pointerup', () => { if(last && moved < 6 && Date.now() - t0 < 300) act(ip, 'mouse', {btn: 'left'}); last = null; });
+  pad.addEventListener('touchstart', e => { if(e.touches.length === 2) two = e.touches[0].clientY; }, {passive: true});
+  pad.addEventListener('touchmove', e => {
+    if(two === null || e.touches.length !== 2) return;
+    const d = e.touches[0].clientY - two;
+    if(Math.abs(d) > 24){ act(ip, 'mouse', {scroll: d > 0 ? 1 : -1}); two = e.touches[0].clientY; }
+  }, {passive: true});
+  pad.addEventListener('touchend', () => { two = null; });
+  pad.addEventListener('wheel', e => { e.preventDefault(); act(ip, 'mouse', {scroll: e.deltaY < 0 ? 1 : -1}); }, {passive: false});
+}
+let drawnKey = '';
 async function load(){
   ST = await api('/api/phonelink').catch(() => null);
   if(!ST) return;
   const peers = ST.peers || [];
-  if(!PEER || !peers.some(p => p.ip === PEER)) PEER = (peers.find(p => p.online) || {}).ip || '';
-  $('devs').innerHTML = peers.length ? peers.map(p => `<button class="dev${p.ip === PEER ? ' on' : ''}${p.online ? '' : ' off'}" data-ip="${esc(p.ip)}">
-      <b>${esc(p.name || p.ip)}</b><small>${p.online ? (p.battery ? `🔋 ${p.battery.level}%${p.battery.charging ? ' ⚡' : ''}` : L('в сети', 'online')) : L('не в сети', 'offline')}</small></button>`).join('')
-    : `<div class="hint">${esc(ST.devnet === 'off' ? L('Включи сеть устройств — через неё устройства видят друг друга.', 'Turn on the device network.') : L('Других устройств в сети пока нет.', 'No other devices yet.'))}</div>`;
-  $('devs').querySelectorAll('[data-ip]').forEach(b => b.onclick = () => { PEER = b.dataset.ip; load(); });
+  // Карточки перерисовываем, только если сменились устройства — иначе
+  // тачпад сбрасывался бы посреди движения.
+  const key = peers.map(p => p.ip + p.role).join(',');
+  if(key !== drawnKey){
+    drawnKey = key;
+    $('devs').innerHTML = peers.length ? peers.map(devCard).join('')
+      : `<div class="card hint">${esc(ST.devnet === 'off' ? L('Включи сеть устройств — через неё устройства видят друг друга.', 'Turn on the device network.')
+        : L('Других устройств с этим плагином пока нет. Добавь «Связь с телефоном» и на телефоне, и на компьютере — они найдут друг друга сами.', 'No other devices with this plugin yet. Add it on both the phone and the computer.'))}</div>`;
+    document.querySelectorAll('.dev').forEach(card => {
+      const ip = card.dataset.ip;
+      card.querySelector('[data-a=ring]').onclick = () => act(ip, 'ring');
+      card.querySelectorAll('[data-k]').forEach(b => b.onclick = () => act(ip, 'media', {key: b.dataset.k}));
+      card.querySelectorAll('[data-b]').forEach(b => b.onclick = () => act(ip, 'mouse', {btn: b.dataset.b}));
+      const inp = card.querySelector('.bar input'), send = card.querySelector('[data-a=send]');
+      if(send){
+        send.onclick = async () => { if(!inp.value) return; const r = await act(ip, 'text', {text: inp.value}); if(r && !r.error) inp.value = ''; };
+        inp.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); send.click(); } });
+      }
+      bindPad(card, ip);
+    });
+  } else peers.forEach(p => { const c = document.querySelector(`.dev[data-ip="${p.ip}"] small`); if(c) c.textContent = p.battery ? `🔋 ${p.battery.level}%${p.battery.charging ? ' ⚡' : ''}` : ''; });
   const n = ST.notifs || [];
   $('nots').innerHTML = n.length ? n.slice(0, 50).map(x => `<div class="n"><div class="h"><span>${esc(x.from || '')}</span><span>${esc(x.app || '')}</span><span>${new Date(x.time * 1000).toLocaleTimeString(LANG === 'en' ? 'en-GB' : 'ru-RU', {hour: '2-digit', minute: '2-digit'})}</span></div>
       <b>${esc(x.title || '')}</b>${esc(x.text || '')}</div>`).join('') + `<button class="btn" id="clr" style="margin-top:8px">${esc(L('Очистить', 'Clear'))}</button>`
-    : `<div class="hint">${esc(L('Уведомлений с телефона пока нет. На телефоне добавь этот плагин и дай «Доступ к уведомлениям».', 'No notifications yet. On the phone add this plugin and grant notification access.'))}</div>`;
+    : `<div class="hint">${esc(ST.role === 'phone' ? L('Здесь — уведомления с других устройств.', 'Notifications from other devices.') : L('Уведомлений с телефона пока нет.', 'No phone notifications yet.'))}</div>`;
   if($('clr')) $('clr').onclick = async () => { await api('/api/phonelink', {op: 'clear'}); load(); };
   $('sSend').checked = ST.settings.sendNotifs; $('sCtl').checked = ST.settings.allowControl;
   $('rowSend').hidden = !ANDROID;
@@ -94,52 +138,13 @@ async function load(){
 }
 const saveSet = () => api('/api/phonelink', {op: 'set', settings: {sendNotifs: $('sSend').checked, allowControl: $('sCtl').checked}});
 $('sSend').onchange = saveSet; $('sCtl').onchange = saveSet;
-
-// Тачпад: ведёшь пальцем — курсор едет (ускорение на быстрых движениях),
-// тап — щелчок, два пальца вверх-вниз — прокрутка.
-(() => {
-  const pad = $('pad');
-  let last = null, moved = 0, acc = {x: 0, y: 0}, timer = 0, two = null, t0 = 0;
-  const flush = () => { timer = 0; const dx = Math.round(acc.x), dy = Math.round(acc.y); if(!dx && !dy) return; acc = {x: 0, y: 0}; act('mouse', {dx, dy}); };
-  pad.addEventListener('pointerdown', e => { pad.setPointerCapture(e.pointerId); last = {x: e.clientX, y: e.clientY}; moved = 0; t0 = Date.now(); });
-  pad.addEventListener('pointermove', e => {
-    if(!last || two) return;
-    const dx = e.clientX - last.x, dy = e.clientY - last.y; last = {x: e.clientX, y: e.clientY};
-    const k = Math.min(4, 1.2 + Math.hypot(dx, dy) / 8);
-    acc.x += dx * k; acc.y += dy * k; moved += Math.abs(dx) + Math.abs(dy);
-    if(!timer) timer = setTimeout(flush, 33);
-  });
-  pad.addEventListener('pointerup', () => { if(last && moved < 6 && Date.now() - t0 < 300) act('mouse', {btn: 'left'}); last = null; });
-  pad.addEventListener('touchstart', e => { if(e.touches.length === 2) two = e.touches[0].clientY; }, {passive: true});
-  pad.addEventListener('touchmove', e => {
-    if(two === null || e.touches.length !== 2) return;
-    const d = e.touches[0].clientY - two;
-    if(Math.abs(d) > 24){ act('mouse', {scroll: d > 0 ? 1 : -1}); two = e.touches[0].clientY; }
-  }, {passive: true});
-  pad.addEventListener('touchend', () => { two = null; });
-  pad.addEventListener('wheel', e => { e.preventDefault(); act('mouse', {scroll: e.deltaY < 0 ? 1 : -1}); }, {passive: false});
-})();
-
-$('tFind').textContent = L('Найти устройство', 'Find device');
-$('ring').textContent = L('📢 Позвонить', '📢 Ring');
-$('ring').onclick = () => act('ring');
-$('hFind').textContent = L('Телефон зазвонит на полную громкость 20 секунд — даже в беззвучном. ПК — сигнал и уведомление.', 'The phone rings at full volume for 20 s even if silenced. A PC beeps and notifies.');
-$('tMedia').textContent = L('Музыка и громкость', 'Music and volume');
-document.querySelectorAll('[data-k]').forEach(b => b.onclick = () => act('media', {key: b.dataset.k}));
-$('tPad').textContent = L('Тачпад и клавиатура (для ПК)', 'Touchpad and keyboard (for a PC)');
-$('pad').textContent = L('Веди пальцем — курсор, тап — щелчок, двумя пальцами — прокрутка', 'Move — cursor, tap — click, two fingers — scroll');
-$('lc').textContent = L('Левая', 'Left'); $('rc').textContent = L('Правая', 'Right');
-$('lc').onclick = () => act('mouse', {btn: 'left'}); $('rc').onclick = () => act('mouse', {btn: 'right'});
-$('txt').placeholder = L('напечатать на устройстве…', 'type on the device…');
-$('send').textContent = L('Отправить', 'Send');
-$('send').onclick = async () => { const t = $('txt').value; if(!t) return; const r = await act('text', {text: t}); if(r && !r.error) $('txt').value = ''; };
-$('txt').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); $('send').click(); } });
-$('tNot').textContent = L('Уведомления с других устройств', 'Notifications from other devices');
-$('tSet').textContent = L('Это устройство', 'This device');
-$('lSend').textContent = L('Пересылать мои уведомления на свои устройства', 'Send my notifications to my devices');
-$('lCtl').textContent = L('Разрешить своим устройствам управлять этим (мышь, клавиатура, музыка)', 'Let my devices control this one (mouse, keyboard, music)');
+$('tNot').textContent = L('Уведомления', 'Notifications');
+$('lSend').textContent = L('Пересылать уведомления этого телефона на компьютеры', 'Send this phone\'s notifications to my computers');
+$('lCtl').textContent = L('Разрешить управлять этим устройством', 'Allow controlling this device');
+$('tCtl').textContent = L('Мышь, клавиатура и музыка с других своих устройств. Выключи там, где не нужно.', 'Mouse, keyboard and music from your other devices.');
+$('qCtl').onclick = e => { e.preventDefault(); $('tCtl').hidden = !$('tCtl').hidden; };
 load();
-setInterval(() => { if(!document.hidden) load(); }, 5000);
+setInterval(() => { if(!document.hidden) load(); }, 8000);
 </script>
 </body>
 </html>

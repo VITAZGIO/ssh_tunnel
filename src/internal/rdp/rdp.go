@@ -63,6 +63,19 @@ type Host struct {
 	User   string `json:"user,omitempty"`
 	Pass   string `json:"pass,omitempty"` // только если попросили запомнить; файл 0600
 	Domain string `json:"domain,omitempty"`
+	// Security — any (сам договорится), nla, tls или rdp. «Server refused
+	// connection (wrong security type?)» — выбрать другой.
+	Security string `json:"security,omitempty"`
+}
+
+// splitUser — «домен\пользователь», «домен/пользователь» → домен и имя:
+// guacd ждёт их раздельно, иначе Windows отказывает ещё до пароля.
+// «MicrosoftAccount\почта» — вход учёткой Microsoft.
+func splitUser(user, domain string) (string, string) {
+	if i := strings.IndexAny(user, "\\/"); i > 0 && domain == "" {
+		return user[i+1:], user[:i]
+	}
+	return user, domain
 }
 
 type conf struct {
@@ -118,7 +131,21 @@ func public(c conf) map[string]any {
 		p.Pass = ""
 		hs = append(hs, p)
 	}
-	return map[string]any{"relay": c.Relay, "hosts": hs}
+	// Свои устройства сети — выбрать машину из списка, а не вписывать адрес.
+	type peer struct {
+		IP     string `json:"ip"`
+		Name   string `json:"name"`
+		Host   string `json:"host"`
+		Online bool   `json:"online"`
+	}
+	ps := []peer{}
+	for _, p := range devnet.Status().Peers {
+		if p.Self || !p.IP.IsValid() {
+			continue
+		}
+		ps = append(ps, peer{p.IP.String(), p.Name, p.Host, p.Online})
+	}
+	return map[string]any{"relay": c.Relay, "hosts": hs, "peers": ps}
 }
 
 func handleConf(w http.ResponseWriter, r *http.Request) {
@@ -424,9 +451,14 @@ func handleOpen(w http.ResponseWriter, r *http.Request) {
 	if port == 0 {
 		port = 3389
 	}
+	user, domain := splitUser(user, h.Domain)
+	sec := h.Security
+	if sec == "" {
+		sec = "any"
+	}
 	params := map[string]string{
-		"hostname": h.Host, "port": strconv.Itoa(port), "username": user, "password": pass, "domain": h.Domain,
-		"ignore-cert": "true", "security": "any",
+		"hostname": h.Host, "port": strconv.Itoa(port), "username": user, "password": pass, "domain": domain,
+		"ignore-cert": "true", "security": sec,
 		"width": strconv.Itoa(req.W), "height": strconv.Itoa(req.H), "dpi": strconv.Itoa(req.DPI),
 		// Повернул телефон — Windows сама меняет разрешение (RDP 8.1+).
 		"resize-method": "display-update",
