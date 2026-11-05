@@ -9,7 +9,7 @@ rights) and **VPN** (all system traffic). An educational project: it shows how a
 standard SSH mechanism.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-4c8dff)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.5.0-4c8dff)](https://github.com/VITAZGIO/ssh_tunnel/releases)
+[![Version](https://img.shields.io/github/v/release/VITAZGIO/ssh_tunnel?label=version&color=4c8dff)](https://github.com/VITAZGIO/ssh_tunnel/releases)
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-2de2ff)](https://github.com/VITAZGIO/ssh_tunnel/releases/latest)
 [![Linux](https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-2de2ff)](https://github.com/VITAZGIO/ssh_tunnel/releases/latest)
 [![Android](https://img.shields.io/badge/Android-8.0+-2de2ff)](https://github.com/VITAZGIO/ssh_tunnel/releases/latest)
@@ -142,6 +142,38 @@ reach, and with your local law, is your responsibility.
   a mark when a DNS lookup went around the tunnel.
 - 📱 **Android app** — a system-level VPN connection, no per-app proxy setup
   needed.
+- 🕸 **Device network** — your computer, phone and home server see each other
+  by names like `laptop.mesh`, wherever they are. See [MESH.md](docs/MESH.md).
+- 🧩 **Plugins** — ad blocking, remote desktop, phone link, passwords, server
+  monitoring and more (below).
+- 📖 **The Book** — a built-in manual in Russian and English: every «?» button
+  opens the right chapter.
+- ⬆️ **Updates itself** — a new version is downloaded and installed from the
+  window.
+
+### Plugins
+
+Everything beyond the tunnel is a plugin: add it with **+** in «Plugins»; it
+works on the computer and on the phone in the same interface. Each one is
+described in the Book (the «?» button inside the plugin).
+
+| Plugin | What it does |
+|---|---|
+| 🛡 **Ad blocking** | Blocks ads and trackers by DNS for all apps; statistics of what was blocked |
+| 🖥 **Remote desktop** | RDP to your Windows machines from the phone or another PC (via guacd at home): touchpad, keyboard, left/right buttons, paste a phone photo into a message |
+| 📱 **Phone link** | Phone notifications on the PC, find the phone, music and volume, the phone as a touchpad and keyboard for the PC, phone photos into the PC clipboard |
+| 🔑 **Passwords** | Your own encrypted password vault: Android autofill and an extension for Yandex Browser / Chrome / Edge, synced between devices |
+| 🖧 **Machines** | Server readings (Proxmox, Ubuntu, PC): CPU, memory, disk, temperature — via SSH, netdata or Home Assistant without waking the disks; Wake-on-LAN and shutdown, also from outside home |
+| 📡 **Network scanner** | LAN devices with open ports, all Wi-Fi networks and channel load, signal strength |
+| 📊 **Data usage** | Traffic via the server and direct — by day and by hour, by program |
+| 🗺 **Network map** | Your devices and how they connect |
+| 📁 **Files** and **Mirror folders** | Files of your other devices; a folder that syncs itself between devices, conflicts shown |
+| 📋 **Shared clipboard** | Copy on one device, paste on another |
+| 📅 **Calendar**, ⌨ **SSH** | An events calendar; an SSH console to your servers |
+| 🔍 **Check a site**, **Leak check**, **Who touches traffic**, **Support report** | Diagnostics: does a site open and through what, DNS leaks, who tampers with traffic on the way |
+
+Your own plugin is an HTML page with access to the program's API:
+[CUSTOM_APPS.md](docs/CUSTOM_APPS.md).
 
 > A detailed technical write-up is in [ARCHITECTURE.md](docs/ARCHITECTURE.md)
 > (in Russian).
@@ -253,8 +285,10 @@ Add the public half (`phone.pub`) to
 `/home/tunnel/.ssh/authorized_keys` on the server, with the same restrictions
 as everything else — see [SERVER_SETUP.md](docs/SERVER_SETUP.md) (in Russian).
 
-**What's there:** per-app selection (which apps go through the tunnel, which
-do not) — the system itself handles the picker; a quick-settings tile;
+**What's there:** the same interface and the same [plugins](#plugins) as on the
+computer; per-app selection (which apps go through the tunnel, which do not) —
+the system itself handles the picker; the device network; ad blocking;
+password autofill; notifications forwarded to the PC; a quick-settings tile;
 connection log; speed test; latency to the server.
 
 **What's not:** UDP. It does not pass through SSH, so calls and games that
