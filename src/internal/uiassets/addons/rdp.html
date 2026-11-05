@@ -13,7 +13,11 @@
   .bar input,.bar select,.f input,.f select{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--text);font:inherit}
   .bar input{flex:1;min-width:140px}
   .btn{display:inline-flex;align-items:center;gap:6px}
-  .m{display:grid;grid-template-columns:auto 1fr auto auto;gap:3px 12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+  .m{display:grid;grid-template-columns:auto 1fr auto;gap:6px 12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+  .m>div{min-width:0}
+  .m .a{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .m .go{grid-column:1/-1;display:flex;gap:6px;align-items:center}
+  .m .go .btn.primary{flex:1;justify-content:center}
   .m:last-child{border-bottom:0}
   .m>.mi{width:26px;height:26px;color:var(--accent)}
   .m .n{font-weight:600}
@@ -25,6 +29,8 @@
   .f label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim)}
   .f .full{grid-column:1/-1}
   .ok{color:var(--ok)}.err{color:var(--err)}
+  .q{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--line);color:var(--dim);font-size:11px;cursor:pointer;background:var(--card2);vertical-align:middle}
+  .f select{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--text);font:inherit}
   /* Сеанс: картинка на всю ширину, сверху тонкая строка кнопок. */
   #sess{position:fixed;inset:0;background:#000;display:flex;flex-direction:column;z-index:20}
   #sess[hidden]{display:none}
@@ -44,18 +50,20 @@
   <div class="card relay" id="relayCard">
     <span class="mi" style="--i:url(/icons/antenna.svg)"></span>
     <div style="flex:1;display:flex;flex-direction:column;gap:8px">
-      <div><b id="relayT"></b> <span class="hint" id="relayS"></span></div>
-      <div class="hint" id="relayH"></div>
+      <div><b id="relayT"></b> <span class="hint" id="relayS"></span> <span class="q" id="relayQ">?</span></div>
+      <div class="hint" id="relayH" hidden></div>
       <div class="bar"><input id="relay" spellcheck="false"><button class="btn" id="relaySave"></button></div>
     </div>
   </div>
   <div class="card" id="list"></div>
   <div class="card">
     <div class="f">
+      <label class="full"><span id="lPick"></span><select id="fPick"></select></label>
       <label><span id="lName"></span><input id="fName"></label>
       <label><span id="lHost"></span><input id="fHost" spellcheck="false"></label>
       <label><span id="lUser"></span><input id="fUser" autocomplete="off" spellcheck="false"></label>
       <label><span id="lPass"></span><input id="fPass" type="password" autocomplete="new-password"></label>
+      <label class="full"><span id="lSec"></span><select id="fSec"></select></label>
       <label class="full" style="flex-direction:row;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" id="fRem"><span id="lRem"></span></label>
     </div>
     <div class="bar" style="margin-top:8px"><button class="btn primary" id="fAdd"></button><span class="hint" id="note"></span></div>
@@ -143,6 +151,9 @@ PollTunnel.prototype = Object.create(Guacamole.Tunnel.prototype);
 async function load(){
   CONF = await api('/api/rdp').catch(() => CONF);
   $('relay').value = CONF.relay || '';
+  // Выбрать из сети устройств — имя и адрес подставятся.
+  $('fPick').innerHTML = `<option value="">${esc(L('вручную', 'manually'))}</option>` + (CONF.peers || []).map(p =>
+    `<option value="${esc(p.ip)}" data-n="${esc(p.name || p.host)}">${esc((p.name || p.host) + (p.online ? '' : L(' (не в сети)', ' (offline)')))}</option>`).join('');
   drawList();
   checkRelay();
 }
@@ -157,14 +168,16 @@ async function checkRelay(){
 }
 function drawList(){
   $('list').innerHTML = CONF.hosts.length ? CONF.hosts.map(h => `<div class="m">${icon('desktop_windows')}
-      <div><div class="n">${esc(h.name)}</div><div class="a">${esc((h.user ? h.user + '@' : '') + h.host)}${h.saved ? ' · ' + esc(L('пароль сохранён', 'password saved')) : ''}</div></div>
-      <button class="btn primary" data-go="${esc(h.id)}">${icon('desktop_windows')}${esc(L('Подключиться', 'Connect'))}</button>
-      <span><button class="ico" data-ed="${esc(h.id)}" title="${esc(L('Изменить', 'Edit'))}">${icon('edit')}</button><button class="ico" data-rm="${esc(h.id)}" title="${esc(L('Убрать', 'Remove'))}">${icon('close')}</button></span></div>`).join('')
+      <div><div class="n">${esc(h.name)}</div><div class="a">${esc((h.user ? h.user + ' · ' : '') + h.host)}${h.saved ? ' · 🔑' : ''}</div></div>
+      <span></span>
+      <div class="go"><button class="btn primary" data-go="${esc(h.id)}">${icon('desktop_windows')}${esc(L('Подключиться', 'Connect'))}</button>
+        <button class="ico" data-ed="${esc(h.id)}" title="${esc(L('Изменить', 'Edit'))}">${icon('edit')}</button><button class="ico" data-rm="${esc(h.id)}" title="${esc(L('Убрать', 'Remove'))}">${icon('close')}</button></div></div>`).join('')
     : `<div class="empty" style="padding:20px">${esc(L('Машин пока нет — добавь ниже: имя и адрес в домашней сети (например 192.168.1.202). Адрес — тот, по которому её видит ретранслятор.', 'No machines yet — add one below: a name and its home network address. The address is what the relay sees.'))}</div>`;
   $('list').querySelectorAll('[data-go]').forEach(b => b.onclick = () => start(CONF.hosts.find(h => h.id === b.dataset.go)));
   $('list').querySelectorAll('[data-ed]').forEach(b => b.onclick = () => {
     const h = CONF.hosts.find(x => x.id === b.dataset.ed); EDIT = h.id;
     $('fName').value = h.name; $('fHost').value = h.host + (h.port && h.port !== 3389 ? ':' + h.port : ''); $('fUser').value = h.user || ''; $('fPass').value = ''; $('fRem').checked = h.saved;
+    $('fSec').value = h.security || '';
     $('fAdd').textContent = L('Сохранить', 'Save'); $('fName').focus();
   });
   $('list').querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => {
@@ -176,7 +189,7 @@ function drawList(){
 $('relaySave').onclick = async () => { CONF = await api('/api/rdp', {op: 'relay', relay: $('relay').value.trim()}); $('relay').value = CONF.relay || ''; checkRelay(); };
 $('fAdd').onclick = async () => {
   let [host, port] = $('fHost').value.trim().split(':');
-  const body = {op: 'add', id: EDIT || '', name: $('fName').value.trim(), host, port: +port || 0, user: $('fUser').value.trim(),
+  const body = {op: 'add', id: EDIT || '', name: $('fName').value.trim(), host, port: +port || 0, user: $('fUser').value.trim(), security: $('fSec').value,
     pass: $('fRem').checked ? $('fPass').value : '', forget: !$('fRem').checked};
   const r = await api('/api/rdp', body).catch(e => ({error: String(e)}));
   if(r.error){ $('note').className = 'hint err'; $('note').textContent = r.error; return; }
@@ -197,6 +210,7 @@ function start(h){
     return;
   }
   $('home').hidden = true; $('sess').hidden = false;
+  immersive(true); // весь экран: без логотипа и шапки
   drawTools();
   connect();
 }
@@ -249,6 +263,7 @@ function stop(){
   if(c) try { c.disconnect(); } catch(e) {}
   unbindInput();
   $('sess').hidden = true; $('home').hidden = false; creds = null;
+  immersive(false);
   if(document.fullscreenElement) document.exitFullscreen().catch(() => {});
 }
 
@@ -344,7 +359,7 @@ addEventListener('resize', () => {
   clearTimeout(resizeT);
   resizeT = setTimeout(() => { if(client){ const s = size(); client.sendSize(s.w, s.h); } }, 600);
 });
-addEventListener('pagehide', () => { if(client) client.disconnect(); });
+addEventListener('pagehide', () => { if(client) client.disconnect(); immersive(false); });
 
 /* ---------- подписи ---------- */
 $('relayT').textContent = L('Ретранслятор RDP', 'RDP relay');
@@ -352,9 +367,14 @@ $('relayH').innerHTML = esc(L('Это guacd (Apache Guacamole) на компью
   'This is guacd (Apache Guacamole) on a computer in the same local network as the machines. Install: «docker run -d --name guacd -p 4822:4822 guacamole/guacd». Address — via the device network («ubuntu.mesh:4822») or local («192.168.1.201:4822»).'));
 $('relay').placeholder = 'ubuntu.mesh:4822';
 $('relaySave').textContent = L('Сохранить и проверить', 'Save and check');
+$('lPick').textContent = L('Из сети устройств', 'From the device network');
+$('fPick').onchange = () => { const o = $('fPick').selectedOptions[0]; if(!o || !o.value) return; $('fHost').value = o.value; if(!$('fName').value) $('fName').value = o.dataset.n; };
+$('lSec').textContent = L('Безопасность (если «wrong security type» — выбери другую)', 'Security (if «wrong security type» — try another)');
+$('fSec').innerHTML = [['', L('авто', 'auto')], ['nla', 'NLA'], ['tls', 'TLS'], ['rdp', 'RDP']].map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('');
+$('relayQ').onclick = () => { $('relayH').hidden = !$('relayH').hidden; };
 $('lName').textContent = L('Имя', 'Name'); $('fName').placeholder = L('например «ПК»', 'e.g. «PC»');
 $('lHost').textContent = L('Адрес в домашней сети', 'Home network address'); $('fHost').placeholder = '192.168.1.202';
-$('lUser').textContent = L('Пользователь Windows', 'Windows user');
+$('lUser').textContent = L('Пользователь Windows', 'Windows user'); $('fUser').placeholder = L('Имя или ПК\\Имя', 'name or PC\\name');
 $('lPass').textContent = L('Пароль', 'Password');
 $('lRem').textContent = L('Запомнить вход на этом устройстве (иначе спрошу при подключении)', 'Remember the login on this device (otherwise asked on connect)');
 $('fAdd').textContent = L('Добавить', 'Add');

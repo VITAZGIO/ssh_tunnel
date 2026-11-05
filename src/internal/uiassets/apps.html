@@ -66,6 +66,7 @@
   html.android #winBtn,html.android #winChk{display:none}
   #winChk{display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--dim);cursor:pointer;white-space:nowrap}
   #winChk input{margin:0;width:13px;height:13px}
+  body.immersive #vApp .head{display:none}
 </style>
 </head>
 <body>
@@ -321,6 +322,8 @@ $('winBtn').onclick = async () => {
 };
 $('winAuto').onchange = () => { if(current) op('win', current, $('winAuto').checked); };
 $('backApp').onclick = () => {
+  document.body.classList.remove('immersive');
+  if(EMBED) window.parent.postMessage({sshtunnel: 'immersive', on: false}, '*');
   $('appFrame').src = 'about:blank';
   current = null;
   if(Q.get('open') && (EMBED || ANDROID)) closePage(); else show('vList');
@@ -375,6 +378,12 @@ load().then(() => {
 }).catch(() => {
   $('grid').className = 'empty';
   $('grid').textContent = L('Нет связи с программой.', 'No connection to the app.');
+});
+// Плагин просит весь экран — прячем свою строку и передаём выше.
+window.addEventListener('message', ev => {
+  if(!ev.data || ev.data.sshtunnel !== 'immersive') return;
+  document.body.classList.toggle('immersive', !!ev.data.on);
+  if(EMBED) window.parent.postMessage(ev.data, '*');
 });
 </script>
 </body>

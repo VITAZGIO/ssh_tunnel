@@ -25,6 +25,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -92,6 +93,8 @@ type Reading struct {
 	Uptime   int64     `json:"uptime,omitempty"`
 	Extra    []Extra   `json:"extra,omitempty"` // ha: датчики
 	Hist     []float64 `json:"hist,omitempty"`  // процессор за последние ~30 мин
+	Online   bool      `json:"online"`          // отвечает (пинг или показания)
+	Ping     float64   `json:"ping,omitempty"`  // мс
 }
 
 // Extra — любой датчик (Home Assistant).
@@ -474,6 +477,52 @@ func readHA(m Machine) (Reading, error) {
 	return r, nil
 }
 
+// ping — жива ли машина: в сети устройств — её пинг, иначе — соединение с
+// обычными портами (Windows не отвечает на ICMP без настройки, а 445/3389
+// у неё открыты). Задержка в мс; -1 — не ответила.
+func ping(m Machine) float64 {
+	if m.Peer != "" {
+		if a, err := netip.ParseAddr(m.Peer); err == nil {
+			if d, err := devnet.Ping(a); err == nil {
+				return float64(d.Microseconds()) / 1000
+			}
+		}
+	}
+	host := m.Host
+	if host == "" {
+		host = m.Peer
+	}
+	if host == "" {
+		return -1
+	}
+	ports := []string{"445", "3389", "22", "80", "8006"}
+	ch := make(chan float64, len(ports))
+	for _, port := range ports {
+		go func(port string) {
+			t := time.Now()
+			c, err := devnet.Dial("tcp", net.JoinHostPort(host, port))
+			if err != nil {
+				ch <- -1
+				return
+			}
+			c.Close()
+			ch <- float64(time.Since(t).Microseconds()) / 1000
+		}(port)
+	}
+	timeout := time.After(3 * time.Second)
+	for range ports {
+		select {
+		case v := <-ch:
+			if v >= 0 {
+				return v
+			}
+		case <-timeout:
+			return -1
+		}
+	}
+	return -1
+}
+
 func readOne(m Machine) Reading {
 	var r Reading
 	var err error
@@ -499,11 +548,16 @@ func readOne(m Machine) Reading {
 	case "self":
 		r, err = readSelf()
 	default:
-		return Reading{Time: time.Now().Unix()}
+		r = Reading{}
 	}
 	r.Time = time.Now().Unix()
 	if err != nil {
 		r = Reading{Time: r.Time, Error: err.Error()}
+	}
+	if p := ping(m); p >= 0 {
+		r.Online, r.Ping = true, p
+	} else if err == nil && m.Src != "" {
+		r.Online = true // показания пришли — значит жива
 	}
 	return r
 }
@@ -521,7 +575,7 @@ func refresh() {
 			if old := readings[m.ID]; old != nil {
 				r.Hist = old.Hist
 			}
-			if r.Error == "" && m.Src != "ha" {
+			if r.Error == "" && (m.Src == "ssh" || m.Src == "netdata" || m.Src == "self") {
 				r.Hist = append(r.Hist, r.CPU)
 				if len(r.Hist) > 60 {
 					r.Hist = r.Hist[len(r.Hist)-60:]
