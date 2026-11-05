@@ -66,3 +66,5 @@ func wifiLinkOnly() WifiReport {
 	r.Networks = nil
 	return r
 }
+
+func openLocationSettings() {}

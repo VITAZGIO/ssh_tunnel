@@ -10,6 +10,7 @@ import (
 	"sshtunnel/internal/nativeui"
 	"sshtunnel/internal/phonelink"
 	"sshtunnel/internal/shutdown"
+	"sshtunnel/internal/updater"
 	"sshtunnel/internal/webui"
 	"sshtunnel/vpn/internal/winsvc"
 )
@@ -17,6 +18,9 @@ import (
 // runInProcess — ядро в процессе окна, без службы. Процесс уже с правами
 // администратора.
 func runInProcess(tray, noWindow bool) {
+	// Ядро в этом процессе (уже с правами администратора) — обновляемся как
+	// обычная версия: подмена файла и перезапуск (права наследуются).
+	updater.VPNInstall = updater.InstallPlain
 	e, err := newEngine()
 	if err != nil {
 		fatal("Не удалось запустить интерфейс: " + err.Error())

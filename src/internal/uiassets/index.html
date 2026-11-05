@@ -40,6 +40,10 @@
   body.android .brand svg{width:48px}
   body.android .ico{width:48px;height:48px}
   body.android .ico svg{width:26px;height:26px}
+  /* ПК: шапка тоже в полтора раза крупнее (как на телефоне). */
+  .bar .brand svg{width:48px}
+  .bar .ico{width:48px;height:48px}
+  .bar .ico svg{width:26px;height:26px}
 
   .view{flex:1;overflow-y:auto;padding:0 16px 16px;display:none}
   .view.on{display:block}
@@ -510,7 +514,7 @@
   /* Стрелка вниз — в шапке, слева от журнала; панель выезжает сверху вниз
      под шапкой и кнопок шапки не закрывает. */
   #quickBtn .mi{width:20px;height:20px}
-  body.android #quickBtn .mi{width:30px;height:30px}
+  body.android #quickBtn .mi,.bar #quickBtn .mi{width:30px;height:30px}
   /* Рамка у стрелки — только пока панель открыта. На телефоне :hover и
      :focus «залипают» после касания, и рамка висела до тапа в другом месте. */
   #quickBtn:hover:not(.open),#quickBtn:focus:not(.open){background:transparent;border-color:transparent;outline:none;color:var(--dim)}
@@ -5467,6 +5471,44 @@ function openExternal(url){
   if(ANDROID) SSHTunnelAndroid.openExternal(url);
   else window.open(url, '_blank', 'noopener');
 }
+// «Назад» — один шаг вверх (окно поверх, плагин → список, экран → главная).
+// Ею же — боковая кнопка «назад» на мыши: иначе WebView листал историю
+// внутри окна, экран пустел и открывался другой плагин.
+function backStep(){
+  for(const id of ['confirmOverlay', 'pasteOverlay', 'procOverlay', 'qrOverlay']){
+    if($(id) && !$(id).hidden){
+      if(id === 'confirmOverlay') closeConfirm(false);
+      else if(id === 'pasteOverlay') closePaste(false);
+      else $(id).hidden = true;
+      return true;
+    }
+  }
+  if(menuEl){ closeMenu(); return true; }
+  if($('quickPanel') && !$('quickPanel').hidden){ closeQuick(); return true; }
+  if(current === 'viewAddons'){
+    // Сначала шаг назад внутри «Плагинов» (из плагина — в их список),
+    // и только из списка — туда, откуда их открыли.
+    try { const w = $('addonsFrame').contentWindow; if(w && w.sshtunnelBack && w.sshtunnelBack()) return true; } catch(e) {}
+    show(addonsReturnView); loadAddons(); return true;
+  }
+  if(current !== 'viewMain'){
+    const back = $(current).querySelector('.head .ico');
+    if(back) back.click(); else show('viewMain');
+    return true;
+  }
+  if(mainAtDev){ scrollMainTo(0); return true; }
+  return false;
+}
+function mouseBack(e){
+  if(e.button !== 3 && e.button !== 4) return;
+  e.preventDefault(); e.stopPropagation();
+  if(e.type === 'mouseup' && e.button === 3) backStep();
+}
+['mousedown', 'mouseup', 'auxclick'].forEach(t => addEventListener(t, mouseBack, true));
+window.addEventListener('message', ev => {
+  if(ev.origin === location.origin && ev.data && ev.data.sshtunnel === 'mouseback') backStep();
+});
+
 if(ANDROID){
   $('updateDownloadBtn').dataset.i18n = 'update_download_android';
   $('scanQrBtn').onclick = () => SSHTunnelAndroid.scanQR();
@@ -5484,31 +5526,7 @@ if(ANDROID){
   window.androidImported = r => { show('viewServers'); afterImport(r); };
   // Системная «Назад»: закрыть окно поверх или вернуться на экран выше.
   // false — уже на главном, приложение уходит в фон.
-  window.androidBack = () => {
-    for(const id of ['confirmOverlay', 'pasteOverlay', 'procOverlay', 'qrOverlay']){
-      if($(id) && !$(id).hidden){
-        if(id === 'confirmOverlay') closeConfirm(false);
-        else if(id === 'pasteOverlay') closePaste(false);
-        else $(id).hidden = true;
-        return true;
-      }
-    }
-    if(menuEl){ closeMenu(); return true; }
-    if($('quickPanel') && !$('quickPanel').hidden){ closeQuick(); return true; }
-    if(current === 'viewAddons'){
-      // Сначала шаг назад внутри «Плагинов» (из плагина — в их список),
-      // и только из списка — туда, откуда их открыли.
-      try { const w = $('addonsFrame').contentWindow; if(w && w.sshtunnelBack && w.sshtunnelBack()) return true; } catch(e) {}
-      show(addonsReturnView); loadAddons(); return true;
-    }
-    if(current !== 'viewMain'){
-      const back = $(current).querySelector('.head .ico');
-      if(back) back.click(); else show('viewMain');
-      return true;
-    }
-    if(mainAtDev){ scrollMainTo(0); return true; }
-    return false;
-  };
+  window.androidBack = backStep;
 }
 
 renderCityBtn();

@@ -37,6 +37,11 @@ func kv(line string) (string, string, bool) {
 
 func wifiScan() WifiReport {
 	out, err := netsh("show networks mode=bssid")
+	if strings.Contains(out, "privacy-location") {
+		// Windows 11 (24H2): список сетей — только с доступом к
+		// местоположению (по точкам доступа можно понять, где ты).
+		return WifiReport{Need: "winlocation", Error: "Windows не показывает сети Wi-Fi без доступа к местоположению"}
+	}
 	if err != nil || !strings.Contains(out, "BSSID") {
 		if strings.Contains(strings.ToLower(out), "wlansvc") || err != nil {
 			return WifiReport{Error: "нет Wi-Fi адаптера или служба WLAN выключена"}
@@ -150,4 +155,11 @@ func wifiLinkOnly() WifiReport {
 	}
 	l.Freq = chanFreq(l.Channel, band)
 	return WifiReport{Available: true, Link: l}
+}
+
+// openLocationSettings — «Параметры → Конфиденциальность → Расположение».
+func openLocationSettings() {
+	c := exec.Command("cmd", "/c", "start", "", "ms-settings:privacy-location")
+	c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	_ = c.Start()
 }

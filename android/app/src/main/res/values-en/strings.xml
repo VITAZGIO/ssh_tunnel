@@ -47,6 +47,8 @@
     <string name="crash_copy">Copy</string>
     <string name="crash_copied">Copied</string>
     <string name="phonelink_ring">Someone is looking for this phone</string>
+    <string name="phonelink_ring_stop">Stop</string>
+    <string name="phonelink_ring_stop_hint">Tap to stop (or just turn the screen on)</string>
     <string name="vault_locked">🔒 ssh_tunnel passwords — unlock</string>
     <string name="vault_unlock_title">Unlock passwords</string>
     <string name="vault_master">Master password</string>

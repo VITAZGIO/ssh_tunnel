@@ -27,7 +27,8 @@ On a phone Android does not give apps the MAC addresses of other devices
 
 On a phone precise location permission and location turned on are needed.
 Android allows about 4 scans per 2 minutes. On Windows networks come from
-netsh, on Linux from nmcli.
+netsh, on Linux from nmcli. Windows 11 lists networks only for apps with
+location access — «Open settings» leads there.
 
 ## Signal
 

@@ -54,6 +54,10 @@ func randHex(n int) string {
 // всегда через «/».
 func cleanRel(p string) (string, bool) {
 	p = strings.ReplaceAll(p, `\`, "/")
+	dir := strings.HasSuffix(p, "/") && len(p) > 1
+	if dir {
+		p = strings.TrimSuffix(p, "/")
+	}
 	if p == "" || strings.HasPrefix(p, "/") || strings.ContainsRune(p, 0) || strings.Contains(p, ":") {
 		return "", false
 	}
@@ -62,8 +66,19 @@ func cleanRel(p string) (string, bool) {
 			return "", false
 		}
 	}
+	if dir {
+		return path.Clean(p) + "/", true
+	}
 	return path.Clean(p), true
 }
+
+// DirHash — «хеш» записи папки. Папки синхронизируются записями «путь/»,
+// иначе пустая папка (новая в Obsidian) не доезжала, пока в ней нет файла,
+// а после удаления всех файлов пустая оставалась.
+var DirHash = strings.Repeat("d", 64)
+
+// isDir — запись папки («a/b/»).
+func isDir(rel string) bool { return strings.HasSuffix(rel, "/") }
 
 // full — настоящий путь rel внутри root.
 func full(root, rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
@@ -181,8 +196,12 @@ func scanDir(root string, ig *Ignore) (map[string]stat, error) {
 			}
 			return nil
 		}
+		if d.IsDir() {
+			out[rel+"/"] = stat{} // запись папки: время не важно
+			return nil
+		}
 		if !d.Type().IsRegular() {
-			return nil // папки обходим, ссылки и устройства — нет
+			return nil // ссылки и устройства — нет
 		}
 		fi, ierr := d.Info()
 		if ierr != nil {

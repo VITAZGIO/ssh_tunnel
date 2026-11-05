@@ -498,8 +498,8 @@ func (m *module) state() map[string]any {
 	for _, f := range m.hub.Folders() {
 		it := serveItem{HubFolder: f, Conflicts: []Conflict{}}
 		if r, err := m.hub.Index(f.ID, 0, 0, nil); err == nil {
-			for _, fi := range r.Files {
-				if !fi.Deleted {
+			for p, fi := range r.Files {
+				if !fi.Deleted && !isDir(p) {
 					it.Files++
 				}
 			}

@@ -403,6 +403,20 @@ func (f *hfolder) setFile(h *Hub, rel string, fi FileInfo) error {
 func (h *Hub) refresh(f *hfolder, rel string) error {
 	p := full(f.Path, rel)
 	rec := f.ix.Files[rel]
+	if isDir(rel) {
+		fi, err := os.Lstat(p)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		has := err == nil && fi.IsDir()
+		switch {
+		case has && (rec == nil || rec.Deleted):
+			return f.setFile(h, rel, FileInfo{Hash: DirHash, By: h.host})
+		case !has && rec != nil && !rec.Deleted:
+			return f.setFile(h, rel, FileInfo{Deleted: true, By: h.host})
+		}
+		return nil
+	}
 	fi, err := os.Lstat(p)
 	if err != nil || !fi.Mode().IsRegular() {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -532,7 +546,7 @@ func (h *Hub) Open(id, rel, hash string) (*os.File, error) {
 		return nil, err
 	}
 	cur := f.ix.Files[rel]
-	if cur == nil || cur.Deleted || (hash != "" && cur.Hash != hash) {
+	if cur == nil || cur.Deleted || (hash != "" && cur.Hash != hash) || isDir(rel) {
 		return nil, errChanged
 	}
 	return os.Open(full(f.Path, rel))
@@ -637,6 +651,23 @@ func (h *Hub) Commit(id, dev, rel, hash string, base int64) (CommitReply, error)
 	cur := f.ix.Files[rel]
 	if cur != nil && !cur.Deleted && cur.Hash == hash {
 		return CommitReply{Ver: cur.Ver}, nil // уже так (повтор после обрыва ответа)
+	}
+	if isDir(rel) != (hash == DirHash) {
+		return CommitReply{}, errors.New("плохой путь или хеш")
+	}
+	if isDir(rel) {
+		// Папка: содержимого нет — просто создать.
+		if cur != nil && !cur.Deleted {
+			return CommitReply{}, errors.New("на месте папки файл")
+		}
+		if err := os.MkdirAll(full(f.Path, rel), 0o755); err != nil {
+			return CommitReply{}, err
+		}
+		if err := f.setFile(h, rel, FileInfo{Hash: DirHash, By: dev}); err != nil {
+			return CommitReply{}, err
+		}
+		go h.changed()
+		return CommitReply{Ver: f.ix.Files[rel].Ver}, nil
 	}
 	conflict := cur != nil && !cur.Deleted && cur.Ver != base
 	if conflict {
@@ -843,14 +874,27 @@ func (h *Hub) Delete(id, dev, rel string, base int64) (CommitReply, error) {
 		return CommitReply{Ver: cur.Ver, Conflict: true}, nil
 	}
 	if err := h.remove(f, rel, cur, dev); err != nil {
+		if errors.Is(err, errDirBusy) {
+			return CommitReply{Ver: cur.Ver, Conflict: true}, nil
+		}
 		return CommitReply{}, err
 	}
 	go h.changed()
 	return CommitReply{Ver: f.ix.Files[rel].Ver}, nil
 }
 
+// errDirBusy — в папке ещё что-то есть, удалять её нельзя.
+var errDirBusy = errors.New("папка не пустая")
+
 // remove — в корзину, потом с диска, потом в индекс.
 func (h *Hub) remove(f *hfolder, rel string, cur *FileInfo, dev string) error {
+	if isDir(rel) {
+		// Папку — только пустую: остальное в ней ещё живо.
+		if err := os.Remove(full(f.Path, rel)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return errDirBusy
+		}
+		return f.setFile(h, rel, FileInfo{Deleted: true, By: dev})
+	}
 	if err := h.archive(f, rel, cur, dev, true); err != nil {
 		return err
 	}

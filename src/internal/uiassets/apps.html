@@ -63,9 +63,14 @@
   .first .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .view{display:none;flex:1;min-height:0;flex-direction:column}
   .view.on{display:flex}
-  html.android #winBtn,html.android #winChk{display:none}
-  #winChk{display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--dim);cursor:pointer;white-space:nowrap}
-  #winChk input{margin:0;width:13px;height:13px}
+  html.android #winSeg{display:none}
+  /* Где открывать плагин: выбранное запоминается и дальше открывается так. */
+  .seg{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex:none}
+  .seg[hidden]{display:none}
+  .seg button{border:0;background:transparent;color:var(--dim);padding:6px 10px;font:inherit;font-size:12.5px;cursor:pointer;display:flex;gap:5px;align-items:center;white-space:nowrap}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button.on{background:var(--accent-muted);color:var(--text)}
+  .seg .mi{width:15px;height:15px}
   body.immersive #vApp .head{display:none}
 </style>
 </head>
@@ -117,8 +122,7 @@
       <button class="ico" id="backApp"></button>
       <span class="t" id="appTitle"></span>
       <button class="ico" id="helpBtn"></button>
-      <label id="winChk"><input type="checkbox" id="winAuto"><span></span></label>
-      <button class="tb" id="winBtn"></button>
+      <div class="seg" id="winSeg"><button id="segHere"></button><button id="segWin"></button></div>
     </div>
     <div class="first card" id="first" hidden>
       <p id="firstText"></p>
@@ -165,10 +169,10 @@ function setIcons(){
   $('addBtn').title = L('Добавить приложение', 'Add an app');
   $('helpBtn').innerHTML = icon('help');
   $('helpBtn').title = L('Справка в Книге', 'Help in the Book');
-  $('winBtn').innerHTML = icon('open_in_new') + '<span>' + L('В окне', 'Window') + '</span>';
-  $('winBtn').title = L('Открыть в отдельном окне', 'Open in a separate window');
-  $('winChk').lastChild.textContent = L('сразу в окне', 'open in window');
-  $('winChk').title = L('Галка — открывать отдельным окном сразу. Без галки — здесь.', 'Checked — open in a separate window right away. Unchecked — here.');
+  $('segHere').innerHTML = icon('web_asset') + '<span>' + L('Здесь', 'Here') + '</span>';
+  $('segHere').title = L('Открывать в программе (запомнится)', 'Open inside the app (remembered)');
+  $('segWin').innerHTML = icon('open_in_new') + '<span>' + L('В окне', 'Window') + '</span>';
+  $('segWin').title = L('Открывать отдельным окном (запомнится)', 'Open in a separate window (remembered)');
   $('listTitle').textContent = L('Плагины', 'Plugins');
   $('catTitle').textContent = L('Каталог', 'Catalog');
   $('firstMore').textContent = L('Подробнее — в Книге', 'More in the Book');
@@ -284,9 +288,9 @@ async function openApp(id, here){
   current = id;
   $('appTitle').innerHTML = appIcon(m) + '<span>' + esc(appName(m)) + '</span>';
   $('helpBtn').hidden = !m.book;
-  $('winBtn').hidden = SOLO || ANDROID;
-  $('winChk').hidden = ANDROID || !ST.windows;
-  $('winAuto').checked = inWin(id);
+  $('winSeg').hidden = SOLO || ANDROID;
+  $('segHere').classList.toggle('on', !inWin(id));
+  $('segWin').classList.toggle('on', inWin(id));
   $('backApp').hidden = SOLO && !Q.get('back');
   // Своё приложение — в песочнице: свой origin, без ключа программы в адресе.
   // Ключ приложения уже в пути страницы, им оно и ходит к API.
@@ -316,11 +320,18 @@ function popOut(id){
 $('first').querySelector('#firstOk').onclick = () => { $('first').hidden = true; if(current) op('seen', current); };
 $('firstMore').onclick = ev => { ev.preventDefault(); const m = manifest(current); if(m) openBook(m.book); };
 $('helpBtn').onclick = () => { const m = manifest(current); if(m) openBook(m.book); };
-$('winBtn').onclick = async () => {
+$('segWin').onclick = async () => {
   const id = current;
+  if(!id) return;
+  op('win', id, true);
+  $('segHere').classList.remove('on'); $('segWin').classList.add('on');
   if(await popOut(id)){ $('appFrame').src = 'about:blank'; current = null; show('vList'); }
 };
-$('winAuto').onchange = () => { if(current) op('win', current, $('winAuto').checked); };
+$('segHere').onclick = () => {
+  if(!current) return;
+  op('win', current, false);
+  $('segWin').classList.remove('on'); $('segHere').classList.add('on');
+};
 $('backApp').onclick = () => {
   document.body.classList.remove('immersive');
   if(EMBED) window.parent.postMessage({sshtunnel: 'immersive', on: false}, '*');

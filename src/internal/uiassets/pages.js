@@ -130,3 +130,14 @@ if(ANDROID && !window.sshtunnelPicked){
     }
   };
 }
+
+// Боковая «назад» на мыши во встроенной странице: шаг назад делает главное
+// окно (как «Назад» телефона), а не история фрейма.
+if(EMBED){
+  const mb = e => {
+    if(e.button !== 3 && e.button !== 4) return;
+    e.preventDefault(); e.stopPropagation();
+    if(e.type === 'mouseup' && e.button === 3) try { window.top.postMessage({sshtunnel: 'mouseback'}, location.origin); } catch(x) {}
+  };
+  ['mousedown', 'mouseup', 'auxclick'].forEach(t => addEventListener(t, mb, true));
+}

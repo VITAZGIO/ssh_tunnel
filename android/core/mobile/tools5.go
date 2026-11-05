@@ -34,6 +34,8 @@ type Phone interface {
 	Alert(text string)
 	// Ring — «Найти телефон» с другого устройства: громкий звонок.
 	Ring()
+	// StopRing — выключить «Найти телефон» (кнопка «Стоп» на другом устройстве).
+	StopRing()
 	// Media — медиа-кнопка с другого устройства (playpause, next, prev,
 	// volup, voldown, mute).
 	Media(key string)

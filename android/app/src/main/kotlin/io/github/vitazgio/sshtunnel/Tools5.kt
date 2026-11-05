@@ -79,29 +79,16 @@ object Tools5 : mobile.Phone {
         }
     }
 
-    /** «Найти телефон»: будильник на полную громкость 20 с и вибрация — даже в беззвучном. */
+    /** «Найти телефон»: свой трек или будильник, нарастает до максимума (FindRing). */
     override fun ring() {
         val c = app ?: return
-        main.post {
-            try {
-                val am = c.getSystemService(android.media.AudioManager::class.java)
-                am?.setStreamVolume(android.media.AudioManager.STREAM_ALARM, am.getStreamMaxVolume(android.media.AudioManager.STREAM_ALARM), 0)
-                val uri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM)
-                    ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
-                val rt = android.media.RingtoneManager.getRingtone(c, uri)
-                rt?.audioAttributes = android.media.AudioAttributes.Builder()
-                    .setUsage(android.media.AudioAttributes.USAGE_ALARM).build()
-                rt?.play()
-                main.postDelayed({ rt?.stop() }, 20_000)
-                val v = if (Build.VERSION.SDK_INT >= 31)
-                    c.getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator
-                else @Suppress("DEPRECATION") c.getSystemService(android.os.Vibrator::class.java)
-                v?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 600, 400), 0))
-                main.postDelayed({ v?.cancel() }, 20_000)
-                Toast.makeText(c, c.getString(R.string.phonelink_ring), Toast.LENGTH_LONG).show()
-            } catch (_: Exception) {
-            }
-        }
+        FindRing.init(c)
+        FindRing.start(c)
+    }
+
+    /** «Стоп» поиска с другого устройства. */
+    override fun stopRing() {
+        FindRing.stop()
     }
 
     /** Медиа-кнопка с другого устройства: играет/пауза/дальше/громкость. */
