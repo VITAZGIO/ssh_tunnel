@@ -274,11 +274,34 @@ func (c *client) watchUpgrade(dir string) {
 		if err != nil || ep.Version == "" || updater.Compare(updater.Version, ep.Version) != -1 { // -1 — служба новее
 			continue
 		}
-		cmd := exec.Command(winsvc.InstalledExe(), "-wait-instance")
+		// Окно запущено из своей папки (не из Program Files) — обновляем и
+		// этот файл: копия службы уже новая. Не вышло — новое окно из Program Files.
+		run := winsvc.InstalledExe()
+		if self, err := os.Executable(); err == nil && !winsvc.SamePath(self, run) {
+			if copyOver(run, self) == nil {
+				run = self
+			}
+		}
+		cmd := exec.Command(run, "-wait-instance")
 		if err := cmd.Start(); err != nil {
 			continue
 		}
 		nativeui.Quit()
 		return
 	}
+}
+
+// copyOver — новый src на место работающего dst: dst в «.old» (работающий
+// файл Windows даёт только переименовать; уберёт CleanOld), копия — на место.
+func copyOver(src, dst string) error {
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	tmp := dst + ".new"
+	if err := os.WriteFile(tmp, b, 0o755); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return updater.Swap(tmp, dst)
 }

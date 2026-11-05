@@ -54,6 +54,7 @@ func main() {
 	flag.Parse()
 
 	updater.VPN = true
+	updater.CleanOld() // «.old» прошлой версии после самообновления
 
 	switch {
 	case *service:
