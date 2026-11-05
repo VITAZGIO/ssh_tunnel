@@ -47,7 +47,7 @@ func init() {
 	addons.Register(ID, func() addons.Module { return &module{} })
 	addons.RegisterRoutes(ID, addons.Route{
 		Path: "/api/vault", Methods: "GET, POST",
-		Desc: "Пароли: GET — состояние (есть ли хранилище, открыто ли) и записи без паролей; POST {\"op\":\"create|unlock|lock|get|set|delete|gen|sync|extkey\",…}. Пароль отдаёт только get {id} при открытом хранилище.",
+		Desc: "Пароли: GET — состояние (есть ли хранилище, открыто ли) и записи без паролей; POST {\"op\":\"create|unlock|lock|get|set|delete|gen|sync|import|export|extkey\",…}. Пароль отдаёт только get {id} при открытом хранилище. import {csv} — CSV из Chrome/Яндекса/Firefox/Bitwarden; export {master} — CSV в «Загрузки».",
 		H:    handleAPI,
 	})
 }
@@ -516,9 +516,10 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		Op   string `json:"op"`
 		Pass string `json:"master"`
 		Len  int    `json:"len"`
+		CSV  string `json:"csv"`
 		Entry
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<20)).Decode(&req); err != nil {
 		writeJSON(w, map[string]string{"error": "нужен JSON {\"op\"}"})
 		return
 	}
@@ -561,6 +562,17 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 	case "sync":
 		g, c := Sync()
 		out = map[string]int{"devices": g, "changed": c}
+	case "import":
+		var a, u, k int
+		if a, u, k, err = ImportCSV([]byte(req.CSV)); err == nil {
+			out = map[string]int{"added": a, "updated": u, "skipped": k}
+		}
+	case "export":
+		var p string
+		var n int
+		if p, n, err = ExportCSV(req.Pass); err == nil {
+			out = map[string]any{"path": p, "count": n}
+		}
 	case "extkey":
 		out = map[string]string{"key": newExtKey()}
 	case "extinstall":
@@ -569,7 +581,7 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 			out = map[string]string{"dir": dir}
 		}
 	default:
-		err = errors.New("op: create, unlock, lock, get, set, delete, gen, sync, extkey, extinstall")
+		err = errors.New("op: create, unlock, lock, get, set, delete, gen, sync, import, export, extkey, extinstall")
 	}
 	if err != nil {
 		writeJSON(w, map[string]string{"error": err.Error()})

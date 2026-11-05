@@ -79,8 +79,8 @@ type bitmapInfo struct {
 
 const dibRGBColors = 0
 
-// IconPNG достаёт иконку исполняемого файла (маленькую, 16×16 — ровно ту, что
-// рисуется рядом со строкой в списке) и отдаёт её уже закодированной в PNG.
+// IconPNG достаёт иконку исполняемого файла (32×32 — в списках она 26 px,
+// маленькая 16×16 там расплывалась) и отдаёт её уже закодированной в PNG.
 func IconPNG(path string) ([]byte, error) {
 	if path == "" {
 		return nil, errors.New("пустой путь")
@@ -94,7 +94,7 @@ func IconPNG(path string) ([]byte, error) {
 	r, _, _ := procSHGetFileInfoW.Call(
 		uintptr(unsafe.Pointer(pathPtr)), 0,
 		uintptr(unsafe.Pointer(&info)), unsafe.Sizeof(info),
-		uintptr(shgfiIcon|shgfiSmallIcon))
+		uintptr(shgfiIcon|shgfiLargeIcon))
 	if r == 0 || info.hIcon == 0 {
 		return nil, errors.New("SHGetFileInfo не вернул значок")
 	}

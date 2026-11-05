@@ -24,7 +24,18 @@
   .meter{height:7px;border-radius:4px;background:var(--card2);overflow:hidden}
   .meter i{display:block;height:100%;border-radius:4px;background:var(--ok);transition:width .4s}
   .meter i.w{background:var(--warn)}.meter i.e{background:var(--err)}
-  .spark{width:100%;height:34px;display:block}
+  .spark{width:100%;height:26px;display:block}
+  .gs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;text-align:center}
+  .g{display:flex;flex-direction:column;align-items:center;min-width:0}
+  .g svg{width:100%;max-width:84px;display:block}
+  .g .bg{fill:none;stroke:var(--card2);stroke-width:7;stroke-linecap:round}
+  .g .fg{fill:none;stroke:var(--ok);stroke-width:7;stroke-linecap:round;transition:stroke-dasharray .4s}
+  .g .fg.w{stroke:var(--warn)}.g .fg.e{stroke:var(--err)}
+  .g text{fill:var(--text);font-size:15px;font-weight:700;text-anchor:middle;font-variant-numeric:tabular-nums}
+  .g .gl{font-size:11.5px;color:var(--dim);margin-top:-2px}
+  .g .gv{font-size:10.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;font-variant-numeric:tabular-nums}
+  .mv{width:26px;height:26px;padding:0}
+  .mv .mi{width:18px;height:18px}
   .chips{display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px;color:var(--dim)}
   .chips b{color:var(--text);font-weight:600}
   .err{color:var(--err);font-size:12.5px}
@@ -95,13 +106,21 @@ const gb = b => b >= 1e12 ? (b / 1e12).toFixed(1) + L(' ТБ', ' TB') : (b / 1e9
 const up = s => { const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600); return d ? `${d} ${L('д', 'd')} ${h} ${L('ч', 'h')}` : `${h} ${L('ч', 'h')} ${Math.floor(s % 3600 / 60)} ${L('мин', 'min')}`; };
 const lvl = p => p >= 90 ? 'e' : p >= 70 ? 'w' : '';
 function meter(name, pct, text){ return `<div class="row"><span>${esc(name)}</span><div class="meter"><i class="${lvl(pct)}" style="width:${Math.min(100, pct).toFixed(0)}%"></i></div><span class="v">${esc(text)}</span></div>`; }
+// Спидометр: дуга-полукруг, заполнена на pct %.
+function gauge(name, pct, text){
+  const p = Math.max(0, Math.min(100, pct || 0));
+  const arc = 'M9 43 A31 31 0 0 1 71 43';
+  return `<div class="g"><svg viewBox="0 0 80 48"><path class="bg" d="${arc}"/>${p > 0.5 ? `<path class="fg ${lvl(p)}" d="${arc}" pathLength="100" stroke-dasharray="${p.toFixed(1)} 100"/>` : ''}<text x="40" y="44">${p.toFixed(0)}%</text></svg>
+    <span class="gl">${esc(name)}</span>${text ? `<span class="gv">${esc(text)}</span>` : ''}</div>`;
+}
 function spark(h){
   if(!h || h.length < 2) return '';
   const W = 260, H = 34, max = 100;
   const pts = h.map((v, i) => `${(i * W / (h.length - 1)).toFixed(1)},${(H - 2 - (H - 4) * Math.min(v, max) / max).toFixed(1)}`).join(' ');
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg>`;
 }
-function card(m, own){
+// group — в какой список карточка (для стрелок порядка); n — сколько в нём.
+function card(m, own, group, n){
   const r = m.reading, alive = r && r.online;
   const peerUp = own && m.peer && ST.online[m.peer];
   let body = r ? `<div class="hint ${alive ? 'ok' : ''}">${alive ? '● ' + esc(L('в сети', 'online')) + (r.ping ? ` · ${r.ping < 10 ? r.ping.toFixed(1) : r.ping.toFixed(0)} ${L('мс', 'ms')}` : '') : '○ ' + esc(L('не отвечает — выключена или не в сети', 'not answering — off or offline'))}</div>` : '';
@@ -109,13 +128,15 @@ function card(m, own){
   else if(!r) body = `<div class="hint">${esc(L('Читаю…', 'Reading…'))}</div>`;
   else if(r.error) body = `<div class="err">${esc(r.error)}</div>`;
   else {
-    if(m.src !== 'ha' || r.cpu) body += meter(L('процессор', 'CPU'), r.cpu, r.cpu.toFixed(0) + '%');
-    if(r.memTotal) body += meter(L('память', 'memory'), r.memUsed * 100 / r.memTotal, `${gb(r.memUsed)} / ${gb(r.memTotal)}`);
-    if(r.diskTotal) body += meter(L('диск', 'disk'), r.diskUsed * 100 / r.diskTotal, `${gb(r.diskUsed)} / ${gb(r.diskTotal)}`);
+    const gs = [];
+    if(m.src !== 'ha' || r.cpu) gs.push(gauge(L('процессор', 'CPU'), r.cpu, r.cores ? r.cores + L(' ядер', ' cores') : ''));
+    if(r.memTotal) gs.push(gauge(L('память', 'memory'), r.memUsed * 100 / r.memTotal, `${gb(r.memUsed)} / ${gb(r.memTotal)}`));
+    if(r.diskTotal) gs.push(gauge(L('диск', 'disk'), r.diskUsed * 100 / r.diskTotal, `${gb(r.diskUsed)} / ${gb(r.diskTotal)}`));
+    if(gs.length) body += `<div class="gs">${gs.join('')}</div>`;
     body += spark(r.hist);
     const ch = [];
     if(r.temp) ch.push(`🌡 <b>${r.temp.toFixed(0)}°C</b>`);
-    if(r.load) ch.push(`${esc(L('нагрузка', 'load'))} <b>${r.load.toFixed(2)}</b>${r.cores ? ' / ' + r.cores : ''}`);
+    if(r.load) ch.push(`${esc(L('нагрузка', 'load'))} <b>${r.load.toFixed(2)}</b>`);
     if(r.uptime) ch.push(`⏱ <b>${esc(up(r.uptime))}</b>`);
     if(ch.length) body += `<div class="chips">${ch.join('')}</div>`;
     if(r.extra && r.extra.length) body += r.extra.filter(x => !(m.src === 'ha' && false)).map(x => `<div class="row"><span>${esc(x.name)}</span><span></span><span class="v">${esc(x.value)} ${esc(x.unit || '')}</span></div>`).join('');
@@ -123,8 +144,8 @@ function card(m, own){
   const acts = [];
   if(m.mac) acts.push(`<button class="btn" data-wake="${esc(m.id)}" data-mac="${esc(m.mac)}">${icon('power_settings_new')} ${esc(L('Включить', 'Wake'))}</button>`);
   if(own && m.peer) acts.push(`<button class="btn" data-off="${esc(m.id)}">${esc(L('Выключить', 'Shut down'))}</button>`);
-  if(own) acts.push(`<button class="ico" data-ed="${esc(m.id)}" title="${esc(L('Изменить', 'Edit'))}">${icon('edit')}</button>`);
-  return `<div class="card m"><div class="top"><span class="dot ${alive || peerUp ? 'ok' : r && r.error ? 'err' : ''}"></span><b>${esc(m.name)}</b><span class="src">${esc(SRCSHORT[m.src || ''])}</span></div>
+  const mv = n > 1 ? `<button class="ico mv" data-mv="${esc(m.id)}" data-g="${esc(group)}" data-d="-1" title="${esc(L('Выше', 'Up'))}">${icon('keyboard_arrow_up')}</button><button class="ico mv" data-mv="${esc(m.id)}" data-g="${esc(group)}" data-d="1" title="${esc(L('Ниже', 'Down'))}">${icon('keyboard_arrow_down')}</button>` : '';
+  return `<div class="card m"><div class="top"><span class="dot ${alive || peerUp ? 'ok' : r && r.error ? 'err' : ''}"></span><b>${esc(m.name)}</b><span class="src">${esc(SRCSHORT[m.src || ''])}</span>${mv}${own ? `<button class="ico mv" data-ed="${esc(m.id)}" title="${esc(L('Изменить', 'Edit'))}">${icon('edit')}</button>` : ''}</div>
     ${body}${acts.length ? `<div class="acts">${acts.join('')}</div>` : ''}<div class="hint" data-st="${esc(m.id)}"></div></div>`;
 }
 function bindCards(root){
@@ -142,19 +163,46 @@ function bindCards(root){
     st.textContent = r.error || L('Выключится через 30 секунд.', 'Shuts down in 30 s.');
   });
   root.querySelectorAll('[data-ed]').forEach(b => b.onclick = () => edit(b.dataset.ed));
+  root.querySelectorAll('[data-mv]').forEach(b => b.onclick = () => move(b.dataset.g, b.dataset.mv, +b.dataset.d));
+}
+// Порядок: свои машины — в настройках ядра (одинаково везде, где их видно),
+// машины из сети — запоминаются на этом устройстве.
+const netKey = dev => 'machines.order.' + dev;
+function netOrder(dev){ try { return JSON.parse(localStorage.getItem(netKey(dev)) || '[]'); } catch(_) { return []; } }
+function sorted(list, order){
+  const pos = id => { const i = order.indexOf(id); return i < 0 ? 1e6 : i; };
+  return list.map((m, i) => [m, i]).sort((a, b) => pos(a[0].id) - pos(b[0].id) || a[1] - b[1]).map(x => x[0]);
+}
+async function move(group, id, d){
+  const list = group === '' ? ST.machines : sorted((ST.network || []).find(x => x.device === group).machines, netOrder(group));
+  const ids = list.map(m => m.id), i = ids.indexOf(id), j = i + d;
+  if(i < 0 || j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  if(group === ''){
+    ST.machines = ids.map(x => ST.machines.find(m => m.id === x));
+    draw();
+    await api('/api/machines', {op: 'order', order: ids}).catch(() => {});
+  } else {
+    try { localStorage.setItem(netKey(group), JSON.stringify(ids)); } catch(_) {}
+    draw();
+  }
 }
 async function load(){
   const r = await api('/api/machines').catch(() => null);
   if(!r) return;
   ST = r; ST.machines = ST.machines || []; ST.peers = ST.peers || []; ST.online = ST.online || {};
-  $('mine').innerHTML = ST.machines.length ? ST.machines.map(m => card(m, true)).join('')
+  draw();
+  $('share').checked = ST.settings.share; $('allowOff').checked = ST.settings.allowShutdown;
+  $('rowOff').hidden = !ST.canShutdown;
+}
+function draw(){
+  const n = ST.machines.length;
+  $('mine').innerHTML = n ? ST.machines.map(m => card(m, true, '', n)).join('')
     : `<div class="card hint">${esc(L('Машин пока нет — «Добавить машину».', 'No machines yet.'))}</div>`;
   bindCards($('mine'));
   const net = ST.network || [];
-  $('net').innerHTML = net.map(d => `<h3>${icon('hub')}${esc(L('Из сети: ', 'From the network: ') + d.device)}</h3><div class="grid">${d.machines.map(m => card(m, false)).join('')}</div>`).join('');
+  $('net').innerHTML = net.map(d => `<h3>${icon('hub')}${esc(L('Из сети: ', 'From the network: ') + d.device)}</h3><div class="grid">${sorted(d.machines, netOrder(d.device)).map(m => card(m, false, d.device, d.machines.length)).join('')}</div>`).join('');
   bindCards($('net'));
-  $('share').checked = ST.settings.share; $('allowOff').checked = ST.settings.allowShutdown;
-  $('rowOff').hidden = !ST.canShutdown;
 }
 const saveSet = () => api('/api/machines', {op: 'settings', settings: {share: $('share').checked, allowShutdown: $('allowOff').checked}});
 $('share').onchange = saveSet; $('allowOff').onchange = saveSet;
