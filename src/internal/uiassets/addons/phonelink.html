@@ -39,6 +39,7 @@
 <body>
 <div class="wrap">
   <div id="devs"></div>
+  <input type="file" id="photo" accept="image/*" hidden>
   <div class="hint" id="msg"></div>
   <h3 id="tNot"></h3>
   <div class="card" id="nots"></div>
@@ -70,7 +71,8 @@ function devCard(p){
   // Тачпад и клавиатура — для компьютера; удобнее всего с телефона.
   if(!phone) h += `<div class="pad">${esc(L('Тачпад: веди пальцем — курсор, тап — щелчок, двумя — прокрутка', 'Touchpad: move, tap to click, two fingers to scroll'))}</div>
     <div class="two"><button data-b="left">${esc(L('Левая', 'Left'))}</button><button data-b="right">${esc(L('Правая', 'Right'))}</button></div>
-    <div class="bar"><input placeholder="${esc(L('напечатать на компьютере…', 'type on the computer…'))}"><button class="btn" data-a="send">${esc(L('Отправить', 'Send'))}</button></div>`;
+    <div class="bar"><input placeholder="${esc(L('напечатать на компьютере…', 'type on the computer…'))}"><button class="btn" data-a="send">${esc(L('Отправить', 'Send'))}</button></div>
+    <div class="row"><button data-a="photo">🖼 ${esc(L('Фото — вставить на компьютере', 'Paste a photo on the computer'))}</button></div>`;
   return h + '</div>';
 }
 function bindPad(card, ip){
@@ -96,7 +98,22 @@ function bindPad(card, ip){
   pad.addEventListener('touchend', () => { two = null; });
   pad.addEventListener('wheel', e => { e.preventDefault(); act(ip, 'mouse', {scroll: e.deltaY < 0 ? 1 : -1}); }, {passive: false});
 }
-let drawnKey = '';
+let drawnKey = '', photoTo = '';
+// Фото: ужимаем до 2560 px и отдаём компьютеру — там оно попадает в буфер
+// обмена и вставляется Ctrl+V в окно, где курсор (сообщение, документ).
+$('photo').onchange = async () => {
+  const f = $('photo').files[0]; $('photo').value = '';
+  if(!f || !photoTo) return;
+  say(L('Отправляю фото…', 'Sending photo…'));
+  try {
+    const bmp = await createImageBitmap(f);
+    const k = Math.min(1, 2560 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    await act(photoTo, 'image', {img: c.toDataURL('image/jpeg', 0.9).split(',')[1]});
+  } catch(e){ say(String(e.message || e), 'err'); }
+};
 async function load(){
   ST = await api('/api/phonelink').catch(() => null);
   if(!ST) return;
@@ -119,6 +136,8 @@ async function load(){
         send.onclick = async () => { if(!inp.value) return; const r = await act(ip, 'text', {text: inp.value}); if(r && !r.error) inp.value = ''; };
         inp.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); send.click(); } });
       }
+      const ph = card.querySelector('[data-a=photo]');
+      if(ph) ph.onclick = () => { photoTo = ip; $('photo').click(); };
       bindPad(card, ip);
     });
   } else peers.forEach(p => { const c = document.querySelector(`.dev[data-ip="${p.ip}"] small`); if(c) c.textContent = p.battery ? `🔋 ${p.battery.level}%${p.battery.charging ? ' ⚡' : ''}` : ''; });

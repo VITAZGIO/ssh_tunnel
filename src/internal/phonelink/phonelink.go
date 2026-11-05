@@ -12,6 +12,7 @@ package phonelink
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -39,19 +40,22 @@ func init() {
 	addons.Register(ID, func() addons.Module { return &module{} })
 	addons.RegisterRoutes(ID, addons.Route{
 		Path: "/api/phonelink", Methods: "GET, POST",
-		Desc: "Связь с телефоном: GET — устройства (заряд), уведомления с других устройств, настройки; POST {\"op\":\"ring|media|mouse|text|clear|set\",\"peer\",…} — позвонить, медиа-кнопка (playpause|next|prev|volup|voldown|mute), мышь {dx,dy,btn,scroll}, напечатать текст, очистить уведомления, настройки {sendNotifs,allowControl}.",
+		Desc: "Связь с телефоном: GET — устройства (заряд), уведомления с других устройств, настройки; POST {\"op\":\"ring|media|mouse|text|clear|set\",\"peer\",…} — позвонить, медиа-кнопка (playpause|next|prev|volup|voldown|mute), мышь {dx,dy,btn,scroll}, напечатать текст, image {img: base64 JPEG/PNG} — в буфер обмена компьютера и Ctrl+V, очистить уведомления, настройки {sendNotifs,allowControl}.",
 		H:    handleAPI,
 	})
 }
 
 // Ev — сообщение между устройствами.
 type Ev struct {
-	Kind string `json:"kind"` // notif, ring, media, mouse, text, battery
+	Kind string `json:"kind"` // notif, ring, media, mouse, text, image, battery
 
 	App   string `json:"app,omitempty"` // notif
 	Title string `json:"title,omitempty"`
 	Text  string `json:"text,omitempty"` // notif, text
 	Key   string `json:"key,omitempty"`  // media
+	// Img — картинка (JPEG/PNG в base64): кладётся в буфер обмена
+	// компьютера и сразу вставляется (Ctrl+V) — фото с телефона в сообщение.
+	Img string `json:"img,omitempty"`
 
 	DX     int    `json:"dx,omitempty"` // mouse
 	DY     int    `json:"dy,omitempty"`
@@ -248,13 +252,16 @@ func peerName(ip, fallback string) string {
 	return fallback
 }
 
+// maxBody — с запасом под фото (картинку страница ужимает до ~2560 px).
+const maxBody = 16 << 20
+
 func receive(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST", http.StatusMethodNotAllowed)
 		return
 	}
 	var e Ev
-	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&e); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&e); err != nil {
 		http.Error(w, "json", http.StatusBadRequest)
 		return
 	}
@@ -291,13 +298,20 @@ func handleEv(e Ev, ip string) error {
 		} else {
 			ring(e.From)
 		}
-	case "media", "mouse", "text":
+	case "media", "mouse", "text", "image":
 		if !allow {
 			return errors.New("управление этим устройством выключено")
 		}
 		if e.Kind == "media" && p != nil {
 			p.Media(e.Key)
 			return nil
+		}
+		if e.Kind == "image" {
+			b, err := base64.StdEncoding.DecodeString(e.Img)
+			if err != nil {
+				return errors.New("картинка испорчена")
+			}
+			return pasteImage(b)
 		}
 		return inject(e)
 	}
@@ -418,7 +432,7 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		Ev
 		Settings *Settings `json:"settings"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&req); err != nil {
 		writeJSON(w, map[string]string{"error": "нужен JSON {\"op\"}"})
 		return
 	}
@@ -436,7 +450,7 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 			err = os.WriteFile(setPath(), b, 0o600)
 			mu.Unlock()
 		}
-	case "ring", "media", "mouse", "text":
+	case "ring", "media", "mouse", "text", "image":
 		if req.Peer == "" {
 			err = errors.New("выбери устройство")
 			break
@@ -445,7 +459,7 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		e.Kind = req.Op
 		err = sendTo(req.Peer, e)
 	default:
-		err = errors.New("op: ring, media, mouse, text, clear или set")
+		err = errors.New("op: ring, media, mouse, text, image, clear или set")
 	}
 	if err != nil {
 		writeJSON(w, map[string]string{"error": err.Error()})

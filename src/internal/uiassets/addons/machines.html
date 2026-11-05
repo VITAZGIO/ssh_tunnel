@@ -121,7 +121,7 @@ function card(m, own){
     if(r.extra && r.extra.length) body += r.extra.filter(x => !(m.src === 'ha' && false)).map(x => `<div class="row"><span>${esc(x.name)}</span><span></span><span class="v">${esc(x.value)} ${esc(x.unit || '')}</span></div>`).join('');
   }
   const acts = [];
-  if(m.mac) acts.push(`<button class="btn" data-wake="${esc(m.id)}" data-mac="${esc(m.mac)}">⏻ ${esc(L('Включить', 'Wake'))}</button>`);
+  if(m.mac) acts.push(`<button class="btn" data-wake="${esc(m.id)}" data-mac="${esc(m.mac)}">${icon('power_settings_new')} ${esc(L('Включить', 'Wake'))}</button>`);
   if(own && m.peer) acts.push(`<button class="btn" data-off="${esc(m.id)}">${esc(L('Выключить', 'Shut down'))}</button>`);
   if(own) acts.push(`<button class="ico" data-ed="${esc(m.id)}" title="${esc(L('Изменить', 'Edit'))}">${icon('edit')}</button>`);
   return `<div class="card m"><div class="top"><span class="dot ${alive || peerUp ? 'ok' : r && r.error ? 'err' : ''}"></span><b>${esc(m.name)}</b><span class="src">${esc(SRCSHORT[m.src || ''])}</span></div>
