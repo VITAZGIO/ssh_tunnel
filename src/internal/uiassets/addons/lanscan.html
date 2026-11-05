@@ -253,6 +253,10 @@ function permCard(r){
     box.innerHTML = `<p style="margin:0 0 8px">${esc(L('Android показывает сети Wi-Fi только приложениям с доступом к точной геолокации: по адресам точек доступа можно узнать, где ты. Программа никуда это не отправляет.', 'Android shows Wi-Fi networks only to apps with precise location access: access point addresses reveal where you are. Nothing is sent anywhere.'))}</p>
       <button class="btn primary" id="wpBtn">${esc(L('Разрешить', 'Allow'))}</button>`;
     $('wpBtn').onclick = () => SSHTunnelAndroid.wifiAskPermission();
+  } else if(r.need === 'winlocation'){
+    box.innerHTML = `<p style="margin:0 0 8px">${esc(L('Windows показывает сети Wi-Fi только программам с доступом к местоположению. Включи в «Расположении» два переключателя: «Службы определения местоположения» и «Разрешить классическим приложениям доступ к расположению». Программа никуда это не отправляет.', 'Windows shows Wi-Fi networks only to apps with location access. In «Location» turn on «Location services» and «Let desktop apps access your location». Nothing is sent anywhere.'))}</p>
+      <button class="btn primary" id="wpBtn">${esc(L('Открыть настройки', 'Open settings'))}</button>`;
+    $('wpBtn').onclick = () => api('/api/lanscan/wifi?open=location');
   } else if(r.need === 'location'){
     box.textContent = L('Включи геолокацию в шторке — без неё Android сети Wi-Fi не показывает.', 'Turn on location in quick settings — without it Android shows no Wi-Fi networks.');
   } else box.textContent = r.error || L('Wi-Fi здесь недоступен.', 'Wi-Fi is not available here.');

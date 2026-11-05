@@ -255,6 +255,10 @@ func tree(t *testing.T, root string) map[string]string {
 	}
 	out := map[string]string{}
 	for p := range disk {
+		if isDir(p) {
+			out[p] = "<папка>"
+			continue
+		}
 		b, err := os.ReadFile(full(root, p))
 		if err != nil {
 			t.Fatal(err)
@@ -662,7 +666,7 @@ func TestIgnore(t *testing.T) {
 	}
 	e.write(a.Path, ".obsidian/app.json", "настройки")
 	e.settle()
-	got := keys(tree(t, b.Path))
+	got := fileKeys(tree(t, b.Path))
 	if len(got) != 1 || got[0] != ".obsidian/app.json" {
 		t.Fatalf("исключения не сработали: %v", got)
 	}
@@ -817,7 +821,7 @@ func TestLongRandom(t *testing.T) {
 	rnd := rand.New(rand.NewSource(6))
 	for round := 0; round < rounds; round++ {
 		for _, c := range cs {
-			names := keys(tree(t, c.Path))
+			names := fileKeys(tree(t, c.Path))
 			for k := 0; k < 15 && len(names) > 0; k++ {
 				p := names[rnd.Intn(len(names))]
 				if rnd.Intn(2) == 0 {
@@ -860,4 +864,43 @@ func TestLongRandom(t *testing.T) {
 	if !testing.Short() && len(conflictsIn(srv)) == 0 {
 		t.Error("длительный тест не создал ни одного конфликта — проверка слабая")
 	}
+}
+
+// fileKeys — пути файлов дерева (без записей папок).
+func fileKeys(m map[string]string) []string {
+	var out []string
+	for _, k := range keys(m) {
+		if !isDir(k) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// Пустые папки доезжают и удаляются (Obsidian: новая папка без заметок).
+func TestEmptyDirs(t *testing.T) {
+	e := newEnv(t)
+	a, b := e.client("A", ModeBoth), e.client("B", ModeBoth)
+	if err := os.MkdirAll(full(a.Path, "Новая/Вложенная"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e.settle()
+	if fi, err := os.Stat(full(b.Path, "Новая/Вложенная")); err != nil || !fi.IsDir() {
+		t.Fatalf("пустая папка не доехала: %v", err)
+	}
+	if fi, err := os.Stat(full(e.root, "Новая/Вложенная")); err != nil || !fi.IsDir() {
+		t.Fatalf("пустой папки нет на сервере: %v", err)
+	}
+	// Заметка в папке и удаление всей папки на B — у A папки тоже нет.
+	e.write(a.Path, "Новая/заметка.md", "текст")
+	e.settle()
+	if err := os.RemoveAll(full(b.Path, "Новая")); err != nil {
+		t.Fatal(err)
+	}
+	e.settle()
+	if _, err := os.Stat(full(a.Path, "Новая")); err == nil {
+		t.Fatalf("удалённая папка осталась: %v", keys(tree(t, a.Path)))
+	}
+	e.converged()
+	e.noLoss()
 }

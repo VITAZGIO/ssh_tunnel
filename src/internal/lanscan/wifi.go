@@ -37,14 +37,22 @@ type WifiLink struct {
 
 // WifiReport — ответ GET /api/lanscan/wifi.
 type WifiReport struct {
-	Available bool      `json:"available"`
-	Error     string    `json:"error,omitempty"`
-	Networks  []WifiNet `json:"networks,omitempty"`
-	Link      *WifiLink `json:"link,omitempty"`
+	Available bool   `json:"available"`
+	Error     string `json:"error,omitempty"`
+	// Need — чего не хватает: «winlocation» — Windows 11 не отдаёт сети
+	// без доступа программ к местоположению.
+	Need     string    `json:"need,omitempty"`
+	Networks []WifiNet `json:"networks,omitempty"`
+	Link     *WifiLink `json:"link,omitempty"`
 }
 
 func handleWifi(w http.ResponseWriter, r *http.Request) {
 	var rep WifiReport
+	if r.URL.Query().Get("open") == "location" {
+		openLocationSettings()
+		writeJSON(w, map[string]bool{"ok": true})
+		return
+	}
 	if r.URL.Query().Get("now") == "1" {
 		rep = wifiLinkOnly()
 	} else {

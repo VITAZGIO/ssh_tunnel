@@ -46,6 +46,10 @@
   <div class="card" style="display:flex;flex-direction:column;gap:8px">
     <label class="ck" id="rowSend"><input type="checkbox" id="sSend"><span id="lSend"></span></label>
     <div id="access"></div>
+    <div id="ringRow" style="display:none;flex-direction:column;gap:6px">
+      <span id="ringT"></span>
+      <div class="row"><button id="ringPick"></button><button id="ringDef"></button><button id="ringTest"></button></div>
+    </div>
     <label class="ck"><input type="checkbox" id="sCtl"><span id="lCtl"></span><span class="q" id="qCtl">?</span></label>
     <div class="tip" id="tCtl" hidden></div>
   </div>
@@ -66,7 +70,7 @@ function devCard(p){
   const phone = p.role === 'phone', me = ST.role;
   const bat = p.battery ? `🔋 ${p.battery.level}%${p.battery.charging ? ' ⚡' : ''}` : '';
   let h = `<div class="card dev" data-ip="${esc(p.ip)}"><div class="top">${icon(phone ? 'smartphone' : 'desktop_windows')}<b>${esc(p.name)}</b><small>${esc(bat)}</small></div>
-    <div class="row"><button data-a="ring">📢 ${esc(phone ? L('Найти телефон', 'Find phone') : L('Подать сигнал', 'Beep'))}</button></div>
+    <div class="row"><button data-a="ring">📢 ${esc(phone ? L('Найти телефон', 'Find phone') : L('Подать сигнал', 'Beep'))}</button>${phone ? `<button data-a="unring">■ ${esc(L('Стоп', 'Stop'))}</button>` : ''}</div>
     <div class="media"><button data-k="prev">⏮</button><button data-k="playpause">⏯</button><button data-k="next">⏭</button><button data-k="voldown">🔉</button><button data-k="mute">🔇</button><button data-k="volup">🔊</button></div>`;
   // Тачпад и клавиатура — для компьютера; удобнее всего с телефона.
   if(!phone) h += `<div class="pad">${esc(L('Тачпад: веди пальцем — курсор, тап — щелчок, двумя — прокрутка', 'Touchpad: move, tap to click, two fingers to scroll'))}</div>
@@ -129,6 +133,8 @@ async function load(){
     document.querySelectorAll('.dev').forEach(card => {
       const ip = card.dataset.ip;
       card.querySelector('[data-a=ring]').onclick = () => act(ip, 'ring');
+      const un = card.querySelector('[data-a=unring]');
+      if(un) un.onclick = () => act(ip, 'ring', {key: 'stop'});
       card.querySelectorAll('[data-k]').forEach(b => b.onclick = () => act(ip, 'media', {key: b.dataset.k}));
       card.querySelectorAll('[data-b]').forEach(b => b.onclick = () => act(ip, 'mouse', {btn: b.dataset.b}));
       const inp = card.querySelector('.bar input'), send = card.querySelector('[data-a=send]');
@@ -145,6 +151,7 @@ async function load(){
   $('nots').innerHTML = n.length ? n.slice(0, 50).map(x => `<div class="n"><div class="h"><span>${esc(x.from || '')}</span><span>${esc(x.app || '')}</span><span>${new Date(x.time * 1000).toLocaleTimeString(LANG === 'en' ? 'en-GB' : 'ru-RU', {hour: '2-digit', minute: '2-digit'})}</span></div>
       <b>${esc(x.title || '')}</b>${esc(x.text || '')}</div>`).join('') + `<button class="btn" id="clr" style="margin-top:8px">${esc(L('Очистить', 'Clear'))}</button>`
     : `<div class="hint">${esc(ST.role === 'phone' ? L('Здесь — уведомления с других устройств.', 'Notifications from other devices.') : L('Уведомлений с телефона пока нет.', 'No phone notifications yet.'))}</div>`;
+  ringRow();
   if($('clr')) $('clr').onclick = async () => { await api('/api/phonelink', {op: 'clear'}); load(); };
   $('sSend').checked = ST.settings.sendNotifs; $('sCtl').checked = ST.settings.allowControl;
   $('rowSend').hidden = !ANDROID;
@@ -155,6 +162,25 @@ async function load(){
     if($('acc')) $('acc').onclick = () => SSHTunnelAndroid.openNotifAccess();
   }
 }
+// Свой трек для «Найти телефон» (только на самом телефоне).
+let testing = false;
+function ringRow(){
+  const A = window.SSHTunnelAndroid;
+  if(!ANDROID || !A || !A.pickRingTrack){ $('ringRow').style.display = 'none'; return; }
+  $('ringRow').style.display = 'flex';
+  const n = A.ringTrackName();
+  $('ringT').textContent = L('Звук «Найти телефон»: ', 'Find-phone sound: ') + (n || L('будильник', 'alarm')) + L(' — громкость нарастает до максимума за 3 с; выключить — включи экран.', ' — rises to full volume in 3 s; turn the screen on to stop.');
+  $('ringDef').hidden = !n;
+}
+$('ringPick').textContent = L('Выбрать трек', 'Pick a track');
+$('ringDef').textContent = L('Будильник', 'Alarm');
+$('ringTest').textContent = '▶ ' + L('Проверить', 'Test');
+$('ringPick').onclick = () => SSHTunnelAndroid.pickRingTrack();
+$('ringDef').onclick = () => { SSHTunnelAndroid.clearRingTrack(); ringRow(); };
+$('ringTest').onclick = () => { testing = !testing; SSHTunnelAndroid.testRing(testing); $('ringTest').textContent = (testing ? '■ ' + L('Стоп', 'Stop') : '▶ ' + L('Проверить', 'Test')); };
+addEventListener('focus', ringRow);
+document.addEventListener('visibilitychange', () => { if(!document.hidden) ringRow(); });
+ringRow();
 const saveSet = () => api('/api/phonelink', {op: 'set', settings: {sendNotifs: $('sSend').checked, allowControl: $('sCtl').checked}});
 $('sSend').onchange = saveSet; $('sCtl').onchange = saveSet;
 $('tNot').textContent = L('Уведомления', 'Notifications');

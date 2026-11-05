@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
@@ -32,6 +34,19 @@ func runService(profile, appdata string) {
 	}
 	vpnlayer.WintunDir = filepath.Join(winsvc.InstallDir(), "wintun")
 
+	// «Обновить» в окне: служба (SYSTEM) сама меняет свой файл в Program
+	// Files и перезапускается — без окна UAC. Окно увидит новую версию
+	// службы и перезапустится следом (client.watchUpgrade).
+	updater.VPNInstall = func(newFile, exe string, _ func()) error {
+		if err := updater.Swap(newFile, exe); err != nil {
+			return err
+		}
+		// net stop — штатная остановка (Execute гасит туннель), net start —
+		// уже новый файл. cmd переживает выход службы.
+		cmd := exec.Command("cmd", "/c", "ping -n 3 127.0.0.1 >nul & net stop "+winsvc.Name+" & net start "+winsvc.Name)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+		return cmd.Start()
+	}
 	if err := svc.Run(winsvc.Name, &service{}); err != nil {
 		fmt.Fprintln(os.Stderr, "служба:", err)
 		os.Exit(1)

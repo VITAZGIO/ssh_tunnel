@@ -72,6 +72,7 @@ type Ev struct {
 // Phone — что умеет сам телефон (задаёт приложение Android).
 type Phone interface {
 	Ring()
+	StopRing()
 	Media(key string)
 }
 
@@ -293,9 +294,14 @@ func handleEv(e Ev, ip string) error {
 	case "notif":
 		showNotif(e)
 	case "ring":
-		if p != nil {
+		switch {
+		case e.Key == "stop" && p != nil:
+			p.StopRing()
+		case e.Key == "stop":
+			// у компьютера сигнал короткий — останавливать нечего
+		case p != nil:
 			p.Ring()
-		} else {
+		default:
 			ring(e.From)
 		}
 	case "media", "mouse", "text", "image":

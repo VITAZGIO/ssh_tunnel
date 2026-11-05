@@ -47,6 +47,8 @@
     <string name="crash_copy">Скопировать</string>
     <string name="crash_copied">Скопировано</string>
     <string name="phonelink_ring">Тебя ищут: нажали «Найти телефон»</string>
+    <string name="phonelink_ring_stop">Стоп</string>
+    <string name="phonelink_ring_stop_hint">Нажми, чтобы выключить (или просто включи экран)</string>
     <string name="vault_locked">🔒 Пароли ssh_tunnel — открыть</string>
     <string name="vault_unlock_title">Открыть пароли</string>
     <string name="vault_master">Главный пароль</string>

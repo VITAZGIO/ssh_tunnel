@@ -85,6 +85,11 @@ class MainActivity : AppCompatActivity(), AndroidApi.Screen {
         fileCallback = null
     }
 
+    // «Связь с телефоном»: свой трек для «Найти телефон».
+    private val pickRing = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) FindRing.setTrack(this, uri)
+    }
+
     // Выбор папки (зеркальные папки, addons/mirror.html → pickFolder): id
     // ждёт ответа в pickWait страницы, мы зовём его обратно через
     // window.sshtunnelPicked(id, path).
@@ -306,6 +311,21 @@ class MainActivity : AppCompatActivity(), AndroidApi.Screen {
 
         @JavascriptInterface
         fun openNotifAccess() = runOnUiThread { PhoneNotifs.openSettings(this@MainActivity) }
+
+        /** «Найти телефон»: выбрать свой трек, его имя, вернуть будильник. */
+        @JavascriptInterface
+        fun pickRingTrack() = runOnUiThread {
+            try { pickRing.launch(arrayOf("audio/*")) } catch (_: Exception) {}
+        }
+
+        @JavascriptInterface
+        fun ringTrackName(): String = FindRing.trackName(this@MainActivity)
+
+        @JavascriptInterface
+        fun clearRingTrack() = FindRing.setTrack(this@MainActivity, null)
+
+        @JavascriptInterface
+        fun testRing(on: Boolean) { if (on) FindRing.start(this@MainActivity) else FindRing.stop() }
 
         /** «Сканер сети» → Wi-Fi: сети вокруг, своя сеть сейчас, разрешение. */
         @JavascriptInterface

@@ -234,7 +234,7 @@ func (r *Replica) Sync(ctx context.Context, wait time.Duration, full bool) (bool
 		}
 		_ = r.save()
 		r.setStatus(Status{State: "offline", Pending: n, Error: err.Error(), LastOK: r.st.LastOK,
-			Conflicts: r.st.Conflicts, Files: len(local)})
+			Conflicts: r.st.Conflicts, Files: countFiles(local)})
 		return false, err
 	}
 
@@ -254,7 +254,18 @@ func (r *Replica) Sync(ctx context.Context, wait time.Duration, full bool) (bool
 			list = append(list, p)
 		}
 	}
-	sort.Strings(list)
+	// Сначала файлы, потом папки — глубокие первыми: удалённая папка к
+	// своей очереди уже пустая.
+	sort.Slice(list, func(i, j int) bool {
+		a, b := list[i], list[j]
+		if isDir(a) != isDir(b) {
+			return !isDir(a)
+		}
+		if isDir(a) {
+			return a > b
+		}
+		return a < b
+	})
 
 	did, pending, ops := false, 0, 0
 	var firstErr error
@@ -286,7 +297,7 @@ func (r *Replica) Sync(ctx context.Context, wait time.Duration, full bool) (bool
 	if err := r.save(); err != nil && firstErr == nil {
 		firstErr = err
 	}
-	st := Status{State: "ok", Pending: pending, LastOK: r.st.LastOK, Conflicts: r.st.Conflicts, Files: len(local)}
+	st := Status{State: "ok", Pending: pending, LastOK: r.st.LastOK, Conflicts: r.st.Conflicts, Files: countFiles(local)}
 	if firstErr != nil {
 		st.Error = firstErr.Error()
 	}
@@ -317,6 +328,9 @@ func (r *Replica) noteConflicts(cs []Conflict) {
 // сверки — кроме только что изменённых файлов (две правки за один тик часов
 // файловой системы дают одинаковое время, как «racy git»).
 func (r *Replica) localHash(p string, st stat, rehash bool) (string, error) {
+	if isDir(p) {
+		return DirHash, nil
+	}
 	if !rehash && !fresh(st) {
 		if s, ok := r.st.Synced[p]; ok && s.Hash != "" && s.Size == st.Size && s.MTime == st.MTime {
 			return s.Hash, nil
@@ -472,6 +486,26 @@ func (r *Replica) pushDelete(ctx context.Context, p string, s repFile) error {
 // заменить (оно есть на сервере).
 func (r *Replica) pull(ctx context.Context, p, lh string, s repFile, rm remFile) error {
 	dst := full(r.Path, p)
+	if isDir(p) {
+		if rm.Del {
+			if lh != "" {
+				if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
+					// Тут в папке есть своё — папка нужна, вернуть её на сервер.
+					return r.push(ctx, p, lh, stat{}, repFile{Ver: rm.Ver})
+				}
+			}
+			r.st.Synced[p] = repFile{Ver: rm.Ver}
+			return nil
+		}
+		if fi, err := os.Lstat(dst); err == nil && !fi.IsDir() {
+			return errors.New("на месте папки файл")
+		}
+		if err := os.MkdirAll(dst, 0o755); err != nil {
+			return err
+		}
+		r.st.Synced[p] = repFile{Ver: rm.Ver, Hash: DirHash}
+		return nil
+	}
 	safe := s.Hash
 	if lh == "" {
 		// По сверке файла нет. Появился сейчас или это то же имя в другом
@@ -692,4 +726,15 @@ func (r *Replica) Forget() {
 	defer r.mu.Unlock()
 	os.Remove(r.State)
 	r.gone = true
+}
+
+// countFiles — сколько файлов (без записей папок).
+func countFiles(m map[string]string) int {
+	n := 0
+	for p := range m {
+		if !isDir(p) {
+			n++
+		}
+	}
+	return n
 }

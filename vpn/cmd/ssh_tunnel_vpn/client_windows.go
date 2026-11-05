@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -91,6 +92,7 @@ func runClient(tray, noWindow bool) {
 	}
 
 	go c.trayStatus()
+	go c.watchUpgrade(dir)
 	// «Выход» из трея закрывает только окно: VPN и сеть устройств — дело
 	// службы, они продолжают работать.
 	runWindow(pageURL, tray, c.running, c.toggle, func() {})
@@ -257,4 +259,26 @@ func (clientBoot) Set(enable bool) error {
 		nativeui.Quit()
 	}()
 	return nil
+}
+
+// watchUpgrade — служба обновилась сама («Обновить» в окне): её версия
+// стала новее этого окна. Запускаем новое окно из Program Files и выходим —
+// иначе окно так и работало бы старым файлом.
+func (c *client) watchUpgrade(dir string) {
+	if updater.Version == "dev" {
+		return
+	}
+	for {
+		time.Sleep(5 * time.Second)
+		ep, err := winsvc.ReadEndpoint(dir)
+		if err != nil || ep.Version == "" || updater.Compare(updater.Version, ep.Version) != -1 { // -1 — служба новее
+			continue
+		}
+		cmd := exec.Command(winsvc.InstalledExe(), "-wait-instance")
+		if err := cmd.Start(); err != nil {
+			continue
+		}
+		nativeui.Quit()
+		return
+	}
 }
