@@ -43,6 +43,7 @@
   #state{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);background:rgba(0,0,0,.7);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;text-align:center;max-width:80%}
   #state[hidden]{display:none}
   #kbd{position:absolute;opacity:0;left:-1000px;top:0;width:1px;height:1px}
+  #photo{display:none}
 </style>
 </head>
 <body>
@@ -83,6 +84,7 @@
 <div id="sess" hidden>
   <div id="tools"></div>
   <div id="view"><div id="disp"></div><div id="state" hidden></div><input id="kbd" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></div>
+  <input type="file" id="photo" accept="image/*">
 </div>
 
 <script src="../vendor/guacamole-common.min.js"></script>
@@ -199,7 +201,7 @@ $('fAdd').onclick = async () => {
 
 /* ---------- сеанс ---------- */
 let client = null, keyboard = null, mouse = null, cur = null, creds = null, retries = 0, wasUp = false, mods = {}, touchMode = 'touchpad', qual = 'medium';
-let resizeT = 0, watchT = 0;
+let resizeT = 0, watchT = 0, kbdOn = false, lmbHeld = false, pos = {x: 0, y: 0}, fullH = 0;
 
 function start(h){
   cur = h; retries = 0;
@@ -212,7 +214,10 @@ function start(h){
   $('home').hidden = true; $('sess').hidden = false;
   immersive(true); // весь экран: без логотипа и шапки
   drawTools();
-  connect();
+  // Шапка прячется не сразу — меряем окно, когда раскладка улеглась,
+  // иначе Windows получала размер «с шапкой» и картинка была не на весь экран.
+  say(L('Подключаюсь…', 'Connecting…'));
+  setTimeout(() => { if(!$('sess').hidden) connect(); }, 350);
 }
 
 function size(){
@@ -225,7 +230,11 @@ function fit(){
   if(!client) return;
   const d = client.getDisplay(), v = $('view');
   if(!d.getWidth()) return;
-  d.scale(Math.min(v.clientWidth / d.getWidth(), v.clientHeight / d.getHeight()));
+  const sc = Math.min(v.clientWidth / d.getWidth(), v.clientHeight / d.getHeight());
+  d.scale(sc);
+  // По центру, а не прижато в угол.
+  $('disp').style.left = Math.max(0, (v.clientWidth - d.getWidth() * sc) / 2) + 'px';
+  $('disp').style.top = Math.max(0, (v.clientHeight - d.getHeight() * sc) / 2) + 'px';
 }
 function say(t){ $('state').hidden = !t; $('state').textContent = t || ''; }
 
@@ -262,7 +271,7 @@ function stop(){
   const c = client; client = null; wasUp = false;
   if(c) try { c.disconnect(); } catch(e) {}
   unbindInput();
-  $('sess').hidden = true; $('home').hidden = false; creds = null;
+  $('sess').hidden = true; $('home').hidden = false; creds = null; lmbHeld = false; $('kbd').blur();
   immersive(false);
   if(document.fullscreenElement) document.exitFullscreen().catch(() => {});
 }
@@ -278,7 +287,9 @@ function bindInput(){
   mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = st => {
     if(!client) return;
     const sc = client.getDisplay().getScale() || 1;
-    client.sendMouseState(new Guacamole.Mouse.State(st.x / sc, st.y / sc, st.left, st.middle, st.right, st.up, st.down));
+    pos = {x: st.x / sc, y: st.y / sc};
+    // «ЛКМ» на панели зажата — тянем с нажатой левой (выделить, перетащить).
+    client.sendMouseState(new Guacamole.Mouse.State(pos.x, pos.y, st.left || lmbHeld, st.middle, st.right, st.up, st.down));
   };
   // Физическая клавиатура — один раз и только пока открыт сеанс (на сайте
   // новый Guacamole.Keyboard на каждое подключение глушил ввод после).
@@ -292,6 +303,38 @@ function unbindInput(){
 }
 const K = {ctrl: 0xffe3, alt: 0xffe9, shift: 0xffe1, win: 0xffeb, esc: 0xff1b, tab: 0xff09, bs: 0xff08, enter: 0xff0d, del: 0xffff,
   left: 0xff51, up: 0xff52, right: 0xff53, down: 0xff54, home: 0xff50, end: 0xff57};
+function btn(left, right){
+  if(client) client.sendMouseState(new Guacamole.Mouse.State(pos.x, pos.y, left, false, right, false, false));
+}
+function click(which){
+  if(which === 'right'){ btn(lmbHeld, true); btn(lmbHeld, false); return; }
+  btn(true, false); btn(false, false);
+}
+// Фото с телефона: ужимаем и отдаём «Связи с телефоном» на том компьютере —
+// она кладёт картинку в буфер обмена и жмёт Ctrl+V там, где курсор.
+async function sendPhoto(file){
+  if(!file) return;
+  say(L('Отправляю фото…', 'Sending photo…'));
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 2560 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    const img = c.toDataURL('image/jpeg', 0.9).split(',')[1];
+    const st = await api('/api/phonelink');
+    const pcs = (st.peers || []).filter(p => p.role === 'computer');
+    const nm = s => String(s || '').toLowerCase().replace(/\.mesh$/, '');
+    const peer = pcs.find(p => p.ip === cur.host || nm(p.name) === nm(cur.name) || nm(p.name) === nm(cur.host)) || (pcs.length === 1 ? pcs[0] : null);
+    if(!peer) throw new Error(pcs.length ? L('Не понял, какой из компьютеров — назови машину как в сети устройств', 'Which computer? Name the machine as in the device network')
+      : L('На компьютере нужен плагин «Связь с телефоном» (и сеть устройств)', 'The computer needs the «Phone link» plugin'));
+    const r = await api('/api/phonelink', {op: 'image', peer: peer.ip, img});
+    if(r.error) throw new Error(r.error);
+    say(L('Фото вставлено', 'Photo pasted')); setTimeout(() => { if($('state').textContent === L('Фото вставлено', 'Photo pasted')) say(''); }, 1500);
+  } catch(e){ say(L('Фото: ', 'Photo: ') + (e.message || e)); setTimeout(() => say(''), 5000); }
+}
+$('photo').onchange = () => { const f = $('photo').files[0]; $('photo').value = ''; sendPhoto(f); };
+
 function tap(...keys){
   if(!client) return;
   const held = Object.keys(mods).filter(m => mods[m]).map(m => K[m]);
@@ -311,6 +354,8 @@ $('kbd').addEventListener('input', () => {
     tap(withMods && cp < 0x100 ? ch.toLowerCase().codePointAt(0) : (cp < 0x100 ? cp : 0x01000000 | cp));
   }
 });
+$('kbd').addEventListener('focus', () => { kbdOn = true; fullH = innerHeight; drawTools(); });
+$('kbd').addEventListener('blur', () => { kbdOn = false; drawTools(); });
 $('kbd').addEventListener('keydown', e => {
   if(e.key === 'Backspace'){ tap(K.bs); e.preventDefault(); }
   else if(e.key === 'Enter'){ tap(K.enter); e.preventDefault(); }
@@ -331,15 +376,22 @@ function reconnect(){
 function drawTools(){
   const b = (id, html, on, title) => `<button data-t="${id}" class="${on ? 'on' : ''}" title="${esc(title || '')}">${html}</button>`;
   $('tools').innerHTML = [
-    TOUCH ? b('kbd', '⌨', false, L('Клавиатура', 'Keyboard')) : '',
+    TOUCH ? b('kbd', '⌨', kbdOn, L('Клавиатура', 'Keyboard')) : '',
     TOUCH ? b('mode', touchMode === 'touchpad' ? L('Тачпад', 'Touchpad') : L('Касание', 'Touch'), false, L('Как работает палец', 'How touch works')) : '',
+    TOUCH ? b('lmb', L('ЛКМ', 'LMB'), lmbHeld, L('Левая кнопка: нажать — зажата (тянуть), ещё раз — отпустить', 'Left button: tap to hold (drag), again to release')) : '',
+    TOUCH ? b('rmb', L('ПКМ', 'RMB'), false, L('Правая кнопка', 'Right button')) : '',
+    TOUCH ? b('photo', '🖼', false, L('Фото с телефона — вставить (Ctrl+V)', 'Paste a photo from the phone')) : '',
     b('ctrl', 'Ctrl', mods.ctrl), b('alt', 'Alt', mods.alt), b('shift', 'Shift', mods.shift), b('win', 'Win', mods.win),
     b('esc', 'Esc'), b('tab', 'Tab'), b('left', '←'), b('up', '↑'), b('down', '↓'), b('right', '→'),
     b('cad', 'Ctrl+Alt+Del'), b('alttab', 'Alt+Tab'),
     `<select data-t="q" title="${esc(L('Качество', 'Quality'))}">${[['high', L('Чётко', 'High')], ['medium', L('Обычно', 'Medium')], ['low', L('Слабая связь', 'Low')]].map(([v, t]) => `<option value="${v}"${v === qual ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`,
     b('full', '⛶', !!document.fullscreenElement, L('Во весь экран', 'Full screen')), b('x', '✕ ' + esc(L('Отключить', 'Disconnect')))
   ].join('');
-  $('tools').querySelectorAll('button').forEach(el => el.onclick = () => tool(el.dataset.t));
+  $('tools').querySelectorAll('button').forEach(el => {
+    el.onpointerdown = e => e.preventDefault();
+    el.onmousedown = e => e.preventDefault();
+    el.onclick = () => tool(el.dataset.t);
+  });
   $('tools').querySelector('select').onchange = e => { qual = e.target.value; reconnect(); };
 }
 function tool(t){
@@ -348,7 +400,10 @@ function tool(t){
   if(t === 'cad') return combo(K.ctrl, K.alt, K.del);
   if(t === 'alttab') return combo(K.alt, K.tab);
   // Клавиатура — только по кнопке: тап по экрану её не зовёт.
-  if(t === 'kbd'){ const k = $('kbd'); if(document.activeElement === k) k.blur(); else k.focus(); return; }
+  if(t === 'kbd'){ const k = $('kbd'); if(kbdOn) k.blur(); else k.focus(); return; }
+  if(t === 'lmb'){ lmbHeld = !lmbHeld; btn(lmbHeld, false); drawTools(); return; }
+  if(t === 'rmb') return click('right');
+  if(t === 'photo'){ $('photo').click(); return; }
   if(t === 'mode'){ touchMode = touchMode === 'touchpad' ? 'touch' : 'touchpad'; if(client) bindInput(); drawTools(); return; }
   if(t === 'full'){ (document.fullscreenElement ? document.exitFullscreen() : $('sess').requestFullscreen()).catch(() => {}).then(drawTools); return; }
   if(t === 'x') stop();
@@ -356,8 +411,13 @@ function tool(t){
 // Поворот телефона или новое окно — Windows меняет разрешение сама.
 addEventListener('resize', () => {
   fit();
+  if(kbdOn){
+    if(innerHeight < fullH - 80) fullH = -innerHeight;           // клавиатура открылась
+    else if(fullH < 0 && innerHeight > -fullH + 80) $('kbd').blur(); // закрыли жестом
+    return;
+  }
   clearTimeout(resizeT);
-  resizeT = setTimeout(() => { if(client){ const s = size(); client.sendSize(s.w, s.h); } }, 600);
+  resizeT = setTimeout(() => { if(!client) return; const s = size(), d = client.getDisplay(); if(s.w !== d.getWidth() || s.h !== d.getHeight()) client.sendSize(s.w, s.h); }, 600);
 });
 addEventListener('pagehide', () => { if(client) client.disconnect(); immersive(false); });
 
