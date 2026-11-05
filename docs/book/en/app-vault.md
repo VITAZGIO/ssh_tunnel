@@ -8,3 +8,7 @@ over the device network. The vault is encrypted (AES-256).
   any app's login fields; new passwords are offered for saving.
 - **PC browser**: «Install extension» → load it unpacked in
   browser://extensions (developer mode) → paste the pairing key.
+- **Import / export**: export passwords from the browser as CSV
+  (chrome://password-manager/settings, Yandex: browser://password-manager/settings)
+  → «Import CSV». «Export CSV» (asks for the master password) saves all
+  entries to Downloads in Chrome format. Delete the CSV afterwards.

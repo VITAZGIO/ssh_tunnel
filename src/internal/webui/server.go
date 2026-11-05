@@ -647,6 +647,10 @@ func (s *Server) handleProcesses(w http.ResponseWriter, r *http.Request) {
 // без иконки, как было раньше.
 func (s *Server) handleAppIcon(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
+	if path == "" {
+		// «Расход трафика» знает только имя программы.
+		path = procinfo.PathByName(r.URL.Query().Get("name"))
+	}
 	data, err := procinfo.IconPNG(path)
 	if err != nil {
 		http.NotFound(w, r)

@@ -30,8 +30,8 @@
   .r-server{fill:var(--accent)} .r-direct{fill:var(--ok)} .r-mesh{fill:var(--warn)}
   .prog{display:grid;grid-template-columns:26px 1fr auto;gap:4px 10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
   .prog:last-child{border-bottom:0}
-  .prog .ic{width:26px;height:26px;border-radius:7px;background:var(--card2);display:flex;align-items:center;justify-content:center;overflow:hidden}
-  .prog .ic img{width:100%;height:100%;object-fit:contain}
+  .prog .ic{position:relative;width:26px;height:26px;border-radius:7px;background:var(--card2);display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .prog .ic img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:var(--card2)}
   .prog .ic .mi{width:16px;height:16px;color:var(--dim)}
   .prog .n{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .prog .s{font-variant-numeric:tabular-nums;color:var(--dim);font-size:13px;text-align:right}
@@ -168,8 +168,11 @@ function render(){
   $('topT').textContent = L('Программы', 'Apps');
   $('top').innerHTML = r.top.length ? r.top.map(p => {
     const w = k => (p.total ? p[k] * 100 / p.total : 0).toFixed(1);
-    const ic = ANDROID && p.name && p.name !== 'ssh_tunnel' && !p.name.startsWith('uid:')
-      ? `<img src="/api/appicon?pkg=${encodeURIComponent(p.name)}&t=${encodeURIComponent(T)}" alt="" onerror="this.remove()">` : icon('apps');
+    // Значок программы поверх заглушки: не нашёлся — остаётся заглушка.
+    const q = !p.name || p.name.startsWith('uid:') ? ''
+      : ANDROID ? (p.name !== 'ssh_tunnel' ? 'pkg=' + encodeURIComponent(p.name) : '')
+      : 'name=' + encodeURIComponent(p.name);
+    const ic = icon('apps') + (q ? `<img src="/api/appicon?${q}&t=${encodeURIComponent(T)}" alt="" onerror="this.remove()">` : '');
     return `<div class="prog"><span class="ic">${ic}</span><span class="n" title="${esc(p.name)}">${esc(progName(p.name))}${KNOWN[(p.name || '').toLowerCase()] ? `<small class="why">${esc(KNOWN[p.name.toLowerCase()])}</small>` : ''}</span>
       <span class="s">${esc(human(p.total))}</span>
       <span class="line">${COLORS.map(k => `<i class="c-${k}" style="width:${w(k)}%" title="${esc(NAMES[k])}: ${esc(human(p[k]))}"></i>`).join('')}</span></div>`;

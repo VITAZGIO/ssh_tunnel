@@ -54,7 +54,7 @@ func init() {
 	addons.Register(ID, func() addons.Module { return &module{} })
 	addons.RegisterRoutes(ID, addons.Route{
 		Path: "/api/machines", Methods: "GET, POST",
-		Desc: "Машины: GET — свои машины с показаниями и показания с других устройств сети (те, что показывают их всем); POST {\"op\":\"add|remove|wake|shutdown|settings|refresh\",…}.",
+		Desc: "Машины: GET — свои машины с показаниями и показания с других устройств сети (те, что показывают их всем); POST {\"op\":\"add|remove|order|wake|shutdown|settings|refresh\",…}.",
 		H:    handleAPI,
 	})
 }
@@ -752,6 +752,7 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		Op string `json:"op"`
 		Machine
 		Settings *Settings `json:"settings"`
+		Order    []string  `json:"order"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, map[string]string{"error": "нужен JSON {\"op\"}"})
@@ -818,6 +819,25 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		delete(readings, req.ID)
 		mu.Unlock()
 		dropSSH(req.ID)
+	case "order":
+		// Порядок карточек: перечисленные — в этом порядке, прочие — следом.
+		pos := map[string]int{}
+		for i, id := range req.Order {
+			pos[id] = i + 1
+		}
+		sort.SliceStable(c.Machines, func(i, j int) bool {
+			a, b := pos[c.Machines[i].ID], pos[c.Machines[j].ID]
+			if a == 0 {
+				a = len(req.Order) + 1
+			}
+			if b == 0 {
+				b = len(req.Order) + 1
+			}
+			return a < b
+		})
+		mu.Lock()
+		err = saveConf(c)
+		mu.Unlock()
 	case "settings":
 		if req.Settings != nil {
 			c.Settings = *req.Settings

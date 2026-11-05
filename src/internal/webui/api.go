@@ -81,7 +81,7 @@ func (s *Server) coreRoutes() []route {
 		{"/api/lanaddrs", "GET", "Адреса компьютера в локальной сети.", s.handleLANAddrs},
 		{"/api/mesh", "GET", "Сеть устройств: кто в сети, имена, адреса, прямая связь или через сервер.", s.handleMesh},
 		{"/api/processes", "GET", "Запущенные программы (для правил по программам).", s.handleProcesses},
-		{"/api/appicon", "GET", "Значок программы по пути: ?path=… (PNG, Windows).", s.handleAppIcon},
+		{"/api/appicon", "GET", "Значок программы по пути ?path=… или имени ?name=chrome.exe (PNG, Windows).", s.handleAppIcon},
 		{"/api/pickfile", "POST", "Системный диалог выбора программы (Windows).", s.handlePickFile},
 		{"/api/pickfolder", "POST", "Системный диалог выбора папки (Windows): {\"path\"}, отмена — пустой путь.", s.handlePickFolder},
 		{"/api/openterminal", "POST", "Открыть PowerShell (Windows).", s.handleOpenTerminal},

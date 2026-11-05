@@ -48,6 +48,14 @@
     <div class="card" id="list"></div>
     <div class="bar"><button class="btn" id="sync"></button><span class="hint" id="syncS"></span></div>
     <div class="card" id="fillCard"></div>
+    <div class="card" id="ioCard">
+      <b id="ioT"></b>
+      <ol id="ioHow"></ol>
+      <div class="bar" style="margin-top:8px"><button class="btn primary" id="imp"></button><button class="btn" id="exp"></button>
+        <input type="file" id="impFile" accept=".csv,text/csv,text/comma-separated-values" hidden></div>
+      <div class="bar" id="expRow" hidden style="margin-top:8px"><input type="password" id="expM" autocomplete="off"><button class="btn" id="expGo"></button></div>
+      <div class="hint" id="ioN" style="margin-top:6px"></div>
+    </div>
   </div>
 </div>
 
@@ -176,6 +184,39 @@ $('dSave').onclick = async () => {
 $('dDel').onclick = async () => {
   if(!confirm(L('Удалить запись на всех своих устройствах?', 'Delete on all your devices?'))) return;
   await call({op: 'delete', id: CUR}); $('dlg').hidden = true; load();
+};
+// Импорт/экспорт: CSV — так пароли отдают и принимают все браузеры.
+$('ioT').textContent = L('Импорт и экспорт', 'Import and export');
+$('ioHow').innerHTML = [
+  L('Яндекс Браузер: browser://password-manager/settings → «Экспортировать пароли».', 'Yandex Browser: browser://password-manager/settings → Export passwords.'),
+  L('Chrome / Edge: chrome://password-manager/settings (edge://settings/passwords) → «Экспорт паролей».', 'Chrome / Edge: chrome://password-manager/settings (edge://settings/passwords) → Export passwords.'),
+  L('«Импорт» → выбери этот .csv. Совпавшие пропустятся, изменённые обновятся. Потом удали .csv — в нём пароли открытым текстом.', 'Import → pick that .csv. Duplicates are skipped, changed ones updated. Delete the .csv afterwards — it is plain text.'),
+].map(t => `<li>${esc(t)}</li>`).join('');
+$('imp').innerHTML = icon('upload') + esc(L('Импорт из CSV', 'Import CSV'));
+$('exp').innerHTML = icon('download') + esc(L('Экспорт в CSV', 'Export CSV'));
+$('imp').onclick = () => $('impFile').click();
+$('impFile').onchange = async () => {
+  const f = $('impFile').files[0]; $('impFile').value = '';
+  if(!f) return;
+  $('ioN').className = 'hint'; $('ioN').textContent = L('Загружаю…', 'Importing…');
+  const r = await call({op: 'import', csv: await f.text()});
+  if(r.error){ $('ioN').className = 'hint err'; $('ioN').textContent = r.error; return; }
+  $('ioN').className = 'hint ok';
+  $('ioN').textContent = L(`Добавлено: ${r.added}, обновлено: ${r.updated}, уже были: ${r.skipped}.`, `Added: ${r.added}, updated: ${r.updated}, already there: ${r.skipped}.`);
+  load();
+};
+$('expM').placeholder = L('главный пароль ещё раз', 'master password again');
+$('expGo').textContent = L('Сохранить файл', 'Save file');
+$('exp').onclick = () => { $('expRow').hidden = !$('expRow').hidden; $('expRow').style.display = $('expRow').hidden ? 'none' : 'flex'; if(!$('expRow').hidden) $('expM').focus(); };
+$('expRow').style.display = 'none';
+$('expM').addEventListener('keydown', e => { if(e.key === 'Enter') $('expGo').click(); });
+$('expGo').onclick = async () => {
+  const r = await call({op: 'export', master: $('expM').value});
+  $('expM').value = '';
+  if(r.error){ $('ioN').className = 'hint err'; $('ioN').textContent = r.error; return; }
+  $('expRow').hidden = true; $('expRow').style.display = 'none';
+  $('ioN').className = 'hint ok';
+  $('ioN').innerHTML = esc(L(`Сохранено паролей: ${r.count} → `, `Saved ${r.count} passwords → `)) + `<span class="key">${esc(r.path)}</span> ` + esc(L('Файл открытым текстом — удали после переноса.', 'Plain text — delete it after use.'));
 };
 load();
 </script>
