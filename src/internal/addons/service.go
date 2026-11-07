@@ -64,6 +64,9 @@ func DataDir() string {
 // («/book.html?…»).
 type Opener func(key, title, url string) error
 
+// Closer закрывает отдельное окно по его ключу.
+type Closer func(key string) error
+
 // Service — плагины этого устройства: хранилище, модули,
 // API.
 type Service struct {
@@ -72,6 +75,7 @@ type Service struct {
 	mu      sync.Mutex
 	running map[string]Module
 	opener  Opener
+	closer  Closer
 	log     func(format string, args ...any)
 
 	dataMu sync.Mutex // data.json своих приложений
@@ -95,6 +99,13 @@ func (s *Service) Store() *Store { return s.store }
 func (s *Service) SetOpener(o Opener) {
 	s.mu.Lock()
 	s.opener = o
+	s.mu.Unlock()
+}
+
+// SetCloser — как закрывать отдельные окна; nil — закроет сам браузер.
+func (s *Service) SetCloser(c Closer) {
+	s.mu.Lock()
+	s.closer = c
 	s.mu.Unlock()
 }
 
@@ -276,17 +287,17 @@ func (s *Service) handleAddons(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) handleWindow(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	open := s.opener
+	open, closeWindow := s.opener, s.closer
 	s.mu.Unlock()
-	WindowHandler(open, s.Active)(w, r)
+	WindowHandler(open, s.Active, closeWindow)(w, r)
 }
 
-// WindowHandler — POST /api/window: открыть отдельное окно. Нужен и окну
-// VPN-версии Windows, где ядро в службе, а окна открывает процесс окна.
+// WindowHandler — POST /api/window: открыть или закрыть отдельное окно. Нужен
+// и окну VPN-версии Windows, где ядро в службе, а окна открывает процесс окна.
 // active — можно ли открывать приложение (nil — не проверять: проверит
-// служба, отдавая страницу). open == nil — {"ok":false}: страница откроет окно
-// сама (браузер).
-func WindowHandler(open Opener, active func(id string) bool) http.HandlerFunc {
+// служба, отдавая страницу). open/closer == nil — {"ok":false}: страница
+// откроет или закроет окно браузера сама.
+func WindowHandler(open Opener, active func(id string) bool, closers ...Closer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "нужен POST", http.StatusMethodNotAllowed)
@@ -296,9 +307,25 @@ func WindowHandler(open Opener, active func(id string) bool) http.HandlerFunc {
 			Key   string `json:"key"`
 			Title string `json:"title"`
 			URL   string `json:"url"`
+			Close bool   `json:"close"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Key == "" ||
-			!strings.HasPrefix(req.URL, "/") || strings.HasPrefix(req.URL, "//") {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Key == "" {
+			writeJSON(w, map[string]any{"ok": false, "error": "нужен JSON с ключом окна"})
+			return
+		}
+		if req.Close {
+			if len(closers) == 0 || closers[0] == nil {
+				writeJSON(w, map[string]any{"ok": false})
+				return
+			}
+			if err := closers[0](req.Key); err != nil {
+				writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true})
+			return
+		}
+		if !strings.HasPrefix(req.URL, "/") || strings.HasPrefix(req.URL, "//") {
 			writeJSON(w, map[string]any{"ok": false, "error": "нужен JSON {\"key\",\"title\",\"url\":\"/…\"}"})
 			return
 		}

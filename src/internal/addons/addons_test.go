@@ -154,4 +154,16 @@ func TestWindowHandler(t *testing.T) {
 	if r := call(open, `{"key":"book","url":"//evil.example/"}`); r["ok"] != false {
 		t.Fatalf("чужой адрес принят: %v", r)
 	}
+	if r := call(nil, `{"key":"sample","close":true}`); r["ok"] != false {
+		t.Fatalf("без нативных окон закрытие должно остаться браузеру: %v", r)
+	}
+	closed := ""
+	w := httptest.NewRecorder()
+	WindowHandler(open, nil, func(key string) error { closed = key; return nil })(w,
+		httptest.NewRequest("POST", "/api/window", bytes.NewBufferString(`{"key":"sample","close":true}`)))
+	var r map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &r)
+	if r["ok"] != true || closed != "sample" {
+		t.Fatalf("закрытие: %v, %q", r, closed)
+	}
 }

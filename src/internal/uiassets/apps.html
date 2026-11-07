@@ -187,11 +187,12 @@ async function load(){
 
 async function op(o, id, value){
   const r = await api('/api/addons', {op: o, id, value});
-  if(r.error){ alert(r.error); return; }
+  if(r.error){ alert(r.error); return false; }
   ST = r;
   renderList();
   renderCatalog();
   changed();
+  return true;
 }
 
 // needsIcons — значки «нужна сеть устройств» / «нужен интернет».
@@ -288,7 +289,7 @@ async function openApp(id, here){
   current = id;
   $('appTitle').innerHTML = appIcon(m) + '<span>' + esc(appName(m)) + '</span>';
   $('helpBtn').hidden = !m.book;
-  $('winSeg').hidden = SOLO || ANDROID;
+  $('winSeg').hidden = ANDROID;
   $('segHere').classList.toggle('on', !inWin(id));
   $('segWin').classList.toggle('on', inWin(id));
   $('backApp').hidden = SOLO && !Q.get('back');
@@ -327,10 +328,11 @@ $('segWin').onclick = async () => {
   $('segHere').classList.remove('on'); $('segWin').classList.add('on');
   if(await popOut(id)){ $('appFrame').src = 'about:blank'; current = null; show('vList'); }
 };
-$('segHere').onclick = () => {
-  if(!current) return;
-  op('win', current, false);
+$('segHere').onclick = async () => {
+  const id = current;
+  if(!id || !await op('win', id, false)) return;
   $('segWin').classList.remove('on'); $('segHere').classList.add('on');
+  if(SOLO) await closeWindow(id);
 };
 $('backApp').onclick = () => {
   document.body.classList.remove('immersive');
@@ -382,6 +384,11 @@ $('permNo').onclick = $('backPerm').onclick = () => { pending = null; show('vCat
 $('backCat').onclick = () => show('vList');
 $('backList').hidden = SOLO;
 
+// Если режим изменили в отдельном окне, обновить уже открытый список плагинов.
+if(!SOLO && typeof BroadcastChannel === 'function'){
+  const bus = new BroadcastChannel('sshtunnel-addons');
+  bus.onmessage = () => load();
+}
 setIcons();
 load().then(() => {
   const id = Q.get('open');

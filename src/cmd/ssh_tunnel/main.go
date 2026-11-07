@@ -111,6 +111,7 @@ func main() {
 	// Книга и плагины открываются отдельными окнами.
 	opener := nativeui.Opener("http://"+srv.Addr(), config.Dir())
 	srv.Addons().SetOpener(opener)
+	srv.Addons().SetCloser(nativeui.CloseWindow)
 	// Виджет календаря на рабочем столе — сразу, если человек его включил.
 	if opener != nil && srv.Addons().Active(calendar.ID) && calendar.WidgetWanted(config.Dir()) {
 		go opener(calendar.ID+"-widget", "Календарь",

@@ -5252,6 +5252,12 @@ window.addEventListener('message', ev => {
   if(ev.data.sshtunnel === 'immersive') document.body.classList.toggle('immersive', !!ev.data.on);
 });
 loadAddons();
+// Отдельное окно сообщает о смене «Здесь / В окне»: быстрый доступ не должен
+// открыть плагин по старому сохранённому в главной странице состоянию.
+if(typeof BroadcastChannel === 'function'){
+  const bus = new BroadcastChannel('sshtunnel-addons');
+  bus.onmessage = () => loadAddons();
+}
 
 $('toWizard').onclick = () => {
   // На телефоне из мастера есть только «Пользователь» (QR для телефона и

@@ -226,6 +226,21 @@ func onScreen(p Rect) bool {
 	return m != 0
 }
 
+// CloseWindow закрывает отдельное окно из страницы, например при возврате
+// плагина в главное. Сообщение уходит в поток окна — разрушать его здесь нельзя.
+func CloseWindow(key string) error {
+	extraMu.Lock()
+	h := extra[key]
+	extraMu.Unlock()
+	if h == 0 {
+		return nil
+	}
+	if ok, _, _ := pPostMessage.Call(h, wmClose, 0, 0); ok == 0 {
+		return errors.New("не удалось закрыть окно")
+	}
+	return nil
+}
+
 // Opener — как программа открывает отдельные окна (ключ «…-widget» — виджет
 // на рабочем столе): base — адрес интерфейса
 // («http://127.0.0.1:порт»), к нему прибавляется путь страницы. Место и

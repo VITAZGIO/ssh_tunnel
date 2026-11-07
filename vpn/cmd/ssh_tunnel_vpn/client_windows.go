@@ -73,7 +73,7 @@ func runClient(tray, noWindow bool) {
 	// Отдельные окна (Книга, приложения) открывает окно: у службы нет
 	// рабочего стола. Можно ли открыть приложение, проверит служба, отдавая
 	// его страницу.
-	c.p.Local["/api/window"] = addons.WindowHandler(nativeui.Opener("http://"+ln.Addr().String(), dir), nil)
+	c.p.Local["/api/window"] = addons.WindowHandler(nativeui.Opener("http://"+ln.Addr().String(), dir), nil, nativeui.CloseWindow)
 	// SSH (ТЗ 4) — тоже дело окна: ключ шифруется учётной записью
 	// пользователя (DPAPI), терминал открывается на его рабочем столе. ssh
 	// идёт сам, в сеть устройств его ведёт адаптер службы.

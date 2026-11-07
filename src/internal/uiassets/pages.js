@@ -10,7 +10,7 @@ const LANG = Q.get('lang') === 'en' ? 'en' : (Q.get('lang') ? 'ru' :
 const ANDROID = !!window.SSHTunnelAndroid;
 // Встроено в главное окно ПК (iframe) — «назад» возвращает туда.
 const EMBED = window.parent !== window;
-// Отдельное окно: «назад» и «⧉ В окне» не нужны.
+// Отдельное окно: из него тоже можно вернуть плагин в главное.
 const SOLO = Q.get('solo') === '1';
 
 document.documentElement.lang = LANG;
@@ -89,9 +89,24 @@ function closePage(){
 }
 
 // changed — сказать главному окну, что список приложений изменился
-// (звёздочки → быстрый доступ).
+// (звёздочки → быстрый доступ). Отдельному окну родителя нет: там канал.
 function changed(){
   if(EMBED) window.parent.postMessage({sshtunnel: 'changed'}, '*');
+  if(SOLO && typeof BroadcastChannel === 'function'){
+    const bus = new BroadcastChannel('sshtunnel-addons');
+    bus.postMessage('changed');
+    bus.close();
+  }
+}
+
+// closeWindow — закрыть отдельное нативное окно через ядро; в браузере API
+// окон нет, и страница закрывает созданное ею окно сама.
+async function closeWindow(key){
+  try {
+    const r = await api('/api/window', {key, close: true});
+    if(r && r.ok) return;
+  } catch(e) {}
+  window.close();
 }
 
 // immersive — плагину нужен весь экран (сеанс удалённого стола): убрать
