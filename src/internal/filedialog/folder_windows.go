@@ -11,13 +11,15 @@ import (
 )
 
 var (
-	shell32             = windows.NewLazySystemDLL("shell32.dll")
-	ole32               = windows.NewLazySystemDLL("ole32.dll")
-	procBrowseForFolder = shell32.NewProc("SHBrowseForFolderW")
-	procPathFromIDList  = shell32.NewProc("SHGetPathFromIDListW")
-	procCoInitializeEx  = ole32.NewProc("CoInitializeEx")
-	procCoUninitialize  = ole32.NewProc("CoUninitialize")
-	procCoTaskMemFree   = ole32.NewProc("CoTaskMemFree")
+	shell32              = windows.NewLazySystemDLL("shell32.dll")
+	ole32                = windows.NewLazySystemDLL("ole32.dll")
+	user32               = windows.NewLazySystemDLL("user32.dll")
+	procBrowseForFolder  = shell32.NewProc("SHBrowseForFolderW")
+	procPathFromIDList   = shell32.NewProc("SHGetPathFromIDListW")
+	procCoInitializeEx   = ole32.NewProc("CoInitializeEx")
+	procCoUninitialize   = ole32.NewProc("CoUninitialize")
+	procCoTaskMemFree    = ole32.NewProc("CoTaskMemFree")
+	procGetForegroundWin = user32.NewProc("GetForegroundWindow")
 )
 
 type browseInfo struct {
@@ -47,7 +49,8 @@ func PickFolder(title string) (string, error) {
 
 	name := make([]uint16, windows.MAX_PATH)
 	t, _ := windows.UTF16PtrFromString(title)
-	bi := browseInfo{DisplayName: &name[0], Title: t, Flags: bifReturnOnlyFS | bifNewDialog}
+	owner, _, _ := procGetForegroundWin.Call()
+	bi := browseInfo{Owner: owner, DisplayName: &name[0], Title: t, Flags: bifReturnOnlyFS | bifNewDialog}
 	pidl, _, _ := procBrowseForFolder.Call(uintptr(unsafe.Pointer(&bi)))
 	if pidl == 0 {
 		return "", ErrCancelled

@@ -904,3 +904,37 @@ func TestEmptyDirs(t *testing.T) {
 	e.converged()
 	e.noLoss()
 }
+
+// Сервер без поддержки пустых папок не должен оставлять вечную очередь:
+// файлы синхронизируются, записи папок пропускаются до его обновления.
+func TestEmptyDirsLegacyServer(t *testing.T) {
+	commits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index":
+			jsonOut(w, 200, IndexReply{Epoch: "old", Files: map[string]FileInfo{}, Conflicts: []Conflict{}})
+		case "/commit":
+			commits++
+			errOut(w, 500, errors.New("старый сервер не понимает папки"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Пустая"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := &Replica{Folder: "f", Path: root, Mode: ModeBoth, State: filepath.Join(t.TempDir(), "state.json"),
+		R: &Remote{Base: srv.URL, HC: srv.Client()}}
+	if _, err := r.Sync(context.Background(), 0, false); err != nil {
+		t.Fatalf("сверка со старым сервером: %v", err)
+	}
+	if st := r.Status(); st.State != "ok" || st.Pending != 0 {
+		t.Fatalf("статус со старым сервером %+v", st)
+	}
+	if commits != 0 {
+		t.Fatalf("старый сервер получил %d записей папок", commits)
+	}
+}

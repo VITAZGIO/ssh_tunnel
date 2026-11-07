@@ -488,6 +488,7 @@ type IndexReply struct {
 	Files     map[string]FileInfo `json:"files"`
 	Conflicts []Conflict          `json:"conflicts"`
 	Ignore    []string            `json:"ignore"`
+	Dirs      bool                `json:"dirs,omitempty"` // сервер понимает записи пустых папок
 }
 
 // Index — файлы с Ver > since. wait > 0 — ждать изменений до wait (долгий
@@ -503,7 +504,7 @@ func (h *Hub) Index(id string, since int64, wait time.Duration, done <-chan stru
 		f.mu.Lock()
 		if f.ix.Seq > since || wait <= 0 || !time.Now().Before(deadline) {
 			r := IndexReply{Epoch: f.ix.Epoch, Seq: f.ix.Seq, Files: map[string]FileInfo{},
-				Conflicts: []Conflict{}, Ignore: append([]string{}, f.Ignore...)}
+				Conflicts: []Conflict{}, Ignore: append([]string{}, f.Ignore...), Dirs: true}
 			for p, fi := range f.ix.Files {
 				if fi.Ver > since {
 					r.Files[p] = *fi

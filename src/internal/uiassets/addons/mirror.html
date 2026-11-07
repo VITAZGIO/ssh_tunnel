@@ -178,7 +178,7 @@ function statusText(st){
     case 'conflict': return [L('конфликт', 'conflict') + ` (${st.conflicts.length})`, 'warn'];
     case 'offline': return [L('сервер недоступен', 'server unreachable') + (st.pending ? ` — ${st.pending} ` + L('файлов ждут', 'files waiting') : ''), 'warn'];
     case 'error': return [L('ошибка: ', 'error: ') + (st.error || ''), 'err'];
-    default: return [(st.pending ? `${st.pending} ` : '') + L('файлов ждут', 'files waiting'), 'warn'];
+    default: return [(st.pending ? `${st.pending} ` : '') + L('файлов ждут', 'files waiting') + (st.error ? ' — ' + st.error : ''), 'warn'];
   }
 }
 

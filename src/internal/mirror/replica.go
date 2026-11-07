@@ -208,6 +208,13 @@ func (r *Replica) Sync(ctx context.Context, wait time.Duration, full bool) (bool
 		r.setStatus(Status{State: "error", Error: serr.Error(), LastOK: r.st.LastOK, Conflicts: r.st.Conflicts})
 		return false, serr
 	}
+	if !rep.Dirs {
+		for p := range disk {
+			if isDir(p) {
+				delete(disk, p)
+			}
+		}
+	}
 	local := map[string]string{}
 	for p, st := range disk {
 		h, herr := r.localHash(p, st, full)
@@ -250,7 +257,7 @@ func (r *Replica) Sync(ctx context.Context, wait time.Duration, full bool) (bool
 	}
 	list := make([]string, 0, len(paths))
 	for p := range paths {
-		if !ig.Match(p, false) {
+		if !ig.Match(p, false) && (rep.Dirs || !isDir(p)) {
 			list = append(list, p)
 		}
 	}

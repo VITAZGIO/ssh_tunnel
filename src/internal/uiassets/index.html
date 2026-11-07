@@ -602,16 +602,12 @@
   .verRow .note{margin:0;flex:1;min-width:140px}
   .verRow .btn{font-size:12.5px;padding:6px 12px}
 
-  /* Две кнопки в ряд поровну (вкладки рекламы, буфер обмена). */
+  /* Две кнопки в ряд поровну. */
   .tabs2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .tabs2 .btn{width:100%;padding:10px 8px;font-size:12.5px}
   .tabs2 .btn.on{background:linear-gradient(180deg,var(--accent-muted),var(--accent-muted-dark));
                  border-color:transparent;color:#fff;font-weight:600}
-  .abCount{font-size:11.5px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;
-           color:var(--dim);margin:4px 0 12px}
-  .abCount b{color:var(--text)}
-  /* «Обновить список» — во всю ширину, как «Сохранить»: короткая кнопка с
-     длинной подписью не вмещалась. */
+  /* Короткая кнопка с длинной подписью — во всю ширину, как «Сохранить». */
   .wideRow{display:flex;align-items:center;gap:8px;margin-top:14px}
   .wideRow .btn{flex:1;border-radius:10px;padding:11px 15px}
 
@@ -1027,10 +1023,6 @@
         <button class="row-link" id="toMesh">
           <span class="t"><span data-i18n="mesh_title">Сеть устройств</span>
             <div class="v" id="meshSummary">Выключена</div></span><span class="arr">›</span></button>
-        <!-- Только в VPN-версии: в режиме прокси DNS разрешают сами программы. -->
-        <button class="row-link" id="toAdBlock" hidden>
-          <span class="t"><span data-i18n="adblock_title">Блокировка рекламы</span>
-            <div class="v" id="adBlockSummary"></div></span><span class="arr">›</span></button>
         <button class="row-link" id="toDomains">
           <span class="t"><span data-i18n="domains_title">Исключения доменов</span>
             <div class="v" id="domainsSummary"></div></span><span class="arr">›</span></button>
@@ -1228,33 +1220,6 @@
           <svg viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg><span data-i18n="source_code">Код</span></a>
       </div>
     </div>
-  </div>
-
-  <!-- БЛОКИРОВКА РЕКЛАМЫ — как на телефоне: два списка вкладками (что
-       блокировать и что не трогать), буфер обмена и обновление. -->
-  <div class="view" id="viewAdBlock">
-    <div class="head">
-      <button class="ico" id="backFromAdBlock" title="Назад" data-i18n-title="back"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
-      <span class="t" data-i18n="adblock_title">Блокировка рекламы</span>
-    </div>
-    <label class="chk" style="border-top:0"><input type="checkbox" id="adBlockEnabled">
-      <span class="lbl" data-i18n="adblock_on">Блокировать рекламу и слежку</span></label>
-    <div class="abCount"><span data-i18n="adblock_blocked">Заблокировано</span>: <b id="adBlockCount">0</b></div>
-    <div class="tabs2" id="adBlockTabs">
-      <button type="button" class="btn" data-v="block" data-i18n="adblock_tab_block">Чёрный список</button>
-      <button type="button" class="btn" data-v="allow" data-i18n="adblock_tab_allow">Белый список</button>
-    </div>
-    <div class="lbl-row" style="margin-top:12px">
-      <label id="adBlockListLabel" class="hint" style="margin:0;font-size:12px"></label>
-      <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)">?<span class="tip" id="adBlockListTip"></span></span>
-    </div>
-    <textarea id="adBlockSources" rows="7" spellcheck="false" data-i18n-ph="adblock_sources_ph"></textarea>
-    <textarea id="adBlockAllowlist" rows="7" spellcheck="false" data-i18n-ph="adblock_allow_ph" hidden></textarea>
-    <div class="tabs2" style="margin-top:8px">
-      <button type="button" class="btn" id="adBlockPaste" data-i18n="adblock_paste">Вставить из буфера</button>
-      <button type="button" class="btn" id="adBlockCopy" data-i18n="adblock_copy">Скопировать</button>
-    </div>
-    <span class="hint" id="adBlockNote" style="display:block;margin-top:6px" data-i18n="adblock_help"></span>
   </div>
 
   <!-- ИСКЛЮЧЕНИЯ ДОМЕНОВ: два списка рядом, переключаются кнопками сверху и
@@ -2067,12 +2032,6 @@ const I18N = {
       '(быстрый HTTP/3) не проходят через туннель. Эта галочка включает проброс через отдельный '+
       'ретранслятор на сервере — ставится один раз, в мастере настройки VPS (кнопка «Настроить сервер по '+
       'SSH» в этом же меню). Пока он не установлен, галочка ничего не меняет: UDP по-прежнему не проходит.',
-    adblock_title:'Блокировка рекламы', adblock_on:'Блокировать рекламу и слежку',
-    adblock_sources:'Списки блокировки', adblock_update:'Обновить список', adblock_allow:'Никогда не блокировать',
-    adblock_loading:'скачиваю…', adblock_count:'загружено имён: {n}',
-    adblock_help:'Как на телефоне: запрос имени из списка получает отказ, и реклама не грузится ни в одной '+
-      'программе. Списки — ссылки или файлы в формате hosts, по одному на строку. Скачиваются по кнопке '+
-      '«Сохранить» и дальше работают без сети.',
     direct_label:'Всегда напрямую', scan_net:'Проверить сеть',
     direct_ph:'intranet.example.com\n.corp.example\n10.8.0.0/16',
     direct_help_html:'<p>Сети и домены, которые не надо вести через сервер. Домашние и офисные '+
@@ -2167,15 +2126,6 @@ const I18N = {
       '<code>.example.net</code> или <code>*.example.net</code> — только поддомены, сеть или адрес. '+
       'По одному в строке или через запятую.</p><p>На телефоне приложения, исключённые из VPN, '+
       'в туннель не попадают вовсе — для них список не действует.</p>',
-    adblock_on_short:'Включена', adblock_off_short:'Выключена', adblock_blocked:'Заблокировано',
-    adblock_tab_block:'Чёрный список', adblock_tab_allow:'Белый список',
-    adblock_sources_ph:'ссылка https://… или путь к файлу, по одному в строке',
-    adblock_allow_ph:'example.com — по одному в строке',
-    adblock_sources_note:'Откуда брать списки блокировки: ссылки или файлы в формате hosts, по одному в '+
-      'строке. Скачиваются кнопкой «Обновить список».',
-    adblock_allow_note:'Имена, которые не блокируются никогда, даже если есть в списках: если '+
-      'блокировка сломала нужный сайт — впиши его сюда.',
-    adblock_paste:'Вставить из буфера', adblock_copy:'Скопировать',
     xfer_clip:'буфер', xfer_file:'файл', saved_to_file:'файл сохранён в «Загрузки»',
     bundle_saved:'настройки сохранены файлом в «Загрузки», серверов — {n}; открой его на другом устройстве.',
     sect_look:'Оформление', theme:'Тема', theme_orig:'Оригинал', theme_dark:'Тёмная',
@@ -2399,12 +2349,6 @@ const I18N = {
       "don't get through the tunnel. This checkbox turns on forwarding through a separate relay on the "+
       'server — set up once, in the VPS setup wizard ("Set up the server over SSH" button in this same '+
       "menu). Until it's installed, this checkbox changes nothing: UDP still doesn't get through.",
-    adblock_title:'Ad blocking', adblock_on:'Block ads and trackers',
-    adblock_sources:'Block lists', adblock_update:'Update list', adblock_allow:'Never block',
-    adblock_loading:'downloading…', adblock_count:'names loaded: {n}',
-    adblock_help:'Same as on the phone: a lookup of a listed name is refused, so ads don\'t load in any '+
-      'program. Lists are links or files in hosts format, one per line. They are downloaded when you press '+
-      '"Save" and then work offline.',
     direct_label:'Always direct', scan_net:'Scan network',
     direct_ph:'intranet.example.com\n.corp.example\n10.8.0.0/16',
     direct_help_html:'<p>Networks and domains that shouldn\'t go through the server. Home and office '+
@@ -2497,15 +2441,6 @@ const I18N = {
       'or <code>*.example.net</code> for subdomains only, a network or an address. One per line or '+
       'comma-separated.</p><p>On the phone, apps excluded from the VPN never reach the tunnel, so the '+
       'list doesn\'t apply to them.</p>',
-    adblock_on_short:'On', adblock_off_short:'Off', adblock_blocked:'Blocked',
-    adblock_tab_block:'Blocklist', adblock_tab_allow:'Allowlist',
-    adblock_sources_ph:'https://… link or file path, one per line',
-    adblock_allow_ph:'example.com — one per line',
-    adblock_sources_note:'Where to get block lists: links or files in hosts format, one per line. '+
-      'Downloaded with “Update list”.',
-    adblock_allow_note:'Names that are never blocked even if listed: if blocking broke a site you need, '+
-      'put it here.',
-    adblock_paste:'Paste from clipboard', adblock_copy:'Copy',
     xfer_clip:'clipboard', xfer_file:'file', saved_to_file:'file saved to Downloads',
     bundle_saved:'settings saved as a file in Downloads, {n} server(s); open it on the other device.',
     sect_look:'Look', theme:'Theme', theme_orig:'Original', theme_dark:'Dark',
@@ -2594,7 +2529,6 @@ function applyI18n(){
   if(dh) dh.innerHTML = tr('direct_help_html');
   const th = $('tunnelHelp');
   if(th) th.innerHTML = tr('tunnel_help_html');
-  if(typeof renderAdBlockTab === 'function'){ renderAdBlockTab(); renderAdBlockSummary(); }
   if(typeof renderDomainsSummary === 'function') renderDomainsSummary();
   if(typeof renderXmode === 'function') renderXmode();
   if(typeof renderSelfCheckSteps === 'function') renderSelfCheckSteps(lastSelfCheckSteps);
@@ -3007,10 +2941,10 @@ function shareTraffic(doc, p){
 /* ---------- переключение экранов ---------- */
 const VIEWS = ['viewMain','viewSettings','viewServers','viewApp','viewFilter','viewWizard',
                'viewVpsSetup','viewSelfCheck','viewLog','viewMesh','viewAdvanced',
-               'viewAdBlock','viewDomains','viewAddons'];
+               'viewDomains','viewAddons'];
 // Экраны, на которых правят общий документ настроек: внизу у каждого —
 // одна и та же кнопка «Сохранить» (её переносит show()).
-const SETTINGS_VIEWS = ['viewSettings','viewServers','viewApp','viewAdBlock','viewDomains'];
+const SETTINGS_VIEWS = ['viewSettings','viewServers','viewApp','viewDomains'];
 let current = 'viewMain';
 
 function show(name){
@@ -3059,7 +2993,7 @@ $('backFromServers').onclick = () => show('viewSettings');
 $('toApp').onclick = async () => {
   if(editingProfileId !== cfg.activeProfile) await selectEditingTab(cfg.activeProfile);
   // Из корня настроек — всё свёрнуто; из вложенных экранов (программы, сеть,
-  // реклама, домены) возвращаются в то, что было раскрыто.
+  // домены) возвращаются в то, что было раскрыто.
   document.querySelectorAll('#viewApp .grp').forEach(g => g.classList.remove('open', 'done'));
   $('viewApp').scrollTop = 0;
   show('viewApp');
@@ -3075,8 +3009,6 @@ document.querySelectorAll('#viewApp .grp').forEach(g => {
     if(e.target === body && g.classList.contains('open')) g.classList.add('done');
   });
 });
-$('toAdBlock').onclick = () => { renderAdBlockTab(); show('viewAdBlock'); };
-$('backFromAdBlock').onclick = () => show('viewApp');
 $('toDomains').onclick = () => { setDomTab(domTab, true); show('viewDomains'); };
 $('backFromDomains').onclick = () => { renderDomainsSummary(); show('viewApp'); };
 $('btnLog').onclick = () =>
@@ -3811,46 +3743,6 @@ toggleHelp('udpRelayHelpBtn', 'udpRelayHelp');
 toggleHelp('directHelpBtn', 'directHelp');
 toggleHelp('tunnelHelpBtn', 'tunnelHelp');
 
-/* ---------- блокировка рекламы ---------- */
-/* Как на телефоне: чёрный список (откуда брать списки) и белый (что не
-   трогать никогда) — вкладками над одним полем. Оба применяются вместе. */
-let adBlockTab = 'block', adBlocked = 0;
-function renderAdBlockTab(){
-  const block = adBlockTab === 'block';
-  [...$('adBlockTabs').children].forEach(b => b.classList.toggle('on', b.dataset.v === adBlockTab));
-  $('adBlockSources').hidden = !block;
-  $('adBlockAllowlist').hidden = block;
-  $('adBlockListLabel').textContent = tr(block ? 'adblock_sources' : 'adblock_allow');
-  $('adBlockListTip').textContent = tr(block ? 'adblock_sources_note' : 'adblock_allow_note');
-}
-function renderAdBlockSummary(){
-  $('adBlockSummary').textContent = $('adBlockEnabled').checked
-    ? tr('adblock_on_short') + ' · ' + tr('adblock_blocked').toLowerCase() + ': ' + adBlocked
-    : tr('adblock_off_short');
-}
-[...$('adBlockTabs').children].forEach(b => b.onclick = () => { adBlockTab = b.dataset.v; renderAdBlockTab(); });
-$('adBlockEnabled').addEventListener('change', renderAdBlockSummary);
-function adBlockField(){ return $(adBlockTab === 'block' ? 'adBlockSources' : 'adBlockAllowlist'); }
-$('adBlockPaste').onclick = async () => {
-  const text = await readClipboard();
-  if(!text) return;
-  adBlockField().value = text.trim();
-  formDirty = true;
-};
-$('adBlockCopy').onclick = async () => {
-  const ok = await copyToClipboard(adBlockField().value);
-  $('adBlockNote').textContent = ok ? tr('copied') : tr('copy_manually');
-  setTimeout(() => $('adBlockNote').textContent = '', 3000);
-};
-/* Скачать списки и сразу применить. Отдельной кнопки нет: это делает
-   «Сохранить» на странице рекламы (см. обработчик сохранения). */
-async function updateAdBlockLists(){
-  if(!$('adBlockEnabled').checked || !$('adBlockSources').value.trim()) return;
-  $('adBlockNote').textContent = tr('adblock_loading');
-  const r = await api('/api/adblock/update', {sources: $('adBlockSources').value});
-  $('adBlockNote').textContent = r.error ? r.error : tr('adblock_count').replace('{n}', r.count);
-}
-
 /* ---------- исключения доменов ---------- */
 /* Два списка: «всегда напрямую» и «всегда в туннель». Кнопки сверху
    сдвигают ленту вбок — второй список въезжает на место первого. */
@@ -4190,7 +4082,7 @@ function splitEntries(v){
 }
 
 [...FIELDS, ...PROFILE_CHECKS, ...CHECKS, 'directHosts', 'tunnelHosts', 'autoConnect',
- 'customCityName', 'showServerPicker', 'adBlockSources', 'adBlockAllowlist', 'hotspotVpn'].forEach(f => {
+ 'customCityName', 'showServerPicker', 'hotspotVpn'].forEach(f => {
   const el = $(f);
   if(el) el.addEventListener('input', () => { formDirty = true; });
 });
@@ -4829,8 +4721,6 @@ function fillGeneralForm(c){
   CHECKS.forEach(f => { if($(f)) $(f).checked = !!c[f]; });
   $('hotspotVpn').checked = !c.hotspotDirect;
   $('realIPHosts').value = (c.realIPHosts || []).join('\n');
-  $('adBlockSources').value = c.adBlockSources || '';
-  $('adBlockAllowlist').value = c.adBlockAllowlist || '';
   $('autoStart').checked = !!c.autoStart;
   // Пока настройку не сохраняли явно (autoConnect === undefined), в силе
   // старое поведение — программа подключается сама, поэтому и галочка стоит.
@@ -4847,7 +4737,6 @@ function fillGeneralForm(c){
   if(startMode === 'mesh') startMode = 'off';
   renderSeg('startModeSeg', startMode);
   renderSeg('meshStartSeg', meshStartMode);
-  renderAdBlockSummary();
   uiTheme = c.theme || '';
   uiBg = c.background || '';
   applyLook();
@@ -5066,15 +4955,11 @@ async function refresh(){
   if(detail && usingBackup) detail += ' (' + tr('backup_server_note') + ')';
   if(st.modes) netModes = st.modes;
   if(st.core) renderCore(st.core);
-  $('toAdBlock').hidden = true; // реклама — в плагине «Блокировка рекламы»
-  // Раздача через точку доступа есть только у VPN-версии — как и блокировка.
+  // Раздача через точку доступа есть только у VPN-версии.
   $('hotspotRow').hidden = !st.adBlock;
   // DNS программы — тоже только у VPN-версии.
   $('fakeIPRow').hidden = !st.adBlock;
   $('realIPRow').hidden = !st.adBlock;
-  adBlocked = st.adBlocked || 0;
-  $('adBlockCount').textContent = adBlocked;
-  renderAdBlockSummary();
   setState(st.state, detail);
   // Пока пользователь правит форму, обновление с сервера её не трогает —
   // иначе набранный, но ещё не сохранённый адрес затирался бы.
