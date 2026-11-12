@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 )
 
 // WithSettings подключает настройки панели (ёмкость сервера и прочее).
@@ -29,6 +30,10 @@ func (s *Server) meshRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/udprelay/install", s.requireAuth(s.withMesh(s.handleUDPRelayInstall)))
 	mux.HandleFunc("/api/mesh/rename", s.requireAuth(s.withMesh(s.handleMeshRename)))
 	mux.HandleFunc("/api/mesh/forget", s.requireAuth(s.withMesh(s.handleMeshForget)))
+	mux.HandleFunc("/api/mesh/net/rename", s.requireAuth(s.withMesh(s.handleMeshNetRename)))
+	mux.HandleFunc("/api/mesh/net/delete", s.requireAuth(s.withMesh(s.handleMeshNetDelete)))
+	mux.HandleFunc("/api/mesh/events", s.requireAuth(s.withMesh(s.handleMeshEvents)))
+	mux.HandleFunc("/api/mesh/check", s.requireAuth(s.withMesh(s.handleMeshCheck)))
 	mux.HandleFunc("/api/mesh/links/create", s.requireAuth(s.withMesh(s.handleMeshLinkCreate)))
 	mux.HandleFunc("/api/mesh/links/delete", s.requireAuth(s.withMesh(s.handleMeshLinkDelete)))
 	mux.HandleFunc("/api/mesh/join", s.requireAuth(s.withMesh(s.handleMeshJoin)))
@@ -165,6 +170,56 @@ func (s *Server) handleMeshForget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	replyErr(w, s.mesh.Forget(r.Context(), req.Net, req.Device), map[string]bool{"ok": true})
+}
+
+// handleMeshNetRename — имя сети (пустое — убрать).
+func (s *Server) handleMeshNetRename(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Net  string `json:"net"`
+		Name string `json:"name"`
+	}
+	if !decodePost(w, r, &req) {
+		return
+	}
+	replyErr(w, s.mesh.RenameNetwork(r.Context(), req.Net, req.Name), map[string]bool{"ok": true})
+}
+
+// handleMeshNetDelete — удалить сеть и отключить её устройства.
+func (s *Server) handleMeshNetDelete(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Net string `json:"net"`
+	}
+	if !decodePost(w, r, &req) {
+		return
+	}
+	replyErr(w, s.mesh.DeleteNetwork(r.Context(), req.Net), map[string]bool{"ok": true})
+}
+
+// handleMeshEvents — журнал событий: GET ?after=<seq>&limit=<n>.
+func (s *Server) handleMeshEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	ev, err := s.mesh.Events(r.Context(), after, limit)
+	replyErr(w, err, ev)
+}
+
+// handleMeshCheck — пустят ли устройство from к устройству to на порт.
+func (s *Server) handleMeshCheck(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Net  string `json:"net"`
+		From string `json:"from"`
+		To   string `json:"to"`
+		Port int    `json:"port"`
+	}
+	if !decodePost(w, r, &req) {
+		return
+	}
+	res, err := s.mesh.Check(r.Context(), req.Net, req.From, req.To, req.Port)
+	replyErr(w, err, res)
 }
 
 func (s *Server) handleMeshLinkCreate(w http.ResponseWriter, r *http.Request) {

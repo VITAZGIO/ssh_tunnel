@@ -66,8 +66,14 @@ type NAT struct {
 
 // Network — одна сеть (все устройства с одинаковым ключом).
 type Network struct {
-	ID      string   `json:"id"`
-	Devices []Device `json:"devices"`
+	ID string `json:"id"`
+	// Name — имя сети из панели; Created — когда сеть появилась (unix);
+	// EmptySince — с какого момента в ней нет устройств (0 — есть).
+	// Старый meshd этих полей не присылает — они нулевые.
+	Name       string   `json:"name"`
+	Created    int64    `json:"created"`
+	EmptySince int64    `json:"emptySince"`
+	Devices    []Device `json:"devices"`
 }
 
 // Server — подключённый побочный сервер.
@@ -127,6 +133,9 @@ func NewAdmin(sock string) *Admin {
 // без входа для панели (старая версия).
 var ErrNotRunning = errors.New("meshd не отвечает")
 
+// ErrUnsupported — meshd старой версии не знает такого запроса.
+var ErrUnsupported = errors.New("эта версия meshd не умеет этого — обновите meshd на сервере (Сеть устройств → переустановить)")
+
 func (a *Admin) do(ctx context.Context, method, path string, body, out any) error {
 	var rd io.Reader
 	if body != nil {
@@ -148,6 +157,10 @@ func (a *Admin) do(ctx context.Context, method, path string, body, out any) erro
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
 		return err
+	}
+	if resp.StatusCode == http.StatusNotFound && !json.Valid(data) {
+		// Старый meshd: путь неизвестен, отвечает текстом «404 page not found».
+		return ErrUnsupported
 	}
 	if resp.StatusCode != http.StatusOK {
 		var e struct {
@@ -185,6 +198,63 @@ func (a *Admin) Rename(ctx context.Context, netID, device, alias string) error {
 // Forget убирает устройство из сети.
 func (a *Admin) Forget(ctx context.Context, netID, device string) error {
 	return a.do(ctx, http.MethodPost, "/v1/forget", deviceReq{Net: netID, Device: device}, nil)
+}
+
+// Event — запись журнала событий meshd (см. /v1/events). Net, Device и Peer —
+// id; Text — подпись для человека.
+type Event struct {
+	Seq    int64  `json:"seq"`
+	Time   int64  `json:"time"`
+	Type   string `json:"type"`
+	Net    string `json:"net,omitempty"`
+	Device string `json:"device,omitempty"`
+	Peer   string `json:"peer,omitempty"`
+	Port   int    `json:"port,omitempty"`
+	Text   string `json:"text,omitempty"`
+}
+
+// Events — ответ /v1/events: Seq — номер последнего события в журнале.
+type Events struct {
+	Seq    int64   `json:"seq"`
+	Events []Event `json:"events"`
+}
+
+// CheckResult — ответ /v1/check: можно ли устройству From открыть соединение
+// к To на порт. Rule — индекс правила или -1; Reason — «rule», «policy off»,
+// «no rule», «unknown device», «server cannot initiate».
+type CheckResult struct {
+	Allowed bool   `json:"allowed"`
+	Rule    int    `json:"rule"`
+	Reason  string `json:"reason"`
+	Visible bool   `json:"visible"`
+}
+
+// RenameNetwork задаёт сети имя (пустое — убрать).
+func (a *Admin) RenameNetwork(ctx context.Context, netID, name string) error {
+	return a.do(ctx, http.MethodPost, "/v1/net/rename", map[string]string{"net": netID, "name": name}, nil)
+}
+
+// DeleteNetwork удаляет сеть и отключает её устройства.
+func (a *Admin) DeleteNetwork(ctx context.Context, netID string) error {
+	return a.do(ctx, http.MethodPost, "/v1/net/delete", map[string]string{"net": netID}, nil)
+}
+
+// Events — события журнала с номером больше after (limit 0 — по умолчанию).
+func (a *Admin) Events(ctx context.Context, after int64, limit int) (Events, error) {
+	var ev Events
+	path := fmt.Sprintf("/v1/events?after=%d&limit=%d", after, limit)
+	err := a.do(ctx, http.MethodGet, path, nil, &ev)
+	if ev.Events == nil {
+		ev.Events = []Event{}
+	}
+	return ev, err
+}
+
+// Check спрашивает, пустят ли устройство from к устройству to на порт.
+func (a *Admin) Check(ctx context.Context, netID, from, to string, port int) (CheckResult, error) {
+	var res CheckResult
+	err := a.do(ctx, http.MethodPost, "/v1/check", map[string]any{"net": netID, "from": from, "to": to, "port": port}, &res)
+	return res, err
 }
 
 // SetSelf — как этот сервер выглядит в сети устройств: имя, пускать ли к нему
