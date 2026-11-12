@@ -202,8 +202,21 @@ func (winBoard) Write(c Clip) error {
 		}
 		return put(cfDIB, dib)
 	case KindFile:
+		// Картинка-файл (фото с телефона: JPEG, PNG, GIF) кладётся сразу
+		// тремя форматами в одном открытии буфера: PNG и DIB — чтобы
+		// вставлялось картинкой (Paint, Word, поле в браузере), CF_HDROP —
+		// чтобы вставлялось файлом (Проводник, почта). Самое «богатое» —
+		// первым. Не картинка или слишком большая — только файл.
+		if dib, p, err := imageBitmaps(c.Data); err == nil {
+			if cfPNG != 0 {
+				_ = put(cfPNG, p)
+			}
+			_ = put(cfDIB, dib)
+		}
 		// DROPFILES: смещение списка (20), точка, «не клиентская», «UTF-16»;
 		// потом пути, каждый с нулём, и ещё один ноль.
+		// Read читает CF_HDROP раньше картинок и получает тот же файл, поэтому
+		// отпечаток (lastApplied) совпадает и обратно в сеть он не уходит.
 		hdr := make([]byte, 20)
 		binary.LittleEndian.PutUint32(hdr[0:], 20)
 		binary.LittleEndian.PutUint32(hdr[16:], 1)

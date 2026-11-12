@@ -37,6 +37,15 @@
       <span class="hint" id="msg"></span>
     </div>
   </div>
+  <div class="card" id="acc" hidden>
+    <b id="accT"></b>
+    <div class="hint" id="accS"></div>
+    <ol class="hint" id="accHow" style="margin:6px 0 6px 18px;padding:0"></ol>
+    <div class="f">
+      <button class="btn primary" id="accOpen"></button>
+      <button class="btn" id="accInfo"></button>
+    </div>
+  </div>
   <div class="card" id="list"></div>
   <div class="f"><button class="btn" id="clear"></button></div>
   <div class="hint" id="note"></div>
@@ -120,7 +129,7 @@ function render(){
 function state(r){
   const off = r.mesh === 'off' || r.mesh === 'stopped';
   $('state').textContent = off ? L('Сеть устройств выключена — буфер не передаётся.', 'The device network is off — nothing is shared.')
-    : ANDROID ? L('Отсюда: «Поделиться → ssh_tunnel» или плитка «Общий буфер» в шторке. Сюда — само.', 'From here: Share → ssh_tunnel or the «Shared clipboard» quick tile. To here — automatically.')
+    : ANDROID ? L('Отсюда: «Поделиться → ssh_tunnel», плитка «Общий буфер» в шторке или кнопка «Отправить буфер» в уведомлении. Сюда — само.', 'From here: Share → ssh_tunnel, the «Shared clipboard» quick tile or the “Send clipboard” notification button. To here — automatically.')
     : L('Скопированное на этом устройстве уходит остальным само, полученное — сразу в буфер.', 'What you copy here goes to the others automatically; what arrives goes straight to the clipboard.');
   $('note').textContent = L('Хранятся последние 20 записей. Участие — выключатель на плитке приложения на каждом устройстве.',
     'The last 20 entries are kept. Taking part is the switch on the app tile, on each device.');
@@ -145,6 +154,30 @@ async function watch(){
     } catch(e) { await new Promise(f => setTimeout(f, 3000)); }
   }
 }
+
+// Android: служба спецвозможностей — отправка буфера сразу после «Копировать».
+function accRender(){
+  const A = window.SSHTunnelAndroid;
+  if(!ANDROID || !A || !A.clipAccess){ return; }
+  $('acc').hidden = false;
+  const on = A.clipAccess();
+  $('accT').textContent = L('Отправлять сразу после «Копировать»', 'Send right after “Copy”');
+  $('accS').textContent = on ? L('✓ Включено. Скопировал в любом приложении — буфер уходит сам.', '✓ On. Copy in any app and the clipboard is sent automatically.')
+    : L('Выключено. Без этого буфер уходит кнопкой в уведомлении, плиткой или при открытии ssh_tunnel.', 'Off. Without it the clipboard goes with the notification button, the tile, or when ssh_tunnel is opened.');
+  $('accHow').innerHTML = [
+    L('Нажми «Открыть настройки спецвозможностей» → «Установленные службы» → ssh_tunnel → включить.', 'Tap “Open accessibility settings” → Installed services → ssh_tunnel → turn on.'),
+    L('Если переключатель серый или пишет «Ограниченная настройка» (Android 13+, приложение установлено не из магазина): «Страница приложения» → меню ⋮ вверху справа → «Разрешить ограниченные настройки», затем повтори п. 1.', 'If the switch is greyed out or says “Restricted setting” (Android 13+, app not from a store): “App page” → ⋮ menu → “Allow restricted settings”, then repeat step 1.'),
+    L('Служба видит только факт нажатия кнопки «Копировать» (её подпись); содержимое экрана не читается.', 'The service only sees that a “Copy” button was tapped (its label); screen content is not read.'),
+    L('На HiOS/Tecno, если перестало работать: разрешить автозапуск и снять ограничение батареи для ssh_tunnel.', 'On HiOS/Tecno, if it stops working: allow autostart and remove battery restrictions for ssh_tunnel.')
+  ].map(x => `<li>${esc(x)}</li>`).join('');
+  $('accOpen').textContent = L('Открыть настройки спецвозможностей', 'Open accessibility settings');
+  $('accInfo').textContent = L('Страница приложения', 'App page');
+  $('accOpen').onclick = () => A.openClipAccess();
+  $('accInfo').onclick = () => A.openAppInfo();
+}
+accRender();
+document.addEventListener('visibilitychange', accRender);
+window.addEventListener('focus', accRender);
 
 refresh().then(watch);
 </script>

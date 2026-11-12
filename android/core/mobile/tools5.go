@@ -117,6 +117,10 @@ func (d devnetSrc) Warn(text string) {
 	}
 }
 
+// ClipActive — плагин «Общий буфер» добавлен и включён: от этого зависят
+// кнопка «Отправить буфер» в уведомлении и служба спецвозможностей.
+func ClipActive() bool { return clipshare.Active() }
+
 // ClipPush — «Поделиться → ssh_tunnel» и плитка: отправить всем устройствам.
 // Ответ — JSON {"sent":N} или {"error","tooBig"}.
 func ClipPush(kind, name, mime string, data []byte) string {

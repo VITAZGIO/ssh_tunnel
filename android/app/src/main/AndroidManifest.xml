@@ -257,6 +257,22 @@
             android:excludeFromRecents="true"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- ТЗ 4: по желанию (выключено, пока человек сам не включит в
+             настройках) — замечает, что в другой программе нажали «Копировать»,
+             и открывает ClipReadActivity, чтобы отправить буфер. Только события
+             нажатия, содержимое экрана не читается (см. clip_access_config). -->
+        <service
+            android:name=".ClipAccess"
+            android:exported="true"
+            android:label="@string/clip_access_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/clip_access_config" />
+        </service>
         <service
             android:name=".ClipTile"
             android:exported="true"

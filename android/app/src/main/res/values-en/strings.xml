@@ -67,4 +67,7 @@
     <string name="clip_sent_multi">Files sent: %1$d of %2$d</string>
     <string name="clip_too_big">Over 50 MB — use Device files</string>
     <string name="clip_empty">Nothing to send in the clipboard</string>
+    <string name="clip_send_now">Send clipboard</string>
+    <string name="clip_access_label">ssh_tunnel shared clipboard</string>
+    <string name="clip_access_desc">Notices a tap on “Copy” in other apps and sends the clipboard to your devices. It does not read the screen content and sends nothing from it.</string>
 </resources>

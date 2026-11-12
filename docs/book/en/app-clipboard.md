@@ -13,6 +13,16 @@ network**, encrypted like the network; turn on «Device network».
   screenshot, file) or the **«Shared clipboard»** quick tile: it sends what
   is in the phone's clipboard now. Android does not let apps read the
   clipboard in the background.
+  Two more ways: the **“Send clipboard”** button in the app's persistent
+  notification (shown while the plugin is on) and, optionally, an
+  accessibility service — then the clipboard is sent by itself after you tap
+  “Copy”. Turn it on from the plugin page (step-by-step instructions there,
+  including “Allow restricted settings” on Android 13+). The service only
+  sees the label of the tapped button and does not read the screen.
+- **Photos**: JPEG, PNG and GIF from the phone paste on the PC both as a
+  picture (Paint, Word, a messenger) and as a file (Explorer). HEIC, WebP and
+  other formats are converted to JPEG on the phone first. Very large images
+  (over 40 megapixels) stay file-only on the PC.
 - **To the phone** — automatically: it lands in the clipboard, just paste.
 - **History** — the last 20 entries: copy text, download a file, delete.
   Files in history take up to 200 MB; older ones lose their content.
