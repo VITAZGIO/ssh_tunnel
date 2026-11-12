@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docker</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../pages.css">
+<style>
+  body{background:transparent}
+  .wrap{padding:4px 14px 16px;display:flex;flex-direction:column;gap:10px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .grow{flex:1;min-width:0}
+  .name{font-weight:600;overflow-wrap:anywhere}
+  .meta{color:var(--dim);font-size:12px;overflow-wrap:anywhere}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex-shrink:0}
+  .seg button{border:0;background:transparent;color:var(--text);padding:6px 10px;cursor:pointer;font-size:13px}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button.on{background:var(--accent-muted);color:#fff}
+  .seg button:disabled{opacity:.5;cursor:default}
+  .ctr{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)}
+  .ctr:first-of-type{border-top:0}
+  .state{font-size:12px;padding:1px 7px;border-radius:8px;background:var(--card2);color:var(--dim)}
+  .bad{color:var(--err)}.ok{color:var(--ok)}
+  h3{margin:0 0 4px;font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card" id="head"></div>
+  <div id="projects"></div>
+  <div class="card" id="list"></div>
+</div>
+<script src="../pages.js"></script>
+<script>
+/* Docker: контейнеры и выбор для каждого. Всё — через /api/docker и
+   /api/docker/set; что действует, решает ядро программы, страница только
+   рисует ответ и шлёт выбор. */
+const CHOICES = [
+  ['host', L('Как компьютер', 'Like the computer')],
+  ['tunnel', L('Через сервер', 'Via the server')],
+  ['direct', L('Напрямую', 'Direct')],
+];
+const word = c => (CHOICES.find(x => x[0] === c) || [c, c])[1];
+
+function seg(cur, attrs, disabled){
+  return `<span class="seg">${CHOICES.map(([v, t]) =>
+    `<button data-route="${v}" ${attrs} class="${v === cur ? 'on' : ''}" ${disabled ? 'disabled' : ''}>${esc(t)}</button>`).join('')}</span>`;
+}
+
+// status — что сейчас с интернетом контейнера, одной фразой.
+function status(c, d){
+  if(c.state !== 'running') return '';
+  const k = d.kernel;
+  if(c.effective === 'tunnel'){
+    if(!k) return `<span class="bad">${esc(L('выбор сохранён, но правил нет: нужна VPN-версия', 'choice saved, but no rules: needs the VPN version'))}</span>`;
+    if(!k.up) return `<span>${esc(L('VPN выключен — идёт как компьютер', 'VPN is off — goes like the computer'))}</span>`;
+    if(!k.full) return `<span class="bad">${esc(L('туннель выключен — интернета нет', 'tunnel is off — no internet'))}</span>`;
+    return `<span class="ok">${esc(L('через сервер', 'via the server'))}</span>`;
+  }
+  if(c.effective === 'direct' && k && k.up) return `<span class="ok">${esc(L('напрямую', 'direct'))}</span>`;
+  return '';
+}
+
+function from(c){
+  switch(c.from){
+    case 'label': return L('по метке ssh_tunnel.route', 'by the ssh_tunnel.route label');
+    case 'project': return L('как весь проект', 'as the whole project');
+    default: return '';
+  }
+}
+
+function render(d){
+  const k = d.kernel;
+  let head;
+  if(d.error) head = `<div class="bad">${esc(d.error)}</div><div class="hint">${esc(L(
+      'Плагин ничего не делает, пока не видит Docker. Docker API — сокет /var/run/docker.sock (или DOCKER_HOST=unix://…).',
+      'The app does nothing until it sees Docker. Docker API is the /var/run/docker.sock socket (or DOCKER_HOST=unix://…).'))}</div>`;
+  else if(!d.vpn) head = `<div class="bad">${esc(L('Это не VPN-версия: выбор сохраняется, но не действует.', 'This is not the VPN version: choices are saved but have no effect.'))}</div><div class="hint">${esc(L('Запусти sudo ssh_tunnel_vpn_linux.', 'Run sudo ssh_tunnel_vpn_linux.'))}</div>`;
+  else head = `<div>${esc(!k.up ? L('VPN выключен: все контейнеры идут как компьютер.', 'VPN is off: all containers go like the computer.')
+      : k.full ? L('Туннель включён.', 'The tunnel is on.')
+      : L('Туннель выключен: у контейнеров «через сервер» сейчас нет интернета.', 'The tunnel is off: containers set to "via the server" have no internet now.'))}</div>
+    <div class="hint">${esc(L('Правил в ядре: ', 'Kernel rules: ') + k.rules)}${k.error ? ' · <span class="bad">' + esc(k.error) + '</span>' : ''}</div>`;
+  $('head').innerHTML = head;
+
+  $('projects').innerHTML = (d.projects || []).length ? `<div class="card"><h3>${esc(L('Проекты compose — весь проект разом', 'Compose projects — whole project at once'))}</h3>${
+    d.projects.map(p => `<div class="ctr"><div class="grow"><div class="name">${esc(p.name)}</div>
+      <div class="meta">${esc(L('контейнеров: ', 'containers: ') + p.count)}</div></div>${seg(p.choice, `data-project="${esc(p.name)}"`, !!d.error)}</div>`).join('')}</div>` : '';
+
+  const cs = d.containers || [];
+  $('list').innerHTML = cs.length ? cs.map(c => {
+    const nets = (c.networks || []).map(n => n.name + (n.ip ? ' ' + n.ip : '')).join(', ');
+    const meta = [c.project ? c.project + (c.service ? '/' + c.service : '') : '', c.image, nets].filter(Boolean).join(' · ');
+    const why = c.switchable ? from(c) : (LANG === 'en' ? c.whyEn : c.why);
+    const st = status(c, d);
+    return `<div class="ctr"><div class="grow">
+        <div class="name">${esc(c.name)} <span class="state">${esc(c.state)}</span></div>
+        <div class="meta">${esc(meta)}</div>
+        <div class="meta">${why ? esc(why) + (st ? ' · ' : '') : ''}${st}</div></div>
+      ${c.switchable ? seg(c.label || c.choice, `data-ctr="${esc(c.name)}"`, !!c.label)
+        : `<span class="hint">${esc(word(c.effective))}</span>`}</div>`;
+  }).join('') : `<div class="hint">${esc(d.error ? '' : L('Контейнеров нет.', 'No containers.'))}</div>`;
+
+  document.querySelectorAll('[data-route]').forEach(b => b.onclick = async () => {
+    const body = {route: b.dataset.route};
+    if(b.dataset.project !== undefined) body.project = b.dataset.project; else body.container = b.dataset.ctr;
+    b.parentElement.querySelectorAll('button').forEach(x => x.disabled = true);
+    const r = await api('/api/docker/set', body).catch(e => ({error: String(e)}));
+    if(r.error) alert(r.error);
+    load();
+  });
+}
+
+const load = () => api('/api/docker').then(render).catch(e => render({error: String(e)}));
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>

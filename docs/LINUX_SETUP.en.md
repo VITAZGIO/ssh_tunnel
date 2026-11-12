@@ -233,6 +233,39 @@ and Alpine: there the service is set up by hand, with the commands above.
 
 ---
 
+## Docker: containers via the server or direct
+
+In the VPN version the **"Docker"** app (Apps → Docker) lists the machine's
+containers with three buttons each: **like the computer** (default), **via
+the server**, **direct**. A compose project switches as a whole; the label
+`ssh_tunnel.route=tunnel|direct|host` in `compose.yaml` wins over the buttons.
+
+- "Via the server" never goes around: tunnel off, reconnecting or the
+  program crashed — the container has no internet; its DNS also goes only
+  into the tunnel.
+- The home network, the machine itself, neighbouring containers and ports
+  published to the home network (`-p`) work with any choice. A port forwarded
+  on the router to the internet does not work for a "via the server"
+  container — replies would go into the tunnel; pick "direct" or "like the
+  computer" for such a container.
+- `network_mode: host` and containers in another container's network cannot
+  be switched on their own.
+- Needs access to the `/var/run/docker.sock` socket (the VPN version has it —
+  it runs as root); the `docker` program is not needed.
+- How it works: `ip rule from <container address>` rules into tables
+  7094–7096, priorities 9400–9401 (`ip rule`, `ip route show table 7094`).
+  Turn the VPN or the app off — they are removed.
+
+From the command line:
+
+```bash
+ssh_tunnel_linux docker
+ssh_tunnel_linux docker set container=qbittorrent route=tunnel
+ssh_tunnel_linux docker set project=media route=direct
+```
+
+---
+
 ## Web interface
 
 The very same one the Windows build shows in its window, served on the fixed
