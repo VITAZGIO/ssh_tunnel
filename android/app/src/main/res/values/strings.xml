@@ -68,4 +68,7 @@
     <string name="clip_sent_multi">Отправлено файлов: %1$d из %2$d</string>
     <string name="clip_too_big">Больше 50 МБ — передай через «Файлы устройства»</string>
     <string name="clip_empty">В буфере нечего отправить</string>
+    <string name="clip_send_now">Отправить буфер</string>
+    <string name="clip_access_label">Общий буфер ssh_tunnel</string>
+    <string name="clip_access_desc">Замечает нажатие «Копировать» в других приложениях и отправляет буфер на ваши устройства. Содержимое экрана не читается и никуда не передаётся.</string>
 </resources>

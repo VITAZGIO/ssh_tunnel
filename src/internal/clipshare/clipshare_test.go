@@ -2,9 +2,12 @@ package clipshare
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"image"
 	"image/color"
+	"image/gif"
+	"image/jpeg"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -143,5 +146,139 @@ func TestNoLoop(t *testing.T) {
 	defer l.mu.Unlock()
 	if len(l.pushed) != 1 || l.pushed[0] != "с ПК" {
 		t.Fatalf("отправлено: %q", l.pushed)
+	}
+}
+
+// jpegOf — JPEG w×h одного цвета.
+func jpegOf(t *testing.T, w, h int, c color.RGBA) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.SetRGBA(x, y, c)
+		}
+	}
+	var b bytes.Buffer
+	if err := jpeg.Encode(&b, img, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+func near(a, b uint8) bool { return int(a)-int(b) < 12 && int(b)-int(a) < 12 }
+
+func TestImageBitmapsJPEG(t *testing.T) {
+	// Нечётные размеры: строка DIB выравнивается не нужно (32 бита), но
+	// цветовые блоки JPEG (подвыборка 2×2) на краю неполные.
+	for _, sz := range [][2]int{{1, 1}, {3, 5}, {17, 9}, {33, 1}} {
+		src := jpegOf(t, sz[0], sz[1], color.RGBA{R: 200, G: 40, B: 40, A: 255})
+		dib, p, err := imageBitmaps(src)
+		if err != nil {
+			t.Fatalf("%v: %v", sz, err)
+		}
+		if len(dib) != 40+sz[0]*sz[1]*4 {
+			t.Fatalf("%v: DIB %d байт", sz, len(dib))
+		}
+		if w, h := int32(binary.LittleEndian.Uint32(dib[4:])), int32(binary.LittleEndian.Uint32(dib[8:])); int(w) != sz[0] || int(h) != sz[1] {
+			t.Fatalf("%v: в заголовке %d×%d", sz, w, h)
+		}
+		// Первая точка в DIB — B, G, R, A.
+		if !near(dib[40], 40) || !near(dib[41], 40) || !near(dib[42], 200) || dib[43] != 255 {
+			t.Fatalf("%v: цвет %v", sz, dib[40:44])
+		}
+		if cfg, err := png.DecodeConfig(bytes.NewReader(p)); err != nil || cfg.Width != sz[0] || cfg.Height != sz[1] {
+			t.Fatalf("%v: PNG %v %v", sz, cfg, err)
+		}
+	}
+}
+
+func TestImageBitmapsOrderAndFormats(t *testing.T) {
+	// Верх красный, низ синий: в DIB строки идут снизу вверх.
+	img := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	for x := 0; x < 2; x++ {
+		img.SetNRGBA(x, 0, color.NRGBA{255, 0, 0, 255})
+		img.SetNRGBA(x, 1, color.NRGBA{0, 0, 255, 255})
+	}
+	var pb, gb bytes.Buffer
+	png.Encode(&pb, img)
+	gif.Encode(&gb, img, nil)
+	for name, src := range map[string][]byte{"png": pb.Bytes(), "gif": gb.Bytes()} {
+		dib, p, err := imageBitmaps(src)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if dib[40] != 255 || dib[42] != 0 { // первая строка DIB — нижняя, синяя
+			t.Fatalf("%s: нижняя строка %v", name, dib[40:44])
+		}
+		if dib[40+8+2] != 255 { // вторая строка DIB — верхняя, красная
+			t.Fatalf("%s: верхняя строка %v", name, dib[48:52])
+		}
+		if _, err := png.Decode(bytes.NewReader(p)); err != nil {
+			t.Fatalf("%s: PNG: %v", name, err)
+		}
+	}
+	if _, _, err := imageBitmaps([]byte("просто текст")); err != errNotImage {
+		t.Fatalf("текст: %v", err)
+	}
+	if _, _, err := imageBitmaps(nil); err != errNotImage {
+		t.Fatalf("пусто: %v", err)
+	}
+}
+
+func TestImageBitmapsPixelLimit(t *testing.T) {
+	old := maxPixels
+	maxPixels = 100
+	defer func() { maxPixels = old }()
+	if _, _, err := imageBitmaps(jpegOf(t, 10, 10, color.RGBA{A: 255})); err != nil {
+		t.Fatalf("ровно на пределе: %v", err)
+	}
+	if _, _, err := imageBitmaps(jpegOf(t, 11, 10, color.RGBA{A: 255})); err != errTooLarge {
+		t.Fatalf("сверх предела: %v", err)
+	}
+	var p bytes.Buffer
+	png.Encode(&p, image.NewNRGBA(image.Rect(0, 0, 11, 10)))
+	if _, err := pngToDIB(p.Bytes()); err != errTooLarge {
+		t.Fatalf("pngToDIB сверх предела: %v", err)
+	}
+}
+
+// Полученный файл-картинка (на Windows он лежит в буфере несколькими
+// форматами, а Read отдаёт тот же файл) обратно в сеть не уходит.
+func TestNoLoopFileImage(t *testing.T) {
+	n := startNode(t.TempDir())
+	defer n.close()
+	nodeMu.Lock()
+	running = n
+	nodeMu.Unlock()
+	defer func() { nodeMu.Lock(); running = nil; nodeMu.Unlock() }()
+
+	b := &fakeBoard{}
+	l := &countLink{}
+	stop := watch(b, l)
+	defer stop()
+	time.Sleep(300 * time.Millisecond)
+
+	photo := jpegOf(t, 5, 3, color.RGBA{R: 9, A: 255})
+	req := httptest.NewRequest(http.MethodPost, "/clip?id=img1&kind=file&name=p.jpg&mime=image/jpeg", bytes.NewReader(photo))
+	w := httptest.NewRecorder()
+	n.receive(w, req)
+	if w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if c, _ := b.Read(); len(c.Data) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("фото не попало в буфер")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	time.Sleep(1500 * time.Millisecond)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.pushed) != 0 {
+		t.Fatalf("полученное фото ушло обратно: %d", len(l.pushed))
 	}
 }

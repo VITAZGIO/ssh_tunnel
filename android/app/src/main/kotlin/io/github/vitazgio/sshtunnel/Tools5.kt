@@ -10,6 +10,11 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.ImageDecoder
 import android.graphics.drawable.Icon
 import android.net.ConnectivityManager
 import android.net.Network
@@ -30,6 +35,7 @@ import java.io.File
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.nio.ByteBuffer
 
 /**
  * ТЗ 5: Расход трафика, Сканер сети, Общий буфер — то, что ядру на Go даёт
@@ -192,10 +198,11 @@ object Tools5 : mobile.Phone {
         main.post {
             val cb = c.getSystemService(ClipboardManager::class.java) ?: return@post
             val clip = if (kind == "text") {
-                lastText = text
+                lastKey = "text:$text"
                 ClipData.newPlainText("ssh_tunnel", text)
             } else {
                 val uri = FileProvider.getUriForFile(c, c.packageName + ".files", File(path))
+                lastKey = "uri:$uri"
                 val type = mime.ifEmpty { if (kind == "image") "image/png" else "application/octet-stream" }
                 ClipData(ClipDescription(name.ifEmpty { "ssh_tunnel" }, arrayOf(type)), ClipData.Item(uri))
             }
@@ -279,26 +286,92 @@ object Tools5 : mobile.Phone {
         return Triple(name, mime, data)
     }
 
-    /** Отправить ClipData (из «Поделиться» или буфера) в фоне и показать итог. */
-    fun sendClip(a: Activity, text: CharSequence?, uri: Uri?) {
+    /** Итог отправки: ok — дошло хоть до одного устройства; final — повторять
+     * бессмысленно (слишком большой), значит не пробовать снова при каждом
+     * возврате в программу. */
+    private class Res(val ok: Boolean, val msg: String, val final: Boolean = false)
+
+    /** Что уходит по сети: kind — text/image/file; image — всегда PNG. */
+    private class Prepared(val kind: String, val name: String, val mime: String, val data: ByteArray)
+
+    private fun startsWith(d: ByteArray, vararg b: Int): Boolean =
+        d.size >= b.size && b.indices.all { d[it] == b[it].toByte() }
+
+    private val CONVERT_EXT = setOf("heic", "heif", "webp", "avif", "bmp", "tif", "tiff", "dng", "ico")
+
+    /**
+     * ТЗ 4: что отправить. Формат определяем по содержимому, а не по Mime
+     * (галерея часто отдаёт пустой или неверный). PNG — как есть, вид image;
+     * JPEG и GIF — как есть, вид file с Mime картинки (ПК положит в буфер
+     * и картинкой, и файлом). Остальные картинки (HEIC/HEIF, WebP и пр.) ПК
+     * разобрать не умеет — переводим в JPEG; не вышло — уходит как файл.
+     */
+    private fun prepare(name: String, mime: String, data: ByteArray): Prepared {
+        if (startsWith(data, 0x89, 0x50, 0x4E, 0x47)) return Prepared("image", name, "image/png", data)
+        if (startsWith(data, 0xFF, 0xD8, 0xFF)) return Prepared("file", name, "image/jpeg", data)
+        if (startsWith(data, 0x47, 0x49, 0x46, 0x38)) return Prepared("file", name, "image/gif", data)
+        val ext = name.substringAfterLast('.', "").lowercase()
+        if (mime.startsWith("image/") || ext in CONVERT_EXT) {
+            toJpeg(data)?.let {
+                return Prepared("file", name.substringBeforeLast('.', name) + ".jpg", "image/jpeg", it)
+            }
+        }
+        return Prepared("file", name, mime, data)
+    }
+
+    /** Любая картинка, которую умеет разобрать телефон → JPEG (поворот по EXIF
+     * учитывается, прозрачность — на белом). null — не картинка / не хватило памяти. */
+    private fun toJpeg(data: ByteArray): ByteArray? = try {
+        val src = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(data))) { dec, _, _ ->
+                dec.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            }
+        } else {
+            BitmapFactory.decodeByteArray(data, 0, data.size)
+        }
+        if (src == null) null else {
+            val flat = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+            val cv = Canvas(flat)
+            cv.drawColor(Color.WHITE)
+            cv.drawBitmap(src, 0f, 0f, null)
+            src.recycle()
+            val out = java.io.ByteArrayOutputStream()
+            flat.compress(Bitmap.CompressFormat.JPEG, 92, out)
+            flat.recycle()
+            out.toByteArray().takeIf { it.isNotEmpty() }
+        }
+    } catch (_: Throwable) {
+        null
+    }
+
+    /** Файл/картинка по uri → отправка. Общий путь для «Поделиться», плитки,
+     * кнопки в уведомлении, службы спецвозможностей и автоотправки. */
+    private fun pushUri(ctx: Context, uri: Uri): Res {
+        val r = readUri(ctx, uri) ?: return Res(false, ctx.getString(R.string.clip_empty))
+        if (r.third.size > MAX) return Res(false, ctx.getString(R.string.clip_too_big), true)
+        val p = prepare(r.first, r.second, r.third)
+        val (ok, msg) = pushResult(ctx, p.kind, p.name, p.mime, p.data)
+        return Res(ok, msg)
+    }
+
+    private fun pushText(ctx: Context, text: String): Res {
+        val (ok, msg) = pushResult(ctx, "text", "", "", text.toByteArray())
+        return Res(ok, msg)
+    }
+
+    /** Отправить ClipData (из «Поделиться» или буфера) в фоне и показать итог.
+     * key — отпечаток элемента буфера (см. keyOf): при успехе его запоминаем,
+     * чтобы автоотправка не слала то же самое второй раз. */
+    fun sendClip(a: Activity, text: CharSequence?, uri: Uri?, key: String? = null) {
         val ctx = a.applicationContext
         Thread {
-            val msg = when {
-                uri != null -> {
-                    val r = readUri(ctx, uri)
-                    when {
-                        r == null -> ctx.getString(R.string.clip_empty)
-                        r.third.size > MAX -> ctx.getString(R.string.clip_too_big)
-                        else -> {
-                            val image = r.second == "image/png"
-                            push(ctx, if (image) "image" else "file", r.first, r.second, r.third)
-                        }
-                    }
-                }
-                !text.isNullOrEmpty() -> push(ctx, "text", "", "", text.toString().toByteArray())
-                else -> ctx.getString(R.string.clip_empty)
+            val res = when {
+                uri != null -> pushUri(ctx, uri)
+                !text.isNullOrEmpty() -> pushText(ctx, text.toString())
+                else -> Res(false, ctx.getString(R.string.clip_empty))
             }
-            main.post { Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show() }
+            if (res.ok || res.final) key?.let { lastKey = it }
+            main.post { Toast.makeText(ctx, res.msg, Toast.LENGTH_SHORT).show() }
         }.start()
     }
 
@@ -312,17 +385,9 @@ object Tools5 : mobile.Phone {
             var ok = 0
             var lastMsg = ""
             for (uri in uris) {
-                val r = readUri(ctx, uri)
-                val (success, msg) = when {
-                    r == null -> false to ctx.getString(R.string.clip_empty)
-                    r.third.size > MAX -> false to ctx.getString(R.string.clip_too_big)
-                    else -> {
-                        val image = r.second == "image/png"
-                        pushResult(ctx, if (image) "image" else "file", r.first, r.second, r.third)
-                    }
-                }
-                lastMsg = msg
-                if (success) ok++
+                val res = pushUri(ctx, uri)
+                lastMsg = res.msg
+                if (res.ok) ok++
             }
             val msg = if (uris.size <= 1 || ok == 0) lastMsg
                 else ctx.getString(R.string.clip_sent_multi, ok, uris.size)
@@ -332,61 +397,91 @@ object Tools5 : mobile.Phone {
 
     const val MAX = 50 * 1024 * 1024
 
-    /** Последний текст буфера, который реально ушёл (sent &gt; 0) или пришёл:
-     * его не шлём снова. Если отправка не удалась (нет сети — «0 устройств»),
-     * lastText остаётся прежним, и как только появится связь, текст уйдёт. */
-    @Volatile private var lastText: String? = null
+    /** Отпечаток последнего элемента буфера, который реально ушёл (или который
+     * положили мы сами): "text:…" или "uri:…". Его не шлём снова. Если отправка
+     * не удалась (нет сети — «0 устройств»), отпечаток остаётся прежним, и как
+     * только появится связь, элемент уйдёт. */
+    @Volatile private var lastKey: String? = null
+
+    /** Отпечаток, который отправляется прямо сейчас (не запускать второй раз). */
+    @Volatile private var sending: String? = null
 
     /** Кого видели последним в фокусе — чтобы повторить отправку, когда
      * вернётся сеть, даже без повторного переключения на программу. */
     @Volatile private var lastActivity: java.lang.ref.WeakReference<Activity>? = null
 
+    /** Текст элемента буфера; ссылки content:// и intent-элементы текстом не
+     * считаются (иначе адрес картинки ушёл бы на ПК строкой). */
+    fun textOf(ctx: Context, item: ClipData.Item): String? {
+        if (item.uri != null) return null
+        val t = item.text ?: if (item.htmlText != null) item.coerceToText(ctx) else null
+        return t?.toString()?.takeIf { it.isNotEmpty() }
+    }
+
+    /** Отпечаток элемента буфера; null — отправлять нечего или это наша же
+     * запись (файл, который только что принят с другого устройства). */
+    fun keyOf(ctx: Context, item: ClipData.Item): String? {
+        val uri = item.uri
+        if (uri != null) {
+            if (uri.authority == ctx.packageName + ".files") return null
+            return "uri:$uri"
+        }
+        return textOf(ctx, item)?.let { "text:$it" }
+    }
+
+    private fun primaryItem(a: Activity): ClipData.Item? = try {
+        a.getSystemService(ClipboardManager::class.java)?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+    } catch (_: Exception) {
+        null
+    }
+
     /**
      * Буфер телефона → компьютеры без кнопок. Android (10+) даёт читать буфер
      * только программе на экране, поэтому скопированное в другом приложении
-     * уходит, как только открываешь ssh_tunnel. Плагин не добавлен или
-     * отправка выключена — ядро отвечает ошибкой, и молчим.
+     * уходит, как только открываешь ssh_tunnel. Текст и картинки/файлы идут
+     * одним путём с «Поделиться» и плиткой. Плагин не добавлен или отправка
+     * выключена — ядро отвечает ошибкой, и молчим.
      */
     fun autoSend(a: Activity) {
         lastActivity = java.lang.ref.WeakReference(a)
-        val cb = a.getSystemService(ClipboardManager::class.java) ?: return
-        val text = try {
-            cb.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(a)?.toString()
-        } catch (_: Exception) {
-            null
-        }
-        if (text.isNullOrEmpty() || text == lastText) return
-        send(a.applicationContext, text)
+        val item = primaryItem(a) ?: return
+        val key = keyOf(a, item) ?: return
+        if (key == lastKey || key == sending) return
+        send(a.applicationContext, item, key)
     }
 
     /** Пытается заново отправить то, что в буфере, когда появилась сеть —
      * без этого «0 устройств» офлайн так и оставалось висеть недошедшим. */
     fun retrySend() {
         val a = lastActivity?.get() ?: return
-        val cb = a.getSystemService(ClipboardManager::class.java) ?: return
-        val text = try {
-            cb.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(a)?.toString()
-        } catch (_: Exception) {
-            null
-        }
-        if (text.isNullOrEmpty() || text != lastText) return
-        send(a.applicationContext, text)
+        val item = primaryItem(a) ?: return
+        val key = keyOf(a, item) ?: return
+        if (key == lastKey || key == sending) return
+        send(a.applicationContext, item, key)
     }
 
-    private fun send(ctx: Context, text: String) {
+    private fun send(ctx: Context, item: ClipData.Item, key: String) {
+        val uri = item.uri
+        val text = if (uri == null) textOf(ctx, item) else null
+        sending = key
         Thread {
-            DeviceApps.init(ctx)
-            val r = try {
-                JSONObject(mobile.Mobile.clipPush("text", "", "", text.toByteArray()))
-            } catch (_: Exception) {
-                return@Thread
-            }
-            val n = r.optInt("sent")
-            // Только при успехе считаем текст «уже отправленным» — иначе при
-            // восстановлении сети повторить будет нечего (см. retrySend).
-            if (n > 0) {
-                lastText = text
-                main.post { Toast.makeText(ctx, ctx.getString(R.string.clip_sent, n), Toast.LENGTH_SHORT).show() }
+            try {
+                DeviceApps.init(ctx)
+                val res = when {
+                    uri != null -> pushUri(ctx, uri)
+                    text != null -> pushText(ctx, text)
+                    else -> return@Thread
+                }
+                // Только при успехе считаем элемент «уже отправленным» — иначе
+                // при восстановлении сети повторить будет нечего (см. retrySend).
+                // Слишком большой тоже запоминаем: иначе каждый возврат в
+                // программу заново читал бы до 50 МБ.
+                if (res.ok || res.final) {
+                    lastKey = key
+                    main.post { Toast.makeText(ctx, res.msg, Toast.LENGTH_SHORT).show() }
+                }
+            } finally {
+                sending = null
             }
         }.start()
     }
@@ -426,8 +521,8 @@ class ClipReadActivity : Activity() {
         val cb = getSystemService(ClipboardManager::class.java)
         val item = cb?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
         val uri = item?.uri
-        val text = item?.text ?: if (uri == null) item?.coerceToText(this) else null
-        Tools5.sendClip(this, text, uri)
+        val text = item?.let { Tools5.textOf(this, it) }
+        Tools5.sendClip(this, text, uri, item?.let { Tools5.keyOf(this, it) })
         finish()
     }
 }

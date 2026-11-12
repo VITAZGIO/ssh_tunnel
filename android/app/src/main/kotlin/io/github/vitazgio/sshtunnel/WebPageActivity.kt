@@ -176,6 +176,17 @@ class WebPageActivity : AppCompatActivity() {
         @JavascriptInterface
         fun openNotifAccess() = runOnUiThread { PhoneNotifs.openSettings(this@WebPageActivity) }
 
+        /** «Общий буфер» (ТЗ 4): включена ли служба спецвозможностей, открыть её
+         * настройки и страницу приложения («Разрешить ограниченные настройки»). */
+        @JavascriptInterface
+        fun clipAccess(): Boolean = ClipAccess.enabled(this@WebPageActivity)
+
+        @JavascriptInterface
+        fun openClipAccess() = runOnUiThread { ClipAccess.openSettings(this@WebPageActivity) }
+
+        @JavascriptInterface
+        fun openAppInfo() = runOnUiThread { ClipAccess.openAppInfo(this@WebPageActivity) }
+
         /** «Сканер сети» → Wi-Fi: сети вокруг, своя сеть сейчас, разрешение. */
         @JavascriptInterface
         fun wifiScan(): String = WifiScan.scanJson(this@WebPageActivity)

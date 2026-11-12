@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    ТЗ 4. Самое узкое, что работает: только нажатия (typeViewClicked), без
+    canRetrieveWindowContent (дерево экрана не доступно), без флагов
+    «важные/неважные элементы», без перехвата жестов и ввода. Из события берётся
+    только подпись нажатой кнопки — чтобы узнать «Копировать».
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewClicked"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:canRetrieveWindowContent="false"
+    android:notificationTimeout="100"
+    android:description="@string/clip_access_desc" />

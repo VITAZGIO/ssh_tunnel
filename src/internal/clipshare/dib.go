@@ -6,6 +6,8 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	_ "image/gif"
+	_ "image/jpeg"
 	"image/png"
 )
 
@@ -76,12 +78,61 @@ func dibToPNG(b []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// maxPixels — потолок размера картинки для «битовых» форматов буфера.
+// Точки в DIB — 4 байта на каждую: 40 МП = 160 МБ, плюс декодированный
+// кадр и PNG на время перекодирования — около полугигабайта на пике, это
+// предел разумного для настольной программы. Телефонные снимки обычно
+// 12 МП (50-мегапиксельные камеры склеивают точки), так что на практике
+// лимит срабатывает редко; больше — кладём только файл (CF_HDROP).
+var maxPixels = 40_000_000
+
+var (
+	errNotImage = errors.New("это не картинка, которую умеет разобрать программа")
+	errTooLarge = errors.New("картинка слишком большая для буфера — остаётся файлом")
+)
+
+// imageBitmaps разбирает JPEG, PNG или GIF (формат определяется по
+// содержимому: Mime у файла бывает пустым или неверным) и отдаёт то, что
+// кладётся в буфер Windows: DIB и PNG. Больше maxPixels — errTooLarge, не
+// картинка — errNotImage. Размер узнаём по заголовку, до выделения памяти.
+func imageBitmaps(data []byte) (dib, pngData []byte, err error) {
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, nil, errNotImage
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > 1<<20 || cfg.Height > 1<<20 || cfg.Width*cfg.Height > maxPixels {
+		return nil, nil, errTooLarge
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, nil, errNotImage
+	}
+	if format == "png" {
+		pngData = data
+	} else {
+		var out bytes.Buffer
+		if err := png.Encode(&out, img); err != nil {
+			return nil, nil, err
+		}
+		pngData = out.Bytes()
+	}
+	return imageToDIB(img), pngData, nil
+}
+
 // pngToDIB — для программ, которые не знают формата «PNG» в буфере.
 func pngToDIB(p []byte) ([]byte, error) {
 	img, err := png.Decode(bytes.NewReader(p))
 	if err != nil {
 		return nil, err
 	}
+	if b := img.Bounds(); b.Dx()*b.Dy() > maxPixels {
+		return nil, errTooLarge
+	}
+	return imageToDIB(img), nil
+}
+
+// imageToDIB — 32-битный DIB снизу вверх (как у самой Windows).
+func imageToDIB(img image.Image) []byte {
 	r := img.Bounds()
 	w, h := r.Dx(), r.Dy()
 	out := make([]byte, 40+w*h*4)
@@ -91,12 +142,20 @@ func pngToDIB(p []byte) ([]byte, error) {
 	binary.LittleEndian.PutUint16(out[12:], 1)
 	binary.LittleEndian.PutUint16(out[14:], 32)
 	binary.LittleEndian.PutUint32(out[20:], uint32(w*h*4))
+	ycc, _ := img.(*image.YCbCr)
 	for y := 0; y < h; y++ {
 		row := out[40+(h-1-y)*w*4:]
 		for x := 0; x < w; x++ {
+			if ycc != nil {
+				// JPEG: прямой путь, без цветовой модели на каждую точку.
+				px, py := r.Min.X+x, r.Min.Y+y
+				rr, gg, bb := color.YCbCrToRGB(ycc.Y[ycc.YOffset(px, py)], ycc.Cb[ycc.COffset(px, py)], ycc.Cr[ycc.COffset(px, py)])
+				row[x*4], row[x*4+1], row[x*4+2], row[x*4+3] = bb, gg, rr, 255
+				continue
+			}
 			c := color.NRGBAModel.Convert(img.At(r.Min.X+x, r.Min.Y+y)).(color.NRGBA)
 			row[x*4], row[x*4+1], row[x*4+2], row[x*4+3] = c.B, c.G, c.R, c.A
 		}
 	}
-	return out, nil
+	return out
 }

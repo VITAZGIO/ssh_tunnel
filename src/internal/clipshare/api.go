@@ -69,6 +69,9 @@ func (m *module) Stop() {
 	m.n.close()
 }
 
+// Active — «Общий буфер» добавлен и включён на этом устройстве.
+func Active() bool { return current() != nil }
+
 // Push — отправить запись с этого устройства (телефон: «Поделиться»,
 // плитка). Ответ — сколько устройств приняло.
 func Push(kind, name, mime string, data []byte) (int, error) {

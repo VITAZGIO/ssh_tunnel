@@ -312,6 +312,17 @@ class MainActivity : AppCompatActivity(), AndroidApi.Screen {
         @JavascriptInterface
         fun openNotifAccess() = runOnUiThread { PhoneNotifs.openSettings(this@MainActivity) }
 
+        /** «Общий буфер» (ТЗ 4): включена ли служба спецвозможностей, открыть её
+         * настройки и страницу приложения («Разрешить ограниченные настройки»). */
+        @JavascriptInterface
+        fun clipAccess(): Boolean = ClipAccess.enabled(this@MainActivity)
+
+        @JavascriptInterface
+        fun openClipAccess() = runOnUiThread { ClipAccess.openSettings(this@MainActivity) }
+
+        @JavascriptInterface
+        fun openAppInfo() = runOnUiThread { ClipAccess.openAppInfo(this@MainActivity) }
+
         /** «Найти телефон»: выбрать свой трек, его имя, вернуть будильник. */
         @JavascriptInterface
         fun pickRingTrack() = runOnUiThread {

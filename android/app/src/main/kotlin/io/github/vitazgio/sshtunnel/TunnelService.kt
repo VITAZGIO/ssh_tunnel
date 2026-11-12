@@ -757,7 +757,7 @@ class TunnelService : VpnService(), Callbacks {
             this, 1, Intent(this, TunnelService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        return Notification.Builder(this, CHANNEL)
+        val b = Notification.Builder(this, CHANNEL)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_notify)
@@ -770,6 +770,24 @@ class TunnelService : VpnService(), Callbacks {
                     stop,
                 ).build()
             )
-            .build()
+        // «Общий буфер» (ТЗ 4): кнопка отправить буфер одним нажатием. Окно
+        // ClipReadActivity прозрачное: оно берёт фокус, читает буфер и
+        // закрывается. Только когда плагин добавлен и включён; список кнопок
+        // обновляется вместе с уведомлением (при смене состояния туннеля).
+        val clipOn = try { Mobile.clipActive() } catch (_: Throwable) { false }
+        if (clipOn) {
+            val send = PendingIntent.getActivity(
+                this, 2, Intent(this, ClipReadActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            b.addAction(
+                Notification.Action.Builder(
+                    null as android.graphics.drawable.Icon?,
+                    getString(R.string.clip_send_now),
+                    send,
+                ).build()
+            )
+        }
+        return b.build()
     }
 }
