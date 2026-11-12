@@ -21,6 +21,14 @@ import (
 // панели; возвращает адрес, сокет панели и порты проверки.
 func startMeshdSTUN(t *testing.T) (string, string, []int) {
 	t.Helper()
+	addr, sock, ports, _ := startMeshdSTUNKill(t)
+	return addr, sock, ports
+}
+
+// startMeshdSTUNKill — то же, плюс kill: «сервер пропал» (как пропадает
+// домашний интернет — сразу и без прощания).
+func startMeshdSTUNKill(t *testing.T) (string, string, []int, func()) {
+	t.Helper()
 	bin, err := buildMeshdOnce()
 	if err != nil {
 		t.Skipf("не удалось собрать meshd: %v", err)
@@ -40,7 +48,9 @@ func startMeshdSTUN(t *testing.T) (string, string, []int) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
+	var killOnce sync.Once
+	kill := func() { killOnce.Do(func() { cmd.Process.Kill(); cmd.Wait() }) }
+	t.Cleanup(kill)
 	type result struct {
 		addr  string
 		ports []int
@@ -68,10 +78,10 @@ func startMeshdSTUN(t *testing.T) (string, string, []int) {
 		if len(r.ports) != 2 {
 			t.Fatalf("meshd не открыл порты проверки NAT: %v", r.ports)
 		}
-		return r.addr, sock, r.ports
+		return r.addr, sock, r.ports, kill
 	case <-time.After(10 * time.Second):
 		t.Fatal("meshd не поднялся")
-		return "", "", nil
+		return "", "", nil, nil
 	}
 }
 

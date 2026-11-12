@@ -230,6 +230,11 @@ func (t *Tunnel) ConfigureMesh(enabled bool, key, name, deviceID string, incomin
 		Key: key, DeviceID: deviceID, Name: name, AllowIncoming: incoming, NoDirect: !direct,
 		Platform: "android", Mode: "vpn", Via: t.cfg.Host, AppVersion: updater.Version,
 	}
+	// Ключ прямых соединений и список устройств (работа без сервера) — в
+	// личной папке приложения (filesDir), рядом с known_hosts и ключом SSH.
+	if t.cfg.KnownHostsPath != "" {
+		t.cfg.Mesh.StateDir = filepath.Join(filepath.Dir(t.cfg.KnownHostsPath), "mesh")
+	}
 	return nil
 }
 

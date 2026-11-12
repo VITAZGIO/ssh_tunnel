@@ -73,6 +73,11 @@ type Config struct {
 	// NoDirect — не пробовать прямые соединения между устройствами: всё
 	// только через сервер.
 	NoDirect bool
+	// StateDir — папка, где сеть устройств хранит ключ прямых соединений и
+	// последний список устройств (store.go), чтобы работать без сервера.
+	// Права — как у остальных настроек программы (0600/0700). Пусто — всё
+	// только в памяти: без сервера живут лишь уже открытые прямые соединения.
+	StateDir string
 }
 
 // NewKey придумывает ключ новой сети.
@@ -106,7 +111,9 @@ type Peer struct {
 
 // Status — то, что показывается человеку.
 type Status struct {
-	// State: "connecting", "online", "error".
+	// State: "connecting", "online", "error" или "local" — сервера сети нет
+	// (Error — почему), но с частью устройств есть прямые соединения: они
+	// Online и Direct, работают без сервера.
 	State string `json:"state"`
 	Error string `json:"error,omitempty"`
 	Self  Peer   `json:"self"`
@@ -129,9 +136,17 @@ type Client struct {
 	// вызова. Можно подменить в тестах.
 	LocalDial func(ctx context.Context, port int) (net.Conn, error)
 
+	// cache — последний список устройств (store.go); свой замок.
+	cache *peerCache
+
+	// Для тестов: приёмник широковещательных маяков и куда их слать (nil —
+	// порт defaultBeaconPort и broadcast локальных сетей).
+	beaconListen  func() (net.PacketConn, error)
+	beaconTargets func() []*net.UDPAddr
+
 	mu     sync.Mutex
 	status Status
-	p2p    *p2p             // прямые соединения текущего подключения; nil — нет
+	p2p    *p2p             // прямые соединения, пока идёт Run; nil — нет
 	ctrl   func(wire) error // отправить строку по управляющему соединению; nil — нет его
 	echo   map[string]chan struct{}
 }
@@ -144,7 +159,7 @@ func New(cfg Config, dial Dialer, log func(level, text string)) *Client {
 	if log == nil {
 		log = func(string, string) {}
 	}
-	c := &Client{cfg: cfg, dial: dial, log: log, status: Status{State: "connecting"}}
+	c := &Client{cfg: cfg, dial: dial, log: log, status: Status{State: "connecting"}, cache: loadCache("")}
 	c.LocalDial = func(ctx context.Context, port int) (net.Conn, error) {
 		var d net.Dialer
 		return d.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
@@ -209,7 +224,36 @@ func send(conn net.Conn, m wire) error {
 
 // Run держит управляющее соединение, пока жив ctx, и переподключается при
 // обрывах с нарастающей паузой.
+//
+// Прямые соединения живут всё время Run, а не одного подключения: сервер
+// пропал — они продолжают работать, сервер вернулся — не пересобираются.
 func (c *Client) Run(ctx context.Context) {
+	c.loadState()
+	if !c.cfg.NoDirect && c.cfg.Via != "" {
+		dir := c.stateDir()
+		cert, fp, err := loadIdentity(dir)
+		if err != nil && dir != "" {
+			c.log("warn", "Сеть устройств: ключ прямых соединений не сохранился: "+err.Error())
+			cert, fp, err = p2pCert()
+		}
+		var p *p2p
+		if err == nil {
+			p, err = startP2P(ctx, c, cert, fp)
+		}
+		if err != nil {
+			c.log("warn", "Сеть устройств: прямые соединения не запустились: "+err.Error())
+		} else {
+			c.mu.Lock()
+			c.p2p = p
+			c.mu.Unlock()
+			defer func() {
+				c.mu.Lock()
+				c.p2p = nil
+				c.mu.Unlock()
+				p.close()
+			}()
+		}
+	}
 	backoff := time.Second
 	for ctx.Err() == nil {
 		start := time.Now()
@@ -243,12 +287,70 @@ func (c *Client) setError(err error) {
 	wasOnline := c.status.State == "online"
 	c.status.State, c.status.Error = "error", text
 	for i := range c.status.Peers {
-		c.status.Peers[i].Online = false
+		c.status.Peers[i].Online = false // с прямым путём — Online в Status
 	}
+	p := c.p2p
 	c.mu.Unlock()
 	if wasOnline {
 		c.log("warn", "Сеть устройств: "+text)
 	}
+	if p != nil {
+		p.setSTUN(nil)
+		p.kick()
+	}
+}
+
+// loadState — список устройств с диска: имена «.mesh» и адреса известны ещё
+// до сервера (и без него).
+func (c *Client) loadState() {
+	c.cache = loadCache(c.stateDir())
+	f := c.cache.snapshot()
+	self, _ := netip.ParseAddr(f.Self.IP)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if self.IsValid() {
+		c.status.Self = Peer{Name: f.Self.Name, Host: f.Self.Host, IP: self, Self: true}
+	}
+	c.status.Peers = nil
+	for _, p := range f.Peers {
+		ip, err := netip.ParseAddr(p.IP)
+		if err != nil {
+			continue
+		}
+		c.status.Peers = append(c.status.Peers, Peer{Name: p.Name, Host: p.Host, IP: ip, Platform: p.Platform,
+			OS: p.OS, Via: p.Via, LastSeen: p.LastSeen, Self: ip == self})
+	}
+}
+
+func (c *Client) saveCache() {
+	if err := c.cache.save(); err != nil {
+		c.log("warn", "Сеть устройств: список устройств не сохранился: "+err.Error())
+	}
+}
+
+// online — управляющее соединение с meshd сейчас есть.
+func (c *Client) online() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.ctrl != nil
+}
+
+func (c *Client) selfIP() netip.Addr {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.status.Self.IP
+}
+
+// sendCtrl — строка для meshd; нет соединения — errNoServer. Не звать под
+// p.mu (порядок замков c.mu → p.mu).
+func (c *Client) sendCtrl(m wire) error {
+	c.mu.Lock()
+	f := c.ctrl
+	c.mu.Unlock()
+	if f == nil {
+		return errNoServer
+	}
+	return f(m)
 }
 
 // session — одно управляющее соединение от подключения до обрыва.
@@ -327,26 +429,18 @@ func (c *Client) session(ctx context.Context) error {
 		}()
 	}
 
-	// Прямые соединения: свой UDP-сокет мимо туннеля, адрес снаружи узнаём
-	// у того же сервера.
-	if len(welcome.Stun) > 0 && c.cfg.Via != "" && !c.cfg.NoDirect {
-		if p, err := c.startDirect(ctx, welcome.Stun[0], func(m wire) error {
-			wmu.Lock()
-			defer wmu.Unlock()
-			return send(conn, m)
-		}); err != nil {
-			c.log("warn", "Сеть устройств: прямые соединения не запустились: "+err.Error())
-		} else {
-			c.mu.Lock()
-			c.p2p = p
-			c.mu.Unlock()
-			defer func() {
-				c.mu.Lock()
-				c.p2p = nil
-				c.mu.Unlock()
-				p.close()
-			}()
+	// Прямые соединения: сокет уже открыт (Run), сервер сообщает свой STUN —
+	// по нему узнаём адрес снаружи и сводим устройства через meshd.
+	if p := c.direct(); p != nil {
+		if len(welcome.Stun) > 0 {
+			if ip, err := resolve4(ctx, ProbeEnv{Server: c.cfg.Via, Resolver: c.cfg.ProbeResolver}); err != nil {
+				c.log("warn", "Сеть устройств: адрес сервера для прямых соединений не нашёлся: "+err.Error())
+			} else {
+				p.setSTUN(&net.UDPAddr{IP: ip, Port: welcome.Stun[0]})
+			}
 		}
+		go p.report() // сервер мог не знать о прямых путях, что жили без него
+		defer p.setSTUN(nil)
 	}
 	go func() {
 		t := time.NewTicker(25 * time.Second)
@@ -419,6 +513,30 @@ func readLine(r *bufio.Reader, v any) error {
 }
 
 func (c *Client) setPeers(list []wirePeer) {
+	c.setPeersLocked(list)
+	c.mu.Lock()
+	st, p := c.status, c.p2p
+	c.mu.Unlock()
+	// Последний список от meshd — он же решает, к кому можно без сервера.
+	self := cachedPeer{IP: st.Self.IP.String(), Host: st.Self.Host, Name: st.Self.Name}
+	cached := make([]cachedPeer, 0, len(st.Peers))
+	now := time.Now().Unix()
+	for _, pr := range st.Peers {
+		cp := cachedPeer{IP: pr.IP.String(), Host: pr.Host, Name: pr.Name, Platform: pr.Platform,
+			OS: pr.OS, Via: pr.Via, LastSeen: pr.LastSeen}
+		if pr.Online {
+			cp.LastSeen = now
+		}
+		cached = append(cached, cp)
+	}
+	removed := c.cache.setList(self, cached)
+	c.saveCache()
+	if p != nil && len(removed) > 0 {
+		p.forget(removed)
+	}
+}
+
+func (c *Client) setPeersLocked(list []wirePeer) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	peers := make([]Peer, 0, len(list))
@@ -458,13 +576,20 @@ func (c *Client) Status() Status {
 	defer c.mu.Unlock()
 	st := c.status
 	st.Peers = append([]Peer(nil), c.status.Peers...)
+	direct := 0
 	if c.p2p != nil {
 		for i := range st.Peers {
 			if ok, rtt := c.p2p.direct(st.Peers[i].IP.String()); ok {
 				st.Peers[i].Direct = true
 				st.Peers[i].DirectRTTMs = float64(rtt.Microseconds()) / 1000
+				// Без сервера на связи те, до кого есть прямой путь.
+				st.Peers[i].Online = true
+				direct++
 			}
 		}
+	}
+	if st.State != "online" && direct > 0 {
+		st.State = "local"
 	}
 	return st
 }
@@ -480,16 +605,16 @@ func (c *Client) Ping(dst netip.Addr) (time.Duration, error) {
 	c.mu.Lock()
 	self, ctrl, p := c.status.Self.IP, c.ctrl, c.p2p
 	c.mu.Unlock()
-	if ctrl == nil {
-		return 0, errors.New("сеть устройств не подключена")
-	}
-	if dst == self {
+	if dst == self && self.IsValid() {
 		return 0, nil
 	}
 	if p != nil && !serverNodes.Contains(dst) {
 		if rtt, ok := p.ping(dst.String()); ok {
 			return rtt, nil
 		}
+	}
+	if ctrl == nil {
+		return 0, errors.New("сеть устройств не подключена")
 	}
 	id := randomString(9)
 	ch := make(chan struct{})
@@ -520,15 +645,6 @@ func (c *Client) direct() *p2p {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.p2p
-}
-
-// startDirect запускает прямые соединения для одного подключения.
-func (c *Client) startDirect(ctx context.Context, stunPort int, sendFn func(wire) error) (*p2p, error) {
-	ip, err := resolve4(ctx, ProbeEnv{Server: c.cfg.Via, Resolver: c.cfg.ProbeResolver})
-	if err != nil {
-		return nil, err
-	}
-	return startP2P(ctx, c, sendFn, c.cfg.ProbeListen, &net.UDPAddr{IP: ip, Port: stunPort})
 }
 
 // serverNodes — адреса серверов в сети устройств (198.19.255.x): к ним
@@ -622,6 +738,7 @@ func (c *Client) DialPeer(target string) (net.Conn, error) {
 		return c.LocalDial(ctx, port)
 	}
 
+	online := c.online()
 	if p := c.direct(); p != nil && !serverNodes.Contains(ip) {
 		// Есть прямой путь — по нему; нет — через сервер, а прямой ищем в
 		// фоне к следующим соединениям.
@@ -629,7 +746,28 @@ func (c *Client) DialPeer(target string) (net.Conn, error) {
 		if conn != nil || err != nil {
 			return conn, err
 		}
-		go p.connect(ip.String(), false)
+		if online {
+			go p.connect(ip.String(), false)
+		} else if p.reach(ip.String(), 3*time.Second) {
+			// Без сервера: путь нашёлся по запомненным адресам или маяку.
+			if conn, err := p.dialDirect(ip.String(), port); conn != nil || err != nil {
+				return conn, err
+			}
+		}
+	}
+	c.mu.Lock()
+	down := c.ctrl == nil && c.status.State == "error"
+	c.mu.Unlock()
+	if down {
+		// Сервер уже не отвечал — не ждать его 20 секунд. (Пока идёт первое
+		// подключение, «connecting», — пробуем через сервер, как раньше.)
+		name := c.hostOf(ip.String())
+		if name == "" {
+			name = ip.String()
+		} else {
+			name += Suffix
+		}
+		return nil, fmt.Errorf("нет связи с сервером сети, а прямого пути к %s нет (устройство не в этой локальной сети или ни разу не соединялось напрямую)", name)
 	}
 
 	conn, err := c.dial("tcp", c.cfg.Addr)

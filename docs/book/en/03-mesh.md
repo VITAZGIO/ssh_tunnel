@@ -28,3 +28,15 @@ forwarding on the router is needed.
   direct link or via the server.
 - Devices connect **directly** when possible (faster), otherwise via the
   server.
+
+## If the server is unreachable
+
+Home internet is down or the server is off — devices that have already
+connected directly keep working with each other: shared clipboard, mirrored
+folders, files. The list shows it as "no server, direct". Restarted the app
+without the server — devices in the same local network find each other on
+their own within about half a minute. A device with no direct path cannot be
+reached without the server, and the app says so right away.
+
+A device removed in the panel while you were without the server stops being
+let in as soon as this device talks to the server again.
