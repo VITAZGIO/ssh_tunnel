@@ -30,8 +30,14 @@
   /* ---------- шапка: одна на все вкладки и на экран входа ---------- */
   .topbar{position:sticky;top:0;z-index:20;background:var(--card);
           border-bottom:1px solid var(--line)}
-  .topbar .inner{max-width:1180px;margin:0 auto;padding:10px 16px;
-                 display:flex;align-items:center;gap:12px}
+  .topbar .inner{padding:10px 18px;display:flex;align-items:center;gap:12px}
+  /* Выбор сети — когда ключей несколько: схема, плитки и список устройств
+     показывают выбранную. */
+  .net-chips{display:flex;align-items:center;gap:6px;min-width:0;overflow-x:auto;scrollbar-width:none}
+  .net-chips .lbl{font-size:12px;color:var(--dim);flex:none}
+  .net-chips button{flex:none;padding:5px 11px;border-radius:999px;border:1px solid var(--line);
+       background:var(--card2);color:var(--dim);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+  .net-chips button.on{background:var(--accent-muted);border-color:var(--accent-muted);color:#fff}
   .topbar svg{display:block}
   .topbar .logo{width:30px;height:auto;fill:var(--accent-muted);flex:none}
   .topbar .shield{width:19px;height:19px;fill:var(--accent-muted);flex:none}
@@ -40,30 +46,53 @@
   .topbar .sp{flex:1}
   .topbar .lang-label{font-size:12px;color:var(--dim)}
   @media (max-width:560px){
-    .topbar .site,.topbar .lang-label{display:none}
+    .topbar .site,.topbar .lang-label,.topbar .shield,.topbar .app-name{display:none}
+    .topbar .inner{padding:8px 12px;gap:8px}
   }
 
   select{background:var(--card2);border:1px solid var(--line);border-radius:8px;
          padding:6px 8px;color:var(--text);font:inherit}
   select:focus{outline:none;border-color:var(--accent)}
 
-  /* ---------- каркас: содержимое слева, выбор раздела справа ---------- */
-  .app{max-width:1180px;margin:0 auto;padding:18px 16px 60px;
-       display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:18px;align-items:start}
-  .side{position:sticky;top:64px;display:flex;flex-direction:column;gap:6px}
-  .side button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+  /* ---------- каркас: выбор раздела слева, содержимое на всю ширину ---------- */
+  /* Ширина страницы не ограничена: на широком мониторе карточки встают в
+     несколько колонок. Ограничена только длина строк текста (.note и т.п.). */
+  .app{display:grid;grid-template-columns:200px minmax(0,1fr);min-height:calc(100vh - 51px)}
+  .side{position:sticky;top:51px;align-self:start;height:calc(100vh - 51px);overflow-y:auto;
+        display:flex;flex-direction:column;gap:4px;padding:14px 10px;
+        background:var(--card);border-right:1px solid var(--line)}
+  .side button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
                background:transparent;border:1px solid transparent;border-radius:10px;
                padding:10px 12px;color:var(--dim);font:inherit;font-weight:600;cursor:pointer}
-  .side button:hover{color:var(--text);background:var(--card)}
-  .side button.on{background:var(--card);border-color:var(--line);color:var(--text)}
-  .side button svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;
+  .side button:hover{color:var(--text);background:var(--card2)}
+  .side button.on{background:var(--card2);border-color:var(--line);color:var(--text)}
+  .side button svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;
                    stroke-linecap:round;stroke-linejoin:round;flex:none}
-  @media (max-width:860px){
+  main{min-width:0;padding:18px 20px 40px}
+  main > section{display:grid;gap:14px;align-content:start}
+  main > section .card{margin-bottom:0}
+  .sec-head{grid-column:1/-1}
+  /* Сетка карточек: на телефоне одна колонка, на мониторе 2–3, на широком больше. */
+  .cards{display:grid;gap:14px;align-items:start;
+         grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr))}
+  .cards:empty{display:none}
+  @media (min-width:1300px){ .cards > .span2{grid-column:span 2} }
+  /* Средняя ширина: раздел — только значком, чтобы содержимому хватило места. */
+  @media (max-width:1100px) and (min-width:761px){
+    .app{grid-template-columns:64px minmax(0,1fr)}
+    .side{padding:14px 8px}
+    .side button{justify-content:center;padding:11px 0}
+    .side button span{display:none}
+  }
+  /* Телефон: разделы — нижней полосой, как в приложениях. */
+  @media (max-width:760px){
     .app{grid-template-columns:minmax(0,1fr)}
-    /* На телефоне тот же выбор разделов, но строкой сверху: колонка сбоку на
-       узком экране съела бы половину ширины. */
-    .side{order:-1;position:static;flex-direction:row;gap:8px;overflow-x:auto}
-    .side button{justify-content:center;padding:9px 12px}
+    .side{position:fixed;top:auto;left:0;right:0;bottom:0;z-index:30;height:auto;flex-direction:row;gap:0;
+          padding:4px 4px calc(4px + env(safe-area-inset-bottom));border-right:0;border-top:1px solid var(--line)}
+    .side button{flex:1;flex-direction:column;gap:3px;padding:7px 2px;font-size:10.5px;text-align:center;min-width:0}
+    .side button span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    main{padding:14px 12px 88px}
+    #toasts{bottom:78px}
   }
 
   /* ---------- карточки ---------- */
@@ -75,9 +104,9 @@
   .card h1{font-size:16px;margin:0 0 4px}
   .card h2{font-size:13px;margin:0 0 10px;color:var(--dim);font-weight:600;
            text-transform:uppercase;letter-spacing:.6px}
-  .card p.note{color:var(--dim);font-size:12.5px;margin:0 0 14px;line-height:1.4}
-  .page-title{font-size:20px;font-weight:700;margin:0 0 4px}
-  .page-sub{color:var(--dim);font-size:13px;margin:0 0 16px}
+  .card p.note{color:var(--dim);font-size:12.5px;margin:0 0 14px;line-height:1.4;max-width:80ch}
+  .page-title{font-size:20px;font-weight:700;margin:0 0 4px;display:flex;align-items:center}
+  .page-sub{color:var(--dim);font-size:13px;margin:0;max-width:90ch}
 
   .field{margin-bottom:12px}
   .field label{display:block;font-size:12px;color:var(--dim);margin-bottom:4px}
@@ -143,19 +172,86 @@
   table.list .sub{color:var(--dim);font-size:11.5px}
   .scroll-x{overflow-x:auto}
 
-  /* ---------- устройства: три колонки по системам ---------- */
-  .cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
-  @media (max-width:1000px){ .cols{grid-template-columns:minmax(0,1fr)} }
-  .col h2{display:flex;align-items:center;gap:8px}
-  .col .count{background:var(--card2);border-radius:999px;padding:1px 8px;font-size:11px}
+  /* ---------- обзор: схема занимает свободное место ---------- */
+  .ov{grid-template-columns:minmax(0,1fr);
+      grid-template-areas:"head" "tiles" "map" "status" "clients" "traffic"}
+  .ov > .sec-head{grid-area:head} .ov-tiles{grid-area:tiles;margin:0}
+  .ov-map{grid-area:map;min-width:0} .ov-status{grid-area:status}
+  .ov-clients{grid-area:clients} .ov-traffic{grid-area:traffic}
+  @media (min-width:1100px){
+    .ov{grid-template-columns:minmax(0,2fr) minmax(340px,1fr);
+        grid-template-areas:"head head" "tiles tiles" "map status" "map clients" "traffic traffic"}
+    .ov.nomap{grid-template-areas:"head head" "tiles tiles" "status clients" "traffic traffic";
+        grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)}
+  }
+  @media (min-width:1900px){
+    .ov{grid-template-columns:minmax(0,2.2fr) minmax(360px,1fr) minmax(360px,1fr);
+        grid-template-areas:"head head head" "tiles tiles tiles" "map status traffic" "map clients traffic"}
+    .ov.nomap{grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) minmax(0,1.3fr);
+        grid-template-areas:"head head head" "tiles tiles tiles" "status clients traffic"}
+  }
+  .ov-map .map-wrap svg{height:clamp(360px, calc(100vh - 330px), 960px)}
+  .ov.nomap .ov-map{display:none}
 
-  .dev{background:var(--card2);border:1px solid var(--line);border-radius:10px;
-       padding:12px;margin-bottom:10px}
-  .dev .top{display:flex;align-items:center;gap:8px}
-  .dev .name{font-weight:600;font-size:13.5px;flex:1;overflow:hidden;
-             text-overflow:ellipsis;white-space:nowrap}
-  .dev .meta{font-size:11.5px;color:var(--dim);margin-top:5px;line-height:1.5}
-  .dev .actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}
+  /* ---------- устройства: список | карточка | схема ---------- */
+  .devs{display:grid;gap:14px;align-items:start;grid-template-columns:minmax(0,1fr)}
+  .dmap{display:none}
+  .back{display:none;margin-bottom:12px}
+  .ddetail{display:flex;flex-direction:column;gap:14px;min-width:0}
+  @media (min-width:980px){
+    .devs{grid-template-columns:minmax(0,1.25fr) minmax(360px,1fr)}
+    /* Карточка не уезжает вместе с длинным списком. */
+    .ddetail,.dmap{position:sticky;top:69px;max-height:calc(100vh - 87px);overflow-y:auto}
+  }
+  @media (min-width:1700px){
+    .devs.withmap{grid-template-columns:minmax(0,1.2fr) minmax(380px,1fr) minmax(420px,1.1fr)}
+    .devs.withmap .dmap{display:block}
+    .dmap .map-wrap svg{height:clamp(380px, calc(100vh - 230px), 900px)}
+  }
+  @media (max-width:979px){
+    .back{display:inline-block;align-self:flex-start;margin:0}
+    .devs:not(.open) .ddetail{display:none}
+    .devs.open .dlist{display:none}
+  }
+  .dlist{container-type:inline-size}
+  .drow{display:grid;grid-template-columns:12px minmax(0,1.6fr) minmax(0,1fr) minmax(0,1fr) 74px;gap:10px;
+        align-items:center;width:100%;padding:9px 10px;border:1px solid transparent;border-radius:9px;
+        background:none;color:var(--text);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+  .drow + .drow{margin-top:2px}
+  button.drow:hover{background:var(--card2)}
+  button.drow.on{background:color-mix(in srgb, var(--accent-muted) 22%, var(--card2));
+        border-color:color-mix(in srgb, var(--accent) 40%, var(--line))}
+  .drow.head{cursor:default;color:var(--dim);font-size:11px;font-weight:600;text-transform:uppercase;
+        letter-spacing:.5px;padding-top:4px;padding-bottom:6px;border-bottom:1px solid var(--line);border-radius:0}
+  .drow .nm{min-width:0}
+  .drow .nm .n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .drow .nm .h{font-size:11.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .drow .c-ip{font:12.5px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .drow .c-sys{color:var(--dim);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .drow .c-ms{font:12px var(--mono);color:var(--dim);white-space:nowrap;text-align:right}
+  .drow .badge{margin-left:6px;vertical-align:1px}
+  @container (max-width:560px){
+    .drow{grid-template-columns:12px minmax(0,1fr) auto}
+    .drow .c-ip,.drow .c-sys{display:none}
+  }
+  .dtop{display:flex;align-items:center;gap:12px}
+  .dtop .pic{width:42px;height:42px;border-radius:12px;flex:none;display:flex;align-items:center;justify-content:center;
+        background:linear-gradient(160deg,var(--accent-muted),var(--accent-muted-dark))}
+  .dtop.offline .pic{background:var(--line)}
+  .dtop .pic svg{width:23px;height:23px;fill:none;stroke:#fff;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .dtop .nm{flex:1;min-width:0}
+  .dtop .nm .n{font-weight:700;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dtop .nm .h{font:12px var(--mono);color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dtop .nm input{width:100%;padding:5px 8px}
+  .dpart{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+  .dpart > h2{display:flex;align-items:center;gap:8px}
+  .dacts{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+  .help{color:var(--dim);font-size:13px;line-height:1.55;max-width:80ch}
+  .help p{margin:0 0 10px}
+  .help b{color:var(--text)}
+  @media (min-width:1100px){
+    .acc-sec{grid-template-columns:minmax(0,2fr) minmax(300px,1fr)}
+  }
   .acc-checks{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
   .acc-checks .g{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;
                  border:1px solid var(--line);background:var(--card2);font-size:12.5px}
@@ -208,7 +304,7 @@
   .side button::before{content:"";position:absolute;left:0;top:22%;bottom:22%;width:3px;
        border-radius:3px;background:var(--accent);transform:scaleY(0);transition:transform .22s}
   .side button.on::before{transform:scaleY(1)}
-  @media (max-width:860px){ .side button::before{display:none} }
+  @media (max-width:760px){ .side button::before{display:none} }
   .dialog{animation:pop .18s ease both}
   .overlay:not([hidden]){animation:fade .15s ease both}
   @media (prefers-reduced-motion: reduce){
@@ -285,7 +381,7 @@
   .map-zoom button{width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--card);
     color:var(--text);font:600 16px/1 "Segoe UI",sans-serif;cursor:pointer;opacity:.85}
   .map-zoom button:hover{opacity:1;border-color:var(--accent)}
-  @media (max-width:560px){ .map-wrap svg{height:330px} }
+  @media (max-width:760px){ .map-wrap svg,.ov-map .map-wrap svg{height:340px} }
   .map-grid{stroke:color-mix(in srgb, var(--line) 70%, transparent);stroke-width:1}
   .edge{fill:none;stroke-width:1.6;stroke-linecap:round}
   .edge.on{stroke-dasharray:5 7;animation:flow 1.1s linear infinite}
@@ -330,39 +426,24 @@
   .upd-bar i{position:absolute;top:0;bottom:0;left:-40%;width:40%;border-radius:3px;background:var(--ok);
         animation:updrun 1.2s ease-in-out infinite}
   @keyframes updrun{to{left:100%}}
-  .mdevs{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:12px}
-  .mdev{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:13px;
-        transition:border-color .2s, transform .2s, box-shadow .2s;animation:rise .3s ease both}
-  .mdev:hover{transform:translateY(-1px);box-shadow:0 8px 22px -14px rgba(0,0,0,.6)}
-  .mdev.flash{animation:flash 1.2s ease}
+  .drow.flash{animation:flash 1.2s ease}
   @keyframes flash{0%,100%{box-shadow:none}30%{box-shadow:0 0 0 3px rgba(76,141,255,.45)}}
-  .mdev .top{display:flex;align-items:center;gap:10px}
-  .mdev .pic{width:34px;height:34px;border-radius:10px;flex:none;display:flex;align-items:center;
-        justify-content:center;background:linear-gradient(160deg,var(--accent-muted),var(--accent-muted-dark))}
-  .mdev.offline .pic{background:var(--line)}
-  .mdev .pic svg{width:19px;height:19px;fill:none;stroke:#fff;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-  .mdev .nm{flex:1;min-width:0}
-  .mdev .nm .n{font-weight:650;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .mdev .nm .h{font:11.5px var(--mono);color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .mdev .nm input{width:100%;padding:4px 7px;font-size:13px}
   .dot{width:9px;height:9px;border-radius:50%;background:var(--dim);flex:none}
   .dot.on{background:var(--ok);box-shadow:0 0 0 0 rgba(47,191,113,.6);animation:beat 2s infinite}
   @keyframes beat{0%{box-shadow:0 0 0 0 rgba(47,191,113,.55)}70%{box-shadow:0 0 0 7px rgba(47,191,113,0)}100%{box-shadow:0 0 0 0 rgba(47,191,113,0)}}
   /* Адрес и система — отдельной строкой под именем: это то, что ищут
      глазами первым, и системе нужна вся ширина карточки. */
-  .mdev .idrow{display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 10px;margin-top:11px;
-        padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:9px}
-  .mdev .idrow .ip{font:600 13px var(--mono)}
-  .mdev .idrow .sys{color:var(--dim);font-size:12px;min-width:0;overflow-wrap:anywhere}
+  .ddetail .idrow{display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 10px;margin-top:11px;
+        padding:8px 10px;background:var(--card2);border:1px solid var(--line);border-radius:9px}
+  .ddetail .idrow .ip{font:600 13px var(--mono)}
+  .ddetail .idrow .sys{color:var(--dim);font-size:12px;min-width:0;overflow-wrap:anywhere}
   /* Колонки строго поровну (minmax(0,…)): длинное значение переносится
      внутри своей колонки, а не раздвигает её и не налезает на соседнюю. */
-  .mdev .facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 14px;margin-top:11px;font-size:12px}
-  .mdev .facts>div{min-width:0}
-  .mdev .facts .k{color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;
+  .ddetail .facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:9px 14px;margin-top:11px;font-size:12px}
+  .ddetail .facts>div{min-width:0}
+  .ddetail .facts .k{color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;
         white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .mdev .facts .v{font-family:var(--mono);font-size:12px;line-height:1.35;margin-top:1px;overflow-wrap:anywhere}
-  .mdev .acts{display:flex;gap:6px;margin-top:11px}
-  .mdev .acts button{flex:1}
+  .ddetail .facts .v{font-family:var(--mono);font-size:12px;line-height:1.35;margin-top:1px;overflow-wrap:anywhere}
   .qual{display:inline-flex;align-items:flex-end;gap:2px;height:13px;vertical-align:-1px;margin-right:6px}
   .qual span{width:3px;border-radius:1px;background:var(--line);transition:background .3s}
   .qual span:nth-child(1){height:4px} .qual span:nth-child(2){height:7px}
@@ -424,6 +505,7 @@
     </svg>
     <span class="app-name">ssh_tunnel</span>
     <span class="sp"></span>
+    <div class="net-chips" id="netChips" hidden></div>
     <span class="lang-label">Язык / Language</span>
     <select id="lang">
       <option value="ru">Русский</option>
@@ -475,14 +557,79 @@
 </div>
 
 <!-- ---------- сама панель ---------- -->
+<!-- Каркас на всю ширину окна: слева (на телефоне — снизу) выбор раздела,
+     справа содержимое. Ширина страницы не ограничена — ограничена только
+     ширина строк текста внутри карточек. -->
 <div class="app" id="viewMain" hidden>
-  <main>
-    <!-- ======== ГЛАВНАЯ ======== -->
-    <section id="tabHome">
-      <h1 class="page-title" data-i18n="nav_home">Главная</h1>
-      <p class="page-sub" data-i18n="home_sub">Что сейчас с сервером и кто через него ходит.</p>
+  <nav class="side" id="sideNav">
+    <button data-tab="Home" class="on" data-i18n-title="nav_home">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/>
+        <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>
+      <span data-i18n="nav_home">Обзор</span>
+    </button>
+    <button data-tab="Devices" data-i18n-title="nav_devices">
+      <svg viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="13" height="10" rx="1.6"/>
+        <path d="M6 19h7"/><rect x="17.5" y="9.5" width="4" height="10" rx="1.2"/></svg>
+      <span data-i18n="nav_devices">Устройства</span>
+    </button>
+    <button data-tab="Access" data-i18n-title="nav_access">
+      <svg viewBox="0 0 24 24"><path d="M4 8h13"/><path d="m14 4.5 3.5 3.5L14 11.5"/><path d="M20 16H7"/><path d="M10 12.5 6.5 16l3.5 3.5"/></svg>
+      <span data-i18n="nav_access">Доступ</span>
+    </button>
+    <button data-tab="Mesh" data-i18n-title="nav_mesh">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6"/><circle cx="5" cy="5.5" r="2"/><circle cx="19" cy="5.5" r="2"/><circle cx="5" cy="18.5" r="2"/><circle cx="19" cy="18.5" r="2"/><path d="M6.5 7 10 10M17.5 7 14 10M6.5 17 10 14M17.5 17 14 14"/></svg>
+      <span data-i18n="nav_mesh">Сети</span>
+    </button>
+    <button data-tab="Settings" data-i18n-title="nav_settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span data-i18n="nav_settings">Настройки</span>
+    </button>
+  </nav>
 
-      <div class="card">
+  <main>
+    <!-- Служба сети не отвечает — видно в любом разделе. -->
+    <div class="msg err" id="meshAdminErr" hidden></div>
+
+    <!-- ======== ОБЗОР ======== -->
+    <section id="tabHome" class="ov nomap">
+      <div class="sec-head">
+        <h1 class="page-title" data-i18n="nav_home">Обзор</h1>
+        <p class="page-sub" data-i18n="home_sub">Что сейчас с сервером и кто через него ходит.</p>
+      </div>
+
+      <div class="sum ov-tiles" id="meshTiles" hidden>
+        <div class="box"><div class="k"><span data-i18n="tile_devices">Устройства</span><button class="hint" data-hint="hint_tile_devices">?</button></div>
+          <div class="v" id="tileDevices">—</div><div class="s" id="tileDevicesSub"></div></div>
+        <div class="box"><div class="k"><span data-i18n="tile_servers">Серверы</span><button class="hint" data-hint="hint_tile_servers">?</button></div>
+          <div class="v" id="tileServers">—</div><div class="s" id="tileServersSub"></div></div>
+        <div class="box"><div class="k"><span data-i18n="tile_latency">Задержка</span><button class="hint" data-hint="hint_tile_latency">?</button></div>
+          <div class="v" id="tileLatency">—</div><div class="s" id="tileLatencySub"></div></div>
+        <div class="box"><div class="k"><span data-i18n="tile_traffic">Трафик в сети</span><button class="hint" data-hint="hint_tile_traffic">?</button></div>
+          <div class="v" id="tileTraffic">—</div><div class="s" id="tileTrafficSub"></div></div>
+      </div>
+
+      <!-- Схема одна на всю панель: обычно стоит здесь, а на очень широком
+           экране переезжает третьей колонкой в «Устройства» (placeMap). -->
+      <div class="ov-map" id="ovMapSlot">
+        <div class="card map-card" id="mapCard" hidden>
+          <h1><span data-i18n="mesh_map_title">Схема сети</span><button class="hint" data-hint="hint_map">?</button></h1>
+          <div class="map-wrap"><svg id="meshMap" role="img" aria-label="mesh map"></svg>
+            <div class="map-zoom">
+              <button type="button" id="mapZoomIn" data-i18n-title="map_zoom_in" title="Приблизить">+</button>
+              <button type="button" id="mapZoomOut" data-i18n-title="map_zoom_out" title="Отдалить">−</button>
+              <button type="button" id="mapZoomFit" data-i18n-title="map_zoom_fit" title="Показать всё">⤢</button>
+            </div></div>
+          <div class="legend">
+            <span><i style="background:var(--ok)"></i><span data-i18n="legend_good">связь хорошая</span></span>
+            <span><i style="background:var(--warn)"></i><span data-i18n="legend_fair">средняя</span></span>
+            <span><i style="background:var(--err)"></i><span data-i18n="legend_poor">плохая</span></span>
+            <span><i style="background:var(--dim);opacity:.5"></i><span data-i18n="legend_off">не в сети</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card ov-status">
         <h1 data-i18n="server_status">Состояние сервера</h1>
         <div class="kv"><span class="k" data-i18n="status_label">Статус</span>
           <span class="v"><span class="badge ok" data-i18n="running">работает</span></span></div>
@@ -502,17 +649,17 @@
           </span></div>
       </div>
 
-      <div class="card">
+      <div class="card ov-clients">
         <h1 data-i18n="clients_title">Подключённые клиенты</h1>
         <p class="note" data-i18n="home_clients_note">Здесь только показ. Заводить, замораживать
-          и удалять устройства — во вкладке «Устройства».</p>
+          и удалять устройства — в разделе «Устройства».</p>
         <div class="scroll-x">
           <table class="list" id="homeClients"></table>
         </div>
         <div class="empty" id="homeClientsEmpty" data-i18n="clients_empty">Клиентов пока нет</div>
       </div>
 
-      <div class="card">
+      <div class="card ov-traffic">
         <h1><span data-i18n="traffic_title">Трафик</span><button class="hint" data-hint="hint_traffic">?</button></h1>
         <p class="note" data-i18n="traffic_note">Считается по правилам nftables на самом сервере,
           отдельно по каждому клиенту. «За всё время» — с момента, когда клиент был заведён.</p>
@@ -538,101 +685,133 @@
 
     <!-- ======== УСТРОЙСТВА ======== -->
     <section id="tabDevices" hidden>
-      <h1 class="page-title" data-i18n="nav_devices">Устройства</h1>
-      <p class="page-sub" data-i18n="devices_sub">У каждого устройства свой ключ и своя системная
-        учётная запись на сервере — панель заводит и удаляет их сама, без консоли.</p>
+      <div class="sec-head">
+        <h1 class="page-title"><span data-i18n="nav_devices">Устройства</span><button class="hint" data-hint="hint_devices_list">?</button></h1>
+        <p class="page-sub" data-i18n="devices_sub">У каждого устройства свой ключ и своя системная
+          учётная запись на сервере — панель заводит и удаляет их сама, без консоли.</p>
+      </div>
 
-      <div class="card">
-        <h1 data-i18n="add_device_title">Добавить устройство</h1>
-        <p class="note" data-i18n="add_device_note">Выбери, на чём стоит программа, и придумай имя,
-          по которому потом узнаешь это устройство в списке. Сразу после создания панель один раз
-          покажет готовые настройки вместе с ключом: для телефона — QR-кодом, для компьютера —
-          кнопкой «Скопировать» или файлом.</p>
-        <div id="addClientMsg"></div>
-        <button class="btn" id="addClientBtn" data-i18n="add_client">+ Добавить устройство</button>
-
-        <div id="addClientForm" hidden style="margin-top:14px">
-          <div class="field">
-            <label for="newClientName" data-i18n="client_name_label">Имя устройства</label>
-            <input type="text" id="newClientName" placeholder="Ноутбук, Телефон…">
+      <!-- Список | карточка выбранного | (от 1700 px) схема. На узком
+           экране — список, а по нажатию карточка во весь экран с «Назад». -->
+      <div class="devs" id="devsBox">
+        <div class="card dlist">
+          <div class="toolbar">
+            <input type="text" id="meshSearch" data-i18n-ph="dev_search_ph" placeholder="Поиск по имени или адресу…">
+            <button class="btn small" id="addClientBtn" data-i18n="add_client">+ Добавить устройство</button>
           </div>
-          <div class="field">
-            <label for="newClientType" data-i18n="client_type_label">Тип устройства</label>
-            <select id="newClientType" style="width:100%">
-              <option value="windows">Windows</option>
-              <option value="linux">Linux</option>
-              <option value="android">Android</option>
-            </select>
+          <div class="chips" id="meshFilter" style="margin-bottom:10px">
+            <button data-f="all" class="on" data-i18n="f_all">Все</button>
+            <button data-f="on" data-i18n="f_on">В сети</button>
+            <button data-f="off" data-i18n="f_off">Не в сети</button>
           </div>
-          <div class="row-inline">
-            <button class="btn" id="createClientBtn" data-i18n="create_client">Создать</button>
-            <button class="btn ghost" id="cancelClientBtn" data-i18n="cancel">Отмена</button>
+          <div class="drow head" id="devRowsHead">
+            <span></span><span data-i18n="col_device">Устройство</span><span class="c-ip" data-i18n="dev_ip">Адрес</span>
+            <span class="c-sys" data-i18n="dev_platform">Система</span><span class="c-ms" data-i18n="dev_latency">Задержка</span>
+          </div>
+          <div id="devRows"></div>
+          <div class="empty" id="devRowsEmpty" hidden></div>
+        </div>
+
+        <div class="ddetail" id="devDetail">
+          <button class="btn ghost small back" id="devBackBtn" type="button" data-i18n="back">← Назад</button>
+          <div id="devicesMsg"></div>
+
+          <!-- добавить устройство -->
+          <div class="card" id="addClientForm" hidden>
+            <h1 data-i18n="add_device_title">Добавить устройство</h1>
+            <p class="note" data-i18n="add_device_note">Выбери, на чём стоит программа, и придумай имя,
+              по которому потом узнаешь это устройство в списке. Сразу после создания панель один раз
+              покажет готовые настройки вместе с ключом: для телефона — QR-кодом, для компьютера —
+              кнопкой «Скопировать» или файлом.</p>
+            <div id="addClientMsg"></div>
+            <div class="field">
+              <label for="newClientName" data-i18n="client_name_label">Имя устройства</label>
+              <input type="text" id="newClientName" placeholder="Ноутбук, Телефон…">
+            </div>
+            <div class="field">
+              <label for="newClientType" data-i18n="client_type_label">Тип устройства</label>
+              <select id="newClientType" style="width:100%">
+                <option value="windows">Windows</option>
+                <option value="linux">Linux</option>
+                <option value="android">Android</option>
+              </select>
+            </div>
+            <div class="row-inline">
+              <button class="btn" id="createClientBtn" data-i18n="create_client">Создать</button>
+              <button class="btn ghost" id="cancelClientBtn" data-i18n="cancel">Отмена</button>
+            </div>
+          </div>
+
+          <!-- настройки клиента: QR и ссылка (только сразу после создания), буфер, файл -->
+          <div class="card" id="clientConfigCard" hidden>
+            <h1 id="clientConfigTitle" data-i18n="client_key_title">Ключ клиента готов</h1>
+            <p class="note" id="clientConfigNote" data-i18n="client_key_note">Это единственный раз, когда
+              панель показывает приватный ключ сам, без нажатия «Показать настройки» в списке.
+              Сохрани его сейчас — он понадобится, чтобы подключить устройство.</p>
+            <div id="clientConfigMsg"></div>
+
+            <div id="clientConfigQRBox" style="text-align:center;margin-bottom:14px">
+              <img id="qrThumb" alt="QR">
+              <p class="note" style="margin:8px auto 0" data-i18n="qr_hint">Нажми на код, чтобы открыть
+                во весь экран — так его проще отсканировать телефоном.</p>
+              <button class="btn" id="copyClientLinkBtn" style="margin-top:10px"
+                data-i18n="copy_link">Скопировать ссылку</button>
+            </div>
+
+            <div class="row-inline" style="margin-bottom:14px">
+              <button class="btn" id="copyClientConfigBtn" data-i18n="copy_config">Скопировать</button>
+              <button class="btn ghost" id="downloadClientConfigBtn" data-i18n="download_config">Скачать файл</button>
+            </div>
+
+            <h2 data-i18n="manual_entry_title">Или впиши руками</h2>
+            <div class="field"><label data-i18n="host_label">Адрес сервера</label>
+              <input type="text" id="clientConfigHost" readonly></div>
+            <div class="field"><label data-i18n="port_label">Порт</label>
+              <input type="text" id="clientConfigPort" readonly></div>
+            <div class="field"><label data-i18n="user_label">Пользователь</label>
+              <input type="text" id="clientConfigUser" readonly></div>
+            <div class="field">
+              <label data-i18n="private_key_label">Приватный ключ</label>
+              <textarea id="clientConfigKey" readonly rows="6"
+                style="font-family:var(--mono);font-size:11.5px;resize:vertical"></textarea>
+            </div>
+            <button class="btn ghost" id="closeClientConfigBtn" data-i18n="close">Закрыть</button>
+          </div>
+
+          <!-- карточка выбранного устройства; перерисовывается при каждом опросе -->
+          <div class="card" id="devInfoCard"><div id="devInfo"></div></div>
+
+          <!-- права одного клиента: группы и право создавать пользователей.
+               Отдельной карточкой: карточка устройства перерисовывается при
+               каждом опросе и смахнула бы открытую форму. -->
+          <div class="card" id="clientAccessCard" hidden>
+            <h1 id="clientAccessTitle"></h1>
+            <div id="clientAccessMsg"></div>
+            <h2><span data-i18n="acc_groups">Группы</span><button class="hint" data-hint="hint_acc_client_groups">?</button></h2>
+            <div id="clientAccessGroups" class="acc-checks"></div>
+            <h2><span data-i18n="acc_creator">Создание пользователей</span><button class="hint" data-hint="hint_acc_creator">?</button></h2>
+            <label class="acc-line"><input type="checkbox" id="clientCanCreate"> <span data-i18n="acc_can_create">Может создавать пользователей</span></label>
+            <div class="field">
+              <input type="password" id="clientCreatorPass" autocomplete="new-password" data-i18n-ph="acc_pass_ph" placeholder="Пароль для создания (от 8 символов)">
+            </div>
+            <div class="row-inline">
+              <button class="btn" id="saveClientAccessBtn" data-i18n="save">Сохранить</button>
+              <button class="btn ghost" id="closeClientAccessBtn" data-i18n="close">Закрыть</button>
+            </div>
           </div>
         </div>
+
+        <div class="dmap" id="devMapSlot"></div>
       </div>
+    </section>
 
-      <!-- настройки клиента: QR и ссылка (только сразу после создания), буфер, файл -->
-      <div class="card" id="clientConfigCard" hidden>
-        <h1 id="clientConfigTitle" data-i18n="client_key_title">Ключ клиента готов</h1>
-        <p class="note" id="clientConfigNote" data-i18n="client_key_note">Это единственный раз, когда
-          панель показывает приватный ключ сам, без нажатия «Показать настройки» в списке.
-          Сохрани его сейчас — он понадобится, чтобы подключить устройство.</p>
-        <div id="clientConfigMsg"></div>
-
-        <div id="clientConfigQRBox" style="text-align:center;margin-bottom:14px">
-          <img id="qrThumb" alt="QR">
-          <p class="note" style="margin:8px 0 0" data-i18n="qr_hint">Нажми на код, чтобы открыть
-            во весь экран — так его проще отсканировать телефоном.</p>
-          <button class="btn" id="copyClientLinkBtn" style="margin-top:10px"
-            data-i18n="copy_link">Скопировать ссылку</button>
-        </div>
-
-        <div class="row-inline" style="margin-bottom:14px">
-          <button class="btn" id="copyClientConfigBtn" data-i18n="copy_config">Скопировать</button>
-          <button class="btn ghost" id="downloadClientConfigBtn" data-i18n="download_config">Скачать файл</button>
-        </div>
-
-        <h2 data-i18n="manual_entry_title">Или впиши руками</h2>
-        <div class="field"><label data-i18n="host_label">Адрес сервера</label>
-          <input type="text" id="clientConfigHost" readonly></div>
-        <div class="field"><label data-i18n="port_label">Порт</label>
-          <input type="text" id="clientConfigPort" readonly></div>
-        <div class="field"><label data-i18n="user_label">Пользователь</label>
-          <input type="text" id="clientConfigUser" readonly></div>
-        <div class="field">
-          <label data-i18n="private_key_label">Приватный ключ</label>
-          <textarea id="clientConfigKey" readonly rows="6"
-            style="font-family:var(--mono);font-size:11.5px;resize:vertical"></textarea>
-        </div>
-        <button class="btn ghost" id="closeClientConfigBtn" data-i18n="close">Закрыть</button>
+    <!-- ======== ДОСТУП ======== -->
+    <section id="tabAccess" class="acc-sec" hidden>
+      <div class="sec-head">
+        <h1 class="page-title" data-i18n="nav_access">Доступ</h1>
+        <p class="page-sub" data-i18n="access_sub">Кто к кому может подключаться в сети устройств.
+          Группы конкретного устройства — в его карточке в разделе «Устройства», кнопка «Права».</p>
       </div>
-
-      <div id="devicesMsg"></div>
-      <div class="cols">
-        <div class="col card"><h2>Windows <span class="count" id="cntWindows">0</span></h2>
-          <div id="colWindows"></div></div>
-        <div class="col card"><h2>Linux <span class="count" id="cntLinux">0</span></h2>
-          <div id="colLinux"></div></div>
-        <div class="col card"><h2>Android <span class="count" id="cntAndroid">0</span></h2>
-          <div id="colAndroid"></div></div>
-      </div>
-      <!-- права одного клиента: группы и право создавать пользователей -->
-      <div class="card" id="clientAccessCard" hidden>
-        <h1 id="clientAccessTitle"></h1>
-        <div id="clientAccessMsg"></div>
-        <h2><span data-i18n="acc_groups">Группы</span><button class="hint" data-hint="hint_acc_client_groups">?</button></h2>
-        <div id="clientAccessGroups" class="acc-checks"></div>
-        <h2><span data-i18n="acc_creator">Создание пользователей</span><button class="hint" data-hint="hint_acc_creator">?</button></h2>
-        <label class="acc-line"><input type="checkbox" id="clientCanCreate"> <span data-i18n="acc_can_create">Может создавать пользователей</span></label>
-        <div class="field">
-          <input type="password" id="clientCreatorPass" autocomplete="new-password" data-i18n-ph="acc_pass_ph" placeholder="Пароль для создания (от 8 символов)">
-        </div>
-        <div class="row-inline">
-          <button class="btn" id="saveClientAccessBtn" data-i18n="save">Сохранить</button>
-          <button class="btn ghost" id="closeClientAccessBtn" data-i18n="close">Закрыть</button>
-        </div>
-      </div>
-
       <!-- права доступа в сети устройств -->
       <div class="card" id="accessCard">
         <h1><span data-i18n="acc_title">Права доступа</span><button class="hint" data-hint="hint_acc">?</button></h1>
@@ -644,137 +823,37 @@
           <input type="text" id="accNewGroup" data-i18n-ph="acc_new_group_ph" placeholder="Новая группа" style="flex:1">
           <button class="btn ghost small" id="accAddGroupBtn" data-i18n="acc_add">Добавить</button>
         </div>
-        <h2><span data-i18n="acc_rules">Правила</span><button class="hint" data-hint="hint_acc_rules">?</button></h2>
+        <h2 style="margin-top:14px"><span data-i18n="acc_rules">Правила</span><button class="hint" data-hint="hint_acc_rules">?</button></h2>
         <div id="accRules"></div>
         <div class="row-inline" style="margin-top:10px">
           <button class="btn ghost small" id="accAddRuleBtn" data-i18n="acc_add_rule">+ Правило</button>
           <button class="btn" id="accSaveBtn" data-i18n="save">Сохранить</button>
         </div>
       </div>
+      <!-- Те же тексты, что в подсказках «?», — раскрытыми: место справа
+           всё равно свободно. -->
+      <div class="card acc-help">
+        <h1 data-i18n="acc_help_title">Как это работает</h1>
+        <div class="help" id="accHelp"></div>
+      </div>
     </section>
 
-    <!-- ======== СЕТЬ УСТРОЙСТВ ======== -->
+    <!-- ======== СЕТИ ======== -->
     <section id="tabMesh" hidden>
-      <h1 class="page-title"><span data-i18n="nav_mesh">Сеть устройств</span><button class="hint" data-hint="hint_mesh_what">?</button></h1>
-      <p class="page-sub" data-i18n="mesh_sub">Твои устройства в одной сети через твои же серверы — как NetBird:
-        каждое получает постоянный адрес и имя вида «ноутбук.mesh».</p>
-
-      <!-- роль сервера -->
-      <div class="card" id="meshRoleCard" hidden>
-        <h1 data-i18n="mesh_role_title">Роль этого сервера</h1>
-        <p class="note" data-i18n="mesh_role_note">Серверов может быть несколько: один главный, остальные подключаются к нему.
-          Устройства, подключённые к любому из них, окажутся в одной сети.</p>
-        <div class="role-grid">
-          <button class="role" id="roleMainBtn" type="button">
-            <div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><circle cx="4.5" cy="5" r="2"/><circle cx="19.5" cy="5" r="2"/><circle cx="4.5" cy="19" r="2"/><circle cx="19.5" cy="19" r="2"/><path d="M6 6.4 9.7 9.8M18 6.4l-3.7 3.4M6 17.6l3.7-3.4M18 17.6l-3.7-3.4"/></svg></div>
-            <div class="t"><span data-i18n="role_main">Главный сервер</span><span class="hint" tabindex="0" data-hint="hint_role_main">?</span></div>
-            <div class="d" data-i18n="role_main_d">Здесь работает служба сети. К нему подключаются устройства и другие серверы, здесь видна вся сеть.</div>
-          </button>
-          <button class="role" id="roleSecBtn" type="button">
-            <div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01M12 10v4"/></svg></div>
-            <div class="t"><span data-i18n="role_secondary">Побочный сервер</span><span class="hint" tabindex="0" data-hint="hint_role_secondary">?</span></div>
-            <div class="d" data-i18n="role_secondary_d">Подключается к главному. Устройства этого сервера попадают в общую сеть, выход в интернет остаётся здесь.</div>
-          </button>
-        </div>
-
-        <div id="meshMainForm" hidden style="margin-top:16px">
-          <div class="field">
-            <label for="meshName"><span data-i18n="mesh_name_label">Как назвать этот сервер</span><button class="hint" data-hint="hint_mesh_name">?</button></label>
-            <input type="text" id="meshName" data-i18n-ph="mesh_name_ph" placeholder="Москва, Германия…">
-          </div>
-          <button class="btn" id="meshMakeMainBtn" data-i18n="mesh_make_main">Сделать главным и установить</button>
-        </div>
-
-        <div id="meshJoinForm" hidden style="margin-top:16px">
-          <div class="field">
-            <label for="meshJoinCode"><span data-i18n="mesh_code_label">Код подключения с главного сервера</span><button class="hint" data-hint="hint_mesh_code">?</button></label>
-            <textarea id="meshJoinCode" rows="3" style="font-family:var(--mono);font-size:11.5px" placeholder="sshtunnel-link1:…"></textarea>
-          </div>
-          <div class="field">
-            <label for="meshSelfHost"><span data-i18n="mesh_self_host">Адрес этого сервера для устройств</span><button class="hint" data-hint="hint_mesh_self_host">?</button></label>
-            <input type="text" id="meshSelfHost" placeholder="de.example.com">
-          </div>
-          <button class="btn" id="meshJoinBtn" data-i18n="mesh_join">Подключить к главному</button>
-        </div>
-        <div id="meshRoleMsg" style="margin-top:12px"></div>
+      <div class="sec-head">
+        <h1 class="page-title"><span data-i18n="nav_mesh">Сети</span><button class="hint" data-hint="hint_mesh_what">?</button></h1>
+        <p class="page-sub" data-i18n="mesh_sub">Твои устройства в одной сети через твои же серверы — как NetBird:
+          каждое получает постоянный адрес и имя вида «ноутбук.mesh».</p>
       </div>
 
-      <!-- установка -->
-      <div class="card" id="meshJobCard" hidden>
-        <h1 id="meshJobTitle"></h1>
-        <div class="console" id="meshJobLog"></div>
+      <div class="card" id="netsNone" hidden>
+        <p class="note" id="netsNoneText" style="margin:0"></p>
       </div>
 
-      <!-- сам сервер как узел сети (и у главного, и у побочного) -->
-      <div class="card" id="meshSelfCard" hidden>
-        <h1><span data-i18n="self_title">Сервер в сети устройств</span><button class="hint" data-hint="hint_self">?</button></h1>
-        <div class="kv"><span class="k" data-i18n="self_addr">Адрес в сети</span><span class="v" id="selfAddr">—</span></div>
-        <label class="chk" style="margin-top:12px"><input type="checkbox" id="selfEnabled">
-          <span data-i18n="self_enable">Пускать устройства сети к самому серверу</span></label>
-        <div class="field" style="margin-top:10px">
-          <label for="selfPorts"><span data-i18n="self_ports">Порты</span><button class="hint" data-hint="hint_self_ports">?</button></label>
-          <input type="text" id="selfPorts" data-i18n-ph="self_ports_ph" placeholder="пусто — все порты; например 22, 80, 8000-8100">
-        </div>
-        <p class="note" id="selfExample" style="margin:0 0 10px"></p>
-        <button class="btn" id="selfSaveBtn" data-i18n="cap_save">Применить</button>
-      </div>
+      <div class="cards" id="meshNets"></div>
 
-      <!-- главный сервер -->
-      <div id="meshMainView" hidden>
-        <div class="msg err" id="meshAdminErr" hidden></div>
-        <div class="sum" id="meshTiles">
-          <div class="box"><div class="k"><span data-i18n="tile_devices">Устройства</span><button class="hint" data-hint="hint_tile_devices">?</button></div>
-            <div class="v" id="tileDevices">—</div><div class="s" id="tileDevicesSub"></div></div>
-          <div class="box"><div class="k"><span data-i18n="tile_servers">Серверы</span><button class="hint" data-hint="hint_tile_servers">?</button></div>
-            <div class="v" id="tileServers">—</div><div class="s" id="tileServersSub"></div></div>
-          <div class="box"><div class="k"><span data-i18n="tile_latency">Задержка</span><button class="hint" data-hint="hint_tile_latency">?</button></div>
-            <div class="v" id="tileLatency">—</div><div class="s" id="tileLatencySub"></div></div>
-          <div class="box"><div class="k"><span data-i18n="tile_traffic">Трафик в сети</span><button class="hint" data-hint="hint_tile_traffic">?</button></div>
-            <div class="v" id="tileTraffic">—</div><div class="s" id="tileTrafficSub"></div></div>
-        </div>
-
-        <div class="card">
-          <h1><span data-i18n="mesh_map_title">Схема сети</span><button class="hint" data-hint="hint_map">?</button></h1>
-          <div class="toolbar" id="meshNetBar" hidden>
-            <label class="note" style="margin:0" for="meshNetSel" data-i18n="mesh_network">Сеть</label>
-            <select id="meshNetSel"></select>
-          </div>
-          <div class="map-wrap"><svg id="meshMap" role="img" aria-label="mesh map"></svg>
-            <div class="map-zoom">
-              <button type="button" id="mapZoomIn" data-i18n-title="map_zoom_in" title="Приблизить">+</button>
-              <button type="button" id="mapZoomOut" data-i18n-title="map_zoom_out" title="Отдалить">−</button>
-              <button type="button" id="mapZoomFit" data-i18n-title="map_zoom_fit" title="Показать всё">⤢</button>
-            </div></div>
-          <div class="legend">
-            <span><i style="background:var(--ok)"></i><span data-i18n="legend_good">связь хорошая</span></span>
-            <span><i style="background:var(--warn)"></i><span data-i18n="legend_fair">средняя</span></span>
-            <span><i style="background:var(--err)"></i><span data-i18n="legend_poor">плохая</span></span>
-            <span><i style="background:var(--dim);opacity:.5"></i><span data-i18n="legend_off">не в сети</span></span>
-          </div>
-        </div>
-
-        <div class="card">
-          <h1><span data-i18n="mesh_devices_title">Устройства в сети</span><button class="hint" data-hint="hint_devices_list">?</button></h1>
-          <div class="toolbar">
-            <input type="text" id="meshSearch" data-i18n-ph="mesh_search_ph" placeholder="Поиск по имени, адресу, системе…">
-            <div class="chips" id="meshFilter">
-              <button data-f="all" class="on" data-i18n="f_all">Все</button>
-              <button data-f="on" data-i18n="f_on">В сети</button>
-              <button data-f="off" data-i18n="f_off">Не в сети</button>
-            </div>
-          </div>
-          <div class="mdevs" id="meshDevices"></div>
-          <div class="empty" id="meshDevicesEmpty" hidden></div>
-        </div>
-
-        <div class="card">
-          <h1><span data-i18n="fc_title">Прямые соединения: прогноз</span><button class="hint" data-hint="hint_fc">?</button></h1>
-          <p class="note" data-i18n="fc_note">Проверка NAT идёт сама при каждом подключении устройства. По её итогам —
-            смогут ли устройства когда-нибудь соединяться напрямую, минуя сервер.</p>
-          <div id="meshForecast"></div>
-        </div>
-
-        <div class="card">
+      <div class="cards">
+        <div class="card" id="meshServersCard" hidden>
           <h1><span data-i18n="mesh_servers_title">Серверы сети</span><button class="hint" data-hint="hint_servers">?</button></h1>
           <div id="meshServers"></div>
           <div id="meshLinkMsg"></div>
@@ -804,14 +883,92 @@
               <button class="btn ghost" id="meshCodeClose" data-i18n="close">Закрыть</button>
             </div>
             <ol class="steps">
-              <li data-i18n="link_step1">Открой панель побочного сервера → «Сеть устройств».</li>
+              <li data-i18n="link_step1">Открой панель побочного сервера → «Настройки».</li>
               <li data-i18n="link_step2">Выбери «Побочный сервер» и вставь код.</li>
               <li data-i18n="link_step3">Нажми «Подключить к главному» — через несколько секунд сервер появится здесь на схеме.</li>
             </ol>
           </div>
         </div>
 
-        <div class="card">
+        <!-- сам сервер как узел сети (и у главного, и у побочного) -->
+        <div class="card" id="meshSelfCard" hidden>
+          <h1><span data-i18n="self_title">Сервер в сети устройств</span><button class="hint" data-hint="hint_self">?</button></h1>
+          <div class="kv"><span class="k" data-i18n="self_addr">Адрес в сети</span><span class="v" id="selfAddr">—</span></div>
+          <label class="chk" style="margin-top:12px"><input type="checkbox" id="selfEnabled">
+            <span data-i18n="self_enable">Пускать устройства сети к самому серверу</span></label>
+          <div class="field" style="margin-top:10px">
+            <label for="selfPorts"><span data-i18n="self_ports">Порты</span><button class="hint" data-hint="hint_self_ports">?</button></label>
+            <input type="text" id="selfPorts" data-i18n-ph="self_ports_ph" placeholder="пусто — все порты; например 22, 80, 8000-8100">
+          </div>
+          <p class="note" id="selfExample" style="margin:0 0 10px"></p>
+          <button class="btn" id="selfSaveBtn" data-i18n="cap_save">Применить</button>
+        </div>
+
+        <div class="card" id="meshForecastCard" hidden>
+          <h1><span data-i18n="fc_title">Прямые соединения: прогноз</span><button class="hint" data-hint="hint_fc">?</button></h1>
+          <p class="note" data-i18n="fc_note">Проверка NAT идёт сама при каждом подключении устройства. По её итогам —
+            смогут ли устройства когда-нибудь соединяться напрямую, минуя сервер.</p>
+          <div id="meshForecast"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======== НАСТРОЙКИ ======== -->
+    <section id="tabSettings" hidden>
+      <div class="sec-head">
+        <h1 class="page-title" data-i18n="nav_settings">Настройки</h1>
+        <p class="page-sub" data-i18n="settings_sub">Роль сервера в сети устройств, службы и сама панель.</p>
+      </div>
+
+      <div class="cards">
+        <!-- роль сервера -->
+        <div class="card span2" id="meshRoleCard" hidden>
+          <h1 data-i18n="mesh_role_title">Роль этого сервера</h1>
+          <p class="note" data-i18n="mesh_role_note">Серверов может быть несколько: один главный, остальные подключаются к нему.
+            Устройства, подключённые к любому из них, окажутся в одной сети.</p>
+          <div class="role-grid">
+            <button class="role" id="roleMainBtn" type="button">
+              <div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><circle cx="4.5" cy="5" r="2"/><circle cx="19.5" cy="5" r="2"/><circle cx="4.5" cy="19" r="2"/><circle cx="19.5" cy="19" r="2"/><path d="M6 6.4 9.7 9.8M18 6.4l-3.7 3.4M6 17.6l3.7-3.4M18 17.6l-3.7-3.4"/></svg></div>
+              <div class="t"><span data-i18n="role_main">Главный сервер</span><span class="hint" tabindex="0" data-hint="hint_role_main">?</span></div>
+              <div class="d" data-i18n="role_main_d">Здесь работает служба сети. К нему подключаются устройства и другие серверы, здесь видна вся сеть.</div>
+            </button>
+            <button class="role" id="roleSecBtn" type="button">
+              <div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01M12 10v4"/></svg></div>
+              <div class="t"><span data-i18n="role_secondary">Побочный сервер</span><span class="hint" tabindex="0" data-hint="hint_role_secondary">?</span></div>
+              <div class="d" data-i18n="role_secondary_d">Подключается к главному. Устройства этого сервера попадают в общую сеть, выход в интернет остаётся здесь.</div>
+            </button>
+          </div>
+
+          <div id="meshMainForm" hidden style="margin-top:16px">
+            <div class="field">
+              <label for="meshName"><span data-i18n="mesh_name_label">Как назвать этот сервер</span><button class="hint" data-hint="hint_mesh_name">?</button></label>
+              <input type="text" id="meshName" data-i18n-ph="mesh_name_ph" placeholder="Москва, Германия…">
+            </div>
+            <button class="btn" id="meshMakeMainBtn" data-i18n="mesh_make_main">Сделать главным и установить</button>
+          </div>
+
+          <div id="meshJoinForm" hidden style="margin-top:16px">
+            <div class="field">
+              <label for="meshJoinCode"><span data-i18n="mesh_code_label">Код подключения с главного сервера</span><button class="hint" data-hint="hint_mesh_code">?</button></label>
+              <textarea id="meshJoinCode" rows="3" style="font-family:var(--mono);font-size:11.5px" placeholder="sshtunnel-link1:…"></textarea>
+            </div>
+            <div class="field">
+              <label for="meshSelfHost"><span data-i18n="mesh_self_host">Адрес этого сервера для устройств</span><button class="hint" data-hint="hint_mesh_self_host">?</button></label>
+              <input type="text" id="meshSelfHost" placeholder="de.example.com">
+            </div>
+            <button class="btn" id="meshJoinBtn" data-i18n="mesh_join">Подключить к главному</button>
+          </div>
+          <div id="meshRoleMsg" style="margin-top:12px"></div>
+        </div>
+
+        <!-- установка -->
+        <div class="card span2" id="meshJobCard" hidden>
+          <h1 id="meshJobTitle"></h1>
+          <div class="console" id="meshJobLog"></div>
+        </div>
+
+        <!-- служба сети (главный сервер) -->
+        <div class="card" id="meshServiceCard" hidden>
           <h1><span data-i18n="mesh_service_title">Служба сети</span><button class="hint" data-hint="hint_service">?</button></h1>
           <div class="kv"><span class="k" data-i18n="status_label">Статус</span><span class="v" id="meshSvcState">—</span></div>
           <div class="kv"><span class="k" data-i18n="mesh_version">Версия meshd</span><span class="v" id="meshSvcVersion">—</span></div>
@@ -823,11 +980,9 @@
             <button class="btn danger" id="meshOffBtn" data-i18n="mesh_off">Выключить сеть на сервере</button>
           </div>
         </div>
-      </div>
 
-      <!-- побочный сервер -->
-      <div id="meshSecView" hidden>
-        <div class="card">
+        <!-- побочный сервер: связь с главным и журнал проброса -->
+        <div class="card span2" id="meshSecView" hidden>
           <h1><span data-i18n="sec_title">Связь с главным сервером</span><button class="hint" data-hint="hint_sec">?</button></h1>
           <div class="link-viz">
             <div class="end"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg></div>
@@ -849,113 +1004,86 @@
             <button class="btn danger" id="secOffBtn" data-i18n="mesh_off">Выключить сеть на сервере</button>
           </div>
         </div>
-      </div>
-    </section>
 
-    <!-- ======== НАСТРОЙКИ ======== -->
-    <section id="tabSettings" hidden>
-      <h1 class="page-title" data-i18n="nav_settings">Настройки</h1>
-      <p class="page-sub" data-i18n="settings_sub">Настройки самой панели — они не влияют на уже
-        подключённые устройства.</p>
-
-      <div class="card">
-        <h1 data-i18n="version_label">Версия панели</h1>
-        <div class="kv"><span class="k" data-i18n="version_installed">Установлена</span>
-          <span class="v" id="setVersion">—</span></div>
-        <button class="btn" id="updateCheckBtn" style="margin-top:12px"
-          data-i18n="update_check">Проверить обновления</button>
-        <div id="updateMsg"></div>
-        <!-- Обновление прямо отсюда: панель скачает свой файл, сверит
-             контрольную сумму, подменит себя и перезапустится. -->
-        <div id="updateHow" hidden style="margin-top:12px">
-          <button class="btn" id="updateInstallBtn"></button>
-          <div class="upd-bar" id="updateBar" hidden><i></i></div>
-          <p class="note" id="updateStage" style="margin:8px 0 0"></p>
-          <p class="note" style="margin:6px 0 0">
-            <a id="updateLink" href="#" target="_blank" rel="noopener"
-               data-i18n="update_open_release">Открыть страницу релиза</a></p>
+        <div class="card">
+          <h1 data-i18n="version_label">Версия панели</h1>
+          <div class="kv"><span class="k" data-i18n="version_installed">Установлена</span>
+            <span class="v" id="setVersion">—</span></div>
+          <button class="btn" id="updateCheckBtn" style="margin-top:12px"
+            data-i18n="update_check">Проверить обновления</button>
+          <div id="updateMsg" style="margin-top:12px"></div>
+          <!-- Обновление прямо отсюда: панель скачает свой файл, сверит
+               контрольную сумму, подменит себя и перезапустится. -->
+          <div id="updateHow" hidden style="margin-top:12px">
+            <button class="btn" id="updateInstallBtn"></button>
+            <div class="upd-bar" id="updateBar" hidden><i></i></div>
+            <p class="note" id="updateStage" style="margin:8px 0 0"></p>
+            <p class="note" style="margin:6px 0 0">
+              <a id="updateLink" href="#" target="_blank" rel="noopener"
+                 data-i18n="update_open_release">Открыть страницу релиза</a></p>
+          </div>
         </div>
-      </div>
 
-      <div class="card">
-        <h1><span data-i18n="cap_title">Ёмкость сервера</span><button class="hint" data-hint="hint_capacity">?</button></h1>
-        <p class="note" data-i18n="cap_note">Сколько устройств могут подключаться к серверу одновременно. Меняет настройку
-          защиты sshd от наплыва соединений — уже подключённые устройства это не затронет.</p>
-        <div id="capMsg"></div>
-        <div class="cap-row">
-          <input type="range" id="capRange" min="1" max="250" value="30">
-          <input type="number" id="capNum" min="1" max="250" value="30">
+        <div class="card">
+          <h1><span data-i18n="cap_title">Ёмкость сервера</span><button class="hint" data-hint="hint_capacity">?</button></h1>
+          <p class="note" data-i18n="cap_note">Сколько устройств могут подключаться к серверу одновременно. Меняет настройку
+            защиты sshd от наплыва соединений — уже подключённые устройства это не затронет.</p>
+          <div id="capMsg"></div>
+          <div class="cap-row">
+            <input type="range" id="capRange" min="1" max="250" value="30">
+            <input type="number" id="capNum" min="1" max="250" value="30">
+          </div>
+          <div class="kv" style="margin-top:8px"><span class="k"><span data-i18n="cap_wanted">Будет выставлено</span><button class="hint" data-hint="hint_maxstartups">?</button></span>
+            <span class="v" id="capWanted">—</span></div>
+          <div class="kv"><span class="k" data-i18n="cap_effective">Действует сейчас (sshd -T)</span>
+            <span class="v" id="capEffective">—</span></div>
+          <button class="btn" id="capSaveBtn" style="margin-top:12px" data-i18n="cap_save">Применить</button>
         </div>
-        <div class="kv" style="margin-top:8px"><span class="k"><span data-i18n="cap_wanted">Будет выставлено</span><button class="hint" data-hint="hint_maxstartups">?</button></span>
-          <span class="v" id="capWanted">—</span></div>
-        <div class="kv"><span class="k" data-i18n="cap_effective">Действует сейчас (sshd -T)</span>
-          <span class="v" id="capEffective">—</span></div>
-        <button class="btn" id="capSaveBtn" style="margin-top:12px" data-i18n="cap_save">Применить</button>
-      </div>
 
-      <div class="card">
-        <h1><span data-i18n="autostart_title">Автозапуск</span><button class="hint" data-hint="hint_autostart">?</button></h1>
-        <p class="note" id="autostartNote" hidden data-i18n="autostart_note">Включено — панель поднимется сама после
-          перезагрузки сервера. Снятая галочка не выключает панель прямо сейчас, а только не даёт
-          ей стартовать в следующий раз.</p>
-        <div id="autostartMsg"></div>
-        <label class="chk" id="autostartRow" hidden>
-          <input type="checkbox" id="autostartCheck">
-          <span data-i18n="autostart_label">Запускать при старте системы</span>
-        </label>
-        <p class="note" id="autostartUnsupported" hidden style="margin:0"
-           data-i18n="autostart_unsupported">Панель запущена не через systemd — управлять
-          автозапуском отсюда нечем.</p>
-      </div>
+        <div class="card">
+          <h1><span data-i18n="autostart_title">Автозапуск</span><button class="hint" data-hint="hint_autostart">?</button></h1>
+          <p class="note" id="autostartNote" hidden data-i18n="autostart_note">Включено — панель поднимется сама после
+            перезагрузки сервера. Снятая галочка не выключает панель прямо сейчас, а только не даёт
+            ей стартовать в следующий раз.</p>
+          <div id="autostartMsg"></div>
+          <label class="chk" id="autostartRow" hidden>
+            <input type="checkbox" id="autostartCheck">
+            <span data-i18n="autostart_label">Запускать при старте системы</span>
+          </label>
+          <p class="note" id="autostartUnsupported" hidden style="margin:0"
+             data-i18n="autostart_unsupported">Панель запущена не через systemd — управлять
+            автозапуском отсюда нечем.</p>
+        </div>
 
-      <div class="card">
-        <h1 data-i18n="account_title">Учётная запись</h1>
-        <div id="accountMsg"></div>
-        <button class="btn ghost" id="showPassFormBtn" data-i18n="change_password">Сменить пароль</button>
-        <div id="passForm" hidden style="margin-top:14px">
-          <div class="field">
-            <label for="curPass2" data-i18n="current_password_label">Текущий пароль</label>
-            <input type="password" id="curPass2" autocomplete="current-password">
-          </div>
-          <div class="field">
-            <label for="newPass21" data-i18n="new_password_label">Новый пароль</label>
-            <input type="password" id="newPass21" autocomplete="new-password">
-          </div>
-          <div class="field">
-            <label for="newPass22" data-i18n="repeat_password_label">Повтори новый пароль</label>
-            <input type="password" id="newPass22" autocomplete="new-password">
-          </div>
+        <div class="card">
+          <h1 data-i18n="account_title">Учётная запись</h1>
+          <div id="accountMsg"></div>
           <div class="row-inline">
-            <button class="btn" id="accountChangeBtn" data-i18n="set_password">Задать пароль</button>
-            <button class="btn ghost" id="cancelPassBtn" data-i18n="cancel">Отмена</button>
+            <button class="btn ghost" id="showPassFormBtn" data-i18n="change_password">Сменить пароль</button>
+            <button class="btn danger" id="logoutBtn" data-i18n="sign_out">Выйти</button>
+          </div>
+          <div id="passForm" hidden style="margin-top:14px">
+            <div class="field">
+              <label for="curPass2" data-i18n="current_password_label">Текущий пароль</label>
+              <input type="password" id="curPass2" autocomplete="current-password">
+            </div>
+            <div class="field">
+              <label for="newPass21" data-i18n="new_password_label">Новый пароль</label>
+              <input type="password" id="newPass21" autocomplete="new-password">
+            </div>
+            <div class="field">
+              <label for="newPass22" data-i18n="repeat_password_label">Повтори новый пароль</label>
+              <input type="password" id="newPass22" autocomplete="new-password">
+            </div>
+            <div class="row-inline">
+              <button class="btn" id="accountChangeBtn" data-i18n="set_password">Задать пароль</button>
+              <button class="btn ghost" id="cancelPassBtn" data-i18n="cancel">Отмена</button>
+            </div>
           </div>
         </div>
       </div>
-
-      <button class="btn danger wide" id="logoutBtn" data-i18n="sign_out">Выйти</button>
     </section>
   </main>
-
-  <nav class="side">
-    <button data-tab="Home" class="on">
-      <svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.8V21h14V9.8"/></svg>
-      <span data-i18n="nav_home">Главная</span>
-    </button>
-    <button data-tab="Devices">
-      <svg viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="13" height="10" rx="1.6"/>
-        <path d="M6 19h7"/><rect x="17.5" y="9.5" width="4" height="10" rx="1.2"/></svg>
-      <span data-i18n="nav_devices">Устройства</span>
-    </button>
-    <button data-tab="Mesh">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6"/><circle cx="5" cy="5.5" r="2"/><circle cx="19" cy="5.5" r="2"/><circle cx="5" cy="18.5" r="2"/><circle cx="19" cy="18.5" r="2"/><path d="M6.5 7 10 10M17.5 7 14 10M6.5 17 10 14M17.5 17 14 14"/></svg>
-      <span data-i18n="nav_mesh">Сеть устройств</span>
-    </button>
-    <button data-tab="Settings">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/>
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      <span data-i18n="nav_settings">Настройки</span>
-    </button>
-  </nav>
 </div>
 
 <!-- QR во весь экран: маленький код в карточке телефоном сканируется плохо. -->
@@ -1011,11 +1139,11 @@ $('confirmCancelBtn').addEventListener('click', () => closeConfirm(false));
 let LANG = localStorage.getItem('panelLang') || 'ru';
 const I18N = {
   ru: {
-    nav_home:'Главная', nav_devices:'Устройства', nav_settings:'Настройки',
+    nav_home:'Обзор', nav_devices:'Устройства', nav_access:'Доступ', nav_settings:'Настройки',
     home_sub:'Что сейчас с сервером и кто через него ходит.',
     devices_sub:'У каждого устройства свой ключ и своя системная учётная запись на сервере — '+
       'панель заводит и удаляет их сама, без консоли.',
-    settings_sub:'Настройки самой панели — они не влияют на уже подключённые устройства.',
+    settings_sub:'Роль сервера в сети устройств, службы и сама панель.',
     login_title:'Вход в панель', login_note:'Панель управляет этим сервером и клиентами, '+
       'подключёнными к нему, поэтому доступ защищён паролем.',
     username_label:'Логин', password_label:'Пароль', sign_in:'Войти',
@@ -1050,7 +1178,7 @@ const I18N = {
     autostart_unsupported:'Панель запущена не через systemd — управлять автозапуском отсюда нечем.',
     clients_title:'Подключённые клиенты',
     home_clients_note:'Здесь только показ. Заводить, замораживать и удалять устройства — '+
-      'во вкладке «Устройства».',
+      'в разделе «Устройства».',
     clients_empty:'Клиентов пока нет',
     col_device:'Устройство', col_state:'Состояние', col_traffic:'Трафик', col_online:'Связь',
     traffic_title:'Трафик',
@@ -1119,7 +1247,23 @@ const I18N = {
     err_password_mismatch:'Пароли не совпадают',
     err_autostart_unsupported:'Автозапуском отсюда управлять нечем',
     password_changed:'Пароль изменён',
-    nav_mesh:'Сеть устройств',
+    nav_mesh:'Сети',
+    back:'← Назад', dev_search_ph:'Поиск по имени, адресу, системе…',
+    access_sub:'Кто к кому может подключаться в сети устройств. Группы конкретного устройства — '+
+      'в его карточке в разделе «Устройства», кнопка «Права».',
+    acc_help_title:'Как это работает',
+    dev_pick:'Выбери устройство в списке — здесь появятся подробности и действия.',
+    dev_none:'Устройств пока нет. Нажми «+ Добавить устройство» — панель заведёт ключ и учётную запись.',
+    dev_part_client:'Вход на этот сервер (SSH)', dev_part_mesh:'Сеть устройств',
+    dev_no_client:'Своей учётной записи на этом сервере у устройства нет — оно пришло через другой '+
+      'сервер сети или заведено не здесь.',
+    dev_no_mesh:'В сети устройств это устройство пока не появлялось.',
+    dev_type:'Тип', dev_created:'Создано', dev_link:'Связь',
+    net_n:'Сеть {n}', net_devices:'Устройств', net_online:'В сети', net_show:'Показать', net_shown:'показана',
+    net_id:'Идентификатор', net_empty:'пустая',
+    nets_secondary:'Этот сервер — побочный: устройства всей сети и её схема видны в панели главного сервера. '+
+      'Здесь — только доступ устройств к самому серверу.',
+    nets_off:'Сеть устройств на этом сервере не включена. Выбери роль сервера в разделе «Настройки».',
     dev_direct:'Напрямую с', map_direct:'напрямую', map_zoom_in:'Приблизить', map_zoom_out:'Отдалить', map_zoom_fit:'Показать всё', dev_nat:'Сеть (NAT)', nat_easy:'простой NAT', nat_hard:'жёсткий NAT', nat_open:'открытый',
     nat_udp_blocked:'UDP не проходит', nat_unknown:'не проверено',
     fc_title:'Прямые соединения: прогноз', fc_pairs:'Пары устройств',
@@ -1178,7 +1322,7 @@ const I18N = {
     link_host_label:'Адрес этого (главного) сервера', link_create:'Получить код',
     link_code_ready:'Код готов. Он содержит ключ доступа — передай его только на свой сервер. Один код — для одного сервера: '+
       'для следующего получи новый.',
-    link_step1:'Открой панель побочного сервера → «Сеть устройств».',
+    link_step1:'Открой панель побочного сервера → «Настройки».',
     link_step2:'Выбери «Побочный сервер» и вставь код.',
     link_step3:'Нажми «Подключить к главному» — через несколько секунд сервер появится здесь на схеме.',
     link_remove:'Отключить', confirm_link_remove:'Отключить сервер «{n}»? Его ключ перестанет работать, '+
@@ -1267,11 +1411,11 @@ const I18N = {
     hint_autostart:'То же, что «systemctl enable ssh_tunnel_panel» в консоли — просто кнопкой.',
   },
   en: {
-    nav_home:'Home', nav_devices:'Devices', nav_settings:'Settings',
+    nav_home:'Overview', nav_devices:'Devices', nav_access:'Access', nav_settings:'Settings',
     home_sub:'How the server is doing and who goes through it.',
     devices_sub:'Every device gets its own key and its own system account on the server — '+
       'the panel creates and removes them itself, no console needed.',
-    settings_sub:'Settings of the panel itself — they do not affect already connected devices.',
+    settings_sub:'Role of the server in the device network, services and the panel itself.',
     login_title:'Sign in', login_note:'The panel controls this server and the clients '+
       'connected to it, so access is protected by a password.',
     username_label:'Username', password_label:'Password', sign_in:'Sign in',
@@ -1306,7 +1450,7 @@ const I18N = {
     autostart_unsupported:'The panel was not started through systemd — there is nothing to switch here.',
     clients_title:'Connected clients',
     home_clients_note:'Read-only here. Adding, freezing and deleting devices lives in the '+
-      '"Devices" tab.',
+      '"Devices" section.',
     clients_empty:'No clients yet',
     col_device:'Device', col_state:'State', col_traffic:'Traffic', col_online:'Link',
     traffic_title:'Traffic',
@@ -1374,7 +1518,23 @@ const I18N = {
     err_password_mismatch:'Passwords do not match',
     err_autostart_unsupported:'There is nothing to switch here',
     password_changed:'Password changed',
-    nav_mesh:'Device network',
+    nav_mesh:'Networks',
+    back:'← Back', dev_search_ph:'Search by name, address, system…',
+    access_sub:'Who can connect to whom in the device network. Groups of a particular device are '+
+      'in its card in "Devices", the "Access" button.',
+    acc_help_title:'How it works',
+    dev_pick:'Pick a device in the list — its details and actions show up here.',
+    dev_none:'No devices yet. Press "+ Add device" — the panel creates a key and an account.',
+    dev_part_client:'Login to this server (SSH)', dev_part_mesh:'Device network',
+    dev_no_client:'The device has no account of its own on this server — it came through another '+
+      'server of the network or was created elsewhere.',
+    dev_no_mesh:'This device has not shown up in the device network yet.',
+    dev_type:'Type', dev_created:'Created', dev_link:'Link',
+    net_n:'Network {n}', net_devices:'Devices', net_online:'Online', net_show:'Show', net_shown:'shown',
+    net_id:'ID', net_empty:'empty',
+    nets_secondary:'This server is a secondary one: devices of the whole network and its map are in the '+
+      'main server panel. Here — only device access to this server itself.',
+    nets_off:'The device network is not enabled on this server. Choose the server role in "Settings".',
     dev_direct:'Direct with', map_direct:'direct', map_zoom_in:'Zoom in', map_zoom_out:'Zoom out', map_zoom_fit:'Show all', dev_nat:'Network (NAT)', nat_easy:'easy NAT', nat_hard:'hard NAT', nat_open:'open',
     nat_udp_blocked:'UDP blocked', nat_unknown:'not checked',
     fc_title:'Direct connections: forecast', fc_pairs:'Device pairs',
@@ -1431,7 +1591,7 @@ const I18N = {
     link_host_label:'Address of this (main) server', link_create:'Get code',
     link_code_ready:'The code is ready. It contains an access key — give it only to your own server. One code — one server: '+
       'get a new one for the next.',
-    link_step1:'Open the panel of the secondary server → "Device network".',
+    link_step1:'Open the panel of the secondary server → "Settings".',
     link_step2:'Choose "Secondary server" and paste the code.',
     link_step3:'Press "Connect to main" — in a few seconds the server shows up here on the map.',
     link_remove:'Disconnect', confirm_link_remove:'Disconnect server "{n}"? Its key stops working, its '+
@@ -1525,9 +1685,11 @@ function applyI18N(){
   document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
   $('lang').value = LANG;
   // Списки собираются кодом, поэтому их надо перерисовать целиком.
+  // Справка в «Доступе» — те же тексты, что в «?» (свои строки, не ввод людей).
+  $('accHelp').innerHTML = t('hint_acc') + t('hint_acc_rules');
   if (!$('viewMain').hidden){
     renderAll();
-    if (MESH){ MAP_SIG = ''; DEV_CARDS.forEach(c => c.remove()); DEV_CARDS.clear(); renderMesh(); }
+    if (MESH){ MAP_SIG = ''; $('netChips').dataset.sig = ''; renderMesh(); }
   }
 }
 $('lang').addEventListener('change', e => {
@@ -1555,18 +1717,26 @@ function showView(name){
   ['Login','MustChange','Main'].forEach(v => { $('view'+v).hidden = (v !== name); });
 }
 
+const TABS = ['Home','Devices','Access','Mesh','Settings'];
 let TAB = localStorage.getItem('panelTab') || 'Home';
+if (!TABS.includes(TAB)) TAB = 'Home';
 function showTab(name){
+  if (!TABS.includes(name)) name = 'Home';
+  const changed = TAB !== name;
   TAB = name;
   localStorage.setItem('panelTab', name);
-  ['Home','Devices','Mesh','Settings'].forEach(v => { $('tab'+v).hidden = (v !== name); });
+  TABS.forEach(v => { $('tab'+v).hidden = (v !== name); });
   document.querySelectorAll('.side button').forEach(b => {
     b.classList.toggle('on', b.dataset.tab === name);
   });
   hidePop();
+  if (changed) scrollTo(0, 0);
   if (name === 'Settings'){ loadAutostart(); loadCapacity(); }
-  if (name === 'Devices') loadAccess();
-  if (name === 'Mesh'){ MAP_SIG = ''; loadMesh(); } else { clearTimeout(MESH_TIMER); }
+  // Группы нужны и редактору правил, и форме прав клиента в «Устройствах».
+  if (name === 'Devices' || name === 'Access') loadAccess();
+  placeMap();
+  MAP_SIG = '';
+  if (MESH) renderMesh();
 }
 document.querySelectorAll('.side button').forEach(b => {
   b.addEventListener('click', () => showTab(b.dataset.tab));
@@ -1627,6 +1797,9 @@ async function loadSession(){
   if (data.mustChange){ showView('MustChange'); return; }
   showView('Main');
   showTab(TAB);
+  // Данные сети нужны почти всем разделам: схема и плитки, список
+  // устройств, сети, роль сервера в настройках.
+  loadMesh();
   loadStatus();
   await loadClients();
   loadTraffic();
@@ -1646,7 +1819,8 @@ async function loadClients(){
   if (!ok) return;
   CLIENTS = data.clients || [];
   renderHomeClients();
-  renderDevices();
+  renderDevList();
+  renderDetail();
 }
 
 async function loadTraffic(){
@@ -1658,7 +1832,8 @@ async function loadTraffic(){
 
 function renderAll(){
   renderHomeClients();
-  renderDevices();
+  renderDevList();
+  renderDetail();
   renderTraffic();
 }
 
@@ -1748,85 +1923,227 @@ function renderTraffic(){
   });
 }
 
-/* ---------- устройства: три колонки по системам ---------- */
-function renderDevices(){
-  const cols = {windows: $('colWindows'), linux: $('colLinux'), android: $('colAndroid')};
-  const counts = {windows: 0, linux: 0, android: 0};
-  Object.values(cols).forEach(el => { el.innerHTML = ''; });
-
-  CLIENTS.forEach(c => {
-    const col = cols[c.deviceType];
-    if (!col) return;
-    counts[c.deviceType]++;
-    col.appendChild(deviceCard(c));
+/* ---------- устройства: один список на клиентов и устройства сети ---------- */
+/* Клиент — учётная запись SSH на этом сервере (ключ, заморозка, удаление);
+   устройство сети — то, что знает meshd (адрес .mesh, связь, имя). Обычно
+   это одно и то же устройство: meshd помнит, под каким SSH-пользователем оно
+   пришло (user), — по нему строки и склеиваются. Устройство с другого
+   сервера сети — только «сеть», клиент, ещё не включавший сеть, — только
+   «вход». */
+let DEV_SEL = '';     // ключ выбранной строки: 'c:<id клиента>' или 'm:<id устройства сети>'
+let CONFIG_FOR = '';  // id клиента, чьи настройки (с ключом) сейчас открыты
+function devItems(){
+  const byUser = {};
+  CLIENTS.forEach(c => { if (c.username) byUser[c.username] = c; });
+  const items = [], paired = new Set();
+  meshDevices().forEach(d => {
+    const c = d.user && byUser[d.user];
+    if (c && !paired.has(c.id)){ paired.add(c.id); items.push({key: 'c:' + c.id, client: c, mesh: d}); }
+    else items.push({key: 'm:' + d.id, client: null, mesh: d});
   });
+  CLIENTS.forEach(c => { if (!paired.has(c.id)) items.push({key: 'c:' + c.id, client: c, mesh: null}); });
+  return items;
+}
+function itemName(it){ return it.mesh ? it.mesh.display : it.client.name; }
+function itemOnline(it){ return !!((it.mesh && it.mesh.online) || (it.client && it.client.sessions > 0)); }
+function itemPlatform(it){ return it.mesh ? it.mesh.platform : it.client.deviceType; }
+function itemSystem(it){ return it.mesh ? systemText(it.mesh) : t('device_' + it.client.deviceType); }
+const WIDE_DETAIL = '(min-width:980px)';
 
-  Object.keys(cols).forEach(k => {
-    $('cnt' + k[0].toUpperCase() + k.slice(1)).textContent = counts[k];
-    if (!counts[k]){
-      const empty = document.createElement('div');
-      empty.className = 'empty';
-      empty.style.padding = '14px 6px';
-      empty.textContent = t('devices_empty');
-      cols[k].appendChild(empty);
-    }
+function renderDevList(){
+  const all = devItems();
+  const q = $('meshSearch').value.trim().toLowerCase();
+  const list = all.filter(it => {
+    const on = itemOnline(it);
+    if (MESH_FILTER === 'on' && !on) return false;
+    if (MESH_FILTER === 'off' && on) return false;
+    if (!q) return true;
+    const d = it.mesh || {}, c = it.client || {};
+    return [d.display, d.name, d.host, d.ip, d.platform, d.os, d.hostname, d.via, d.server && serverName(d.server),
+            c.name, c.username, c.deviceType]
+      .some(v => v && String(v).toLowerCase().includes(q));
+  }).sort((a, b) => (itemOnline(b) - itemOnline(a)) || itemName(a).localeCompare(itemName(b)));
+
+  // На широком экране карточка справа не пустует: выбираем первое.
+  if (!all.some(i => i.key === DEV_SEL) && matchMedia(WIDE_DETAIL).matches &&
+      list.length && $('addClientForm').hidden && $('clientConfigCard').hidden){
+    DEV_SEL = list[0].key;
+  }
+
+  const box = $('devRows');
+  box.innerHTML = '';
+  $('devRowsHead').hidden = !list.length;
+  const empty = $('devRowsEmpty');
+  empty.hidden = list.length > 0;
+  empty.textContent = all.length ? t('mesh_no_match') : t('dev_none');
+  list.forEach(it => {
+    const row = el('button', 'drow' + (it.key === DEV_SEL ? ' on' : ''));
+    row.type = 'button';
+    row.dataset.key = it.key;
+    row.appendChild(el('span', 'dot' + (itemOnline(it) ? ' on' : '')));
+    const nm = el('span', 'nm');
+    const n = el('div', 'n', itemName(it));
+    if (it.client && it.client.state !== 'active') n.appendChild(stateBadge(it.client.state));
+    nm.appendChild(n);
+    nm.appendChild(el('div', 'h', it.mesh ? it.mesh.host + '.mesh'
+      : t('device_' + it.client.deviceType) + ' · ' + onlineText(it.client)));
+    row.appendChild(nm);
+    row.appendChild(el('span', 'c-ip', (it.mesh && it.mesh.ip) || '—'));
+    row.appendChild(el('span', 'c-sys', itemSystem(it) || '—'));
+    const ms = el('span', 'c-ms');
+    if (it.mesh && it.mesh.online){
+      ms.appendChild(qualBars(it.mesh.quality));
+      ms.appendChild(document.createTextNode(fmtMs(it.mesh.rttMs)));
+    } else ms.textContent = '—';
+    row.appendChild(ms);
+    row.addEventListener('click', () => selectDev(it.key, true));
+    box.appendChild(row);
   });
 }
 
-function deviceCard(c){
-  const box = document.createElement('div');
-  box.className = 'dev';
-
-  const top = document.createElement('div');
-  top.className = 'top';
-  const name = document.createElement('div');
-  name.className = 'name';
-  name.textContent = c.name;
-  top.appendChild(name);
-  top.appendChild(stateBadge(c.state));
-
-  const meta = document.createElement('div');
-  meta.className = 'meta';
-  meta.textContent = t('created_on') + ' ' + fmtDate(c.createdAt) + '\n' +
-    t('traffic_down') + ' ' + fmtBytes(c.rxBytes) + ' · ' + t('traffic_up') + ' ' + fmtBytes(c.txBytes) +
-    '\n' + onlineText(c);
-  meta.style.whiteSpace = 'pre-line';
-
-  const actions = document.createElement('div');
-  actions.className = 'actions';
-  const freeze = document.createElement('button');
-  freeze.className = 'btn ghost small';
-  if (c.state === 'frozen'){
-    freeze.textContent = t('unfreeze_client');
-    freeze.addEventListener('click', () => clientAction('unfreeze', c.id));
-  } else {
-    freeze.textContent = t('freeze_client');
-    freeze.addEventListener('click', () => clientAction('freeze', c.id));
+function selectDev(key, open){
+  if (DEV_SEL !== key){
+    DEV_SEL = key;
+    MESH_EDIT = null;
+    // Открытые формы другого клиента закрываем, чтобы не спутать, чьи они.
+    if (key !== 'c:' + ACCESS_CLIENT) $('clientAccessCard').hidden = true;
+    if (CONFIG_FOR && key !== 'c:' + CONFIG_FOR) closeClientConfig();
   }
-  const disconnect = document.createElement('button');
-  disconnect.className = 'btn ghost small';
-  disconnect.textContent = t('disconnect_client');
-  disconnect.addEventListener('click', () => clientAction('disconnect', c.id));
-  const settings = document.createElement('button');
-  settings.className = 'btn ghost small';
-  settings.textContent = t('show_settings');
-  settings.addEventListener('click', () => showClientConfig(c.id));
-  const access = document.createElement('button');
-  access.className = 'btn ghost small';
-  access.textContent = t('acc_client_btn');
-  access.addEventListener('click', () => openClientAccess(c.id));
-  const del = document.createElement('button');
-  del.className = 'btn danger small';
-  del.textContent = t('delete_client');
-  del.addEventListener('click', () => deleteClient(c.id));
-  [freeze, disconnect, settings, access, del].forEach(b => actions.appendChild(b));
+  $('addClientForm').hidden = true;
+  document.querySelectorAll('#devRows .drow').forEach(r => r.classList.toggle('on', r.dataset.key === key));
+  renderDetail();
+  if (open){
+    $('devsBox').classList.add('open');
+    if (!matchMedia(WIDE_DETAIL).matches) scrollTo(0, 0);
+  }
+}
+$('devBackBtn').addEventListener('click', () => { $('devsBox').classList.remove('open'); scrollTo(0, 0); });
+
+// fact — «подпись: значение» в сетке карточки.
+function fact(box, k, v, node){
+  const f = el('div');
+  f.appendChild(el('div', 'k', k));
+  const vv = el('div', 'v');
+  if (node) vv.appendChild(node);
+  vv.appendChild(document.createTextNode(v));
+  f.appendChild(vv);
+  box.appendChild(f);
+}
+
+function renderDetail(){
+  if (MESH_EDIT) return; // идёт переименование — не смахиваем поле ввода
+  const box = $('devInfo');
+  box.innerHTML = '';
+  const it = devItems().find(i => i.key === DEV_SEL);
+  if (!it){
+    box.appendChild(el('div', 'empty', t(devItems().length ? 'dev_pick' : 'dev_none')));
+    return;
+  }
+  const d = it.mesh, c = it.client, on = itemOnline(it);
+
+  const top = el('div', 'dtop' + (on ? '' : ' offline'));
+  const pic = el('div', 'pic');
+  pic.appendChild(glyphSVG(glyphOf(itemPlatform(it))));
+  top.appendChild(pic);
+  const nm = el('div', 'nm');
+  nm.appendChild(el('div', 'n', itemName(it)));
+  nm.appendChild(el('div', 'h', d ? d.host + '.mesh' : (c.username || '')));
+  top.appendChild(nm);
+  if (d){
+    const pencil = el('button', 'icon-btn');
+    pencil.title = t('dev_rename');
+    pencil.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>';
+    pencil.addEventListener('click', () => startRename(nm, d));
+    top.appendChild(pencil);
+  }
+  top.appendChild(el('span', 'dot' + (on ? ' on' : '')));
+  box.appendChild(top);
+
+  // --- сеть устройств ---
+  if (d){
+    const part = el('div', 'dpart');
+    part.appendChild(el('h2', '', t('dev_part_mesh')));
+    const idrow = el('div', 'idrow');
+    idrow.appendChild(el('span', 'ip', d.ip || '—'));
+    const sys = systemText(d);
+    if (sys) idrow.appendChild(el('span', 'sys', sys));
+    part.appendChild(idrow);
+    const facts = el('div', 'facts');
+    if (d.online){
+      fact(facts, t('dev_latency'), fmtMs(d.rttMs) + (d.jitterMs ? ' ±' + d.jitterMs : ''), qualBars(d.quality));
+      fact(facts, t('dev_loss'), (d.lossPct || 0) + '%');
+    }
+    const modeText = d.mode ? t('mode_' + d.mode) : '—';
+    fact(facts, t('dev_mode'), modeText.startsWith('mode_') ? d.mode : modeText);
+    if (d.nat) fact(facts, t('dev_nat'), natLabel(d.nat));
+    fact(facts, t('dev_via'), serverName(d.server));
+    if (d.online && d.direct && d.direct.length) fact(facts, t('dev_direct'), directText(d));
+    fact(facts, t('dev_traffic'), '↑' + fmtBytes(d.bytesUp) + ' ↓' + fmtBytes(d.bytesDown));
+    fact(facts, d.online ? t('dev_since') : t('dev_last'), d.online ? fmtAgo(d.connectedAt) : fmtClock(d.lastSeen));
+    if (d.app) fact(facts, t('dev_app'), d.app);
+    fact(facts, t('dev_sessions'), String(d.sessions || 0));
+    part.appendChild(facts);
+    const acts = el('div', 'dacts');
+    if (d.alias){
+      const reset = el('button', 'btn ghost small', t('dev_reset_name').replace('{n}', d.name));
+      reset.addEventListener('click', () => renameDevice(d, ''));
+      acts.appendChild(reset);
+    }
+    const forget = el('button', 'btn ghost small', t('dev_forget'));
+    forget.addEventListener('click', async () => {
+      const yes = await appConfirm(t('confirm_forget').replace('{n}', d.display), t('confirm_forget_yes'));
+      if (!yes) return;
+      const {ok, data} = await api('/api/mesh/forget', {net: MESH_NET, device: d.id});
+      if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+      toast(t('forgotten'));
+      loadMesh();
+    });
+    acts.appendChild(forget);
+    part.appendChild(acts);
+    box.appendChild(part);
+  } else if (MESH && MESH.effectiveRole === 'main'){
+    const part = el('div', 'dpart');
+    part.appendChild(el('h2', '', t('dev_part_mesh')));
+    part.appendChild(el('p', 'note', t('dev_no_mesh')));
+    box.appendChild(part);
+  }
+
+  // --- вход на сервер (клиент SSH) ---
+  const part = el('div', 'dpart');
+  const h = el('h2');
+  h.appendChild(el('span', '', t('dev_part_client')));
+  if (c) h.appendChild(stateBadge(c.state));
+  part.appendChild(h);
+  if (!c){
+    part.appendChild(el('p', 'note', t('dev_no_client')));
+    box.appendChild(part);
+    return;
+  }
+  const facts = el('div', 'facts');
+  fact(facts, t('client_name_label'), c.name);
+  if (c.username) fact(facts, t('user_label'), c.username);
+  fact(facts, t('dev_type'), t('device_' + c.deviceType));
+  fact(facts, t('dev_created'), fmtDate(c.createdAt));
+  fact(facts, t('dev_traffic'), '↓' + fmtBytes(c.rxBytes) + ' ↑' + fmtBytes(c.txBytes));
+  fact(facts, t('dev_link'), onlineText(c));
   if ((c.groups && c.groups.length) || c.canCreate){
-    meta.textContent += '\n' + t('acc_groups') + ': ' + ((c.groups || []).join(', ') || '—') +
-      (c.canCreate ? ' · ' + t('acc_creator_short') : '');
+    fact(facts, t('acc_groups'), ((c.groups || []).join(', ') || '—') + (c.canCreate ? ' · ' + t('acc_creator_short') : ''));
   }
-
-  box.appendChild(top); box.appendChild(meta); box.appendChild(actions);
-  return box;
+  part.appendChild(facts);
+  const acts = el('div', 'dacts');
+  const btn = (cls, key, fn) => {
+    const b = el('button', 'btn small ' + cls, t(key));
+    b.addEventListener('click', fn);
+    acts.appendChild(b);
+  };
+  if (c.state === 'frozen') btn('ghost', 'unfreeze_client', () => clientAction('unfreeze', c.id));
+  else btn('ghost', 'freeze_client', () => clientAction('freeze', c.id));
+  btn('ghost', 'disconnect_client', () => clientAction('disconnect', c.id));
+  btn('ghost', 'show_settings', () => showClientConfig(c.id));
+  btn('ghost', 'acc_client_btn', () => openClientAccess(c.id));
+  btn('danger', 'delete_client', () => deleteClient(c.id));
+  part.appendChild(acts);
+  box.appendChild(part);
 }
 
 async function clientAction(action, id){
@@ -1955,6 +2272,7 @@ function openClientAccess(id){
   $('clientCanCreate').checked = !!c.canCreate;
   $('clientCreatorPass').value = '';
   $('clientAccessCard').hidden = false;
+  $('devsBox').classList.add('open');
   $('clientAccessCard').scrollIntoView({behavior:'smooth', block:'start'});
 }
 $('closeClientAccessBtn').addEventListener('click', () => { $('clientAccessCard').hidden = true; });
@@ -1977,6 +2295,9 @@ async function deleteClient(id){
   showMsg($('devicesMsg'), '', '');
   const {ok, data} = await api('/api/clients/delete', {id});
   if (!ok){ showMsg($('devicesMsg'), errText(data.error, data), 'err'); return; }
+  if (DEV_SEL === 'c:' + id) DEV_SEL = '';
+  if (ACCESS_CLIENT === id) $('clientAccessCard').hidden = true;
+  if (CONFIG_FOR === id) closeClientConfig();
   loadClients();
   loadTraffic();
 }
@@ -1986,6 +2307,8 @@ $('addClientBtn').addEventListener('click', () => {
   $('newClientName').value = '';
   $('newClientType').value = 'windows';
   $('addClientForm').hidden = false;
+  $('devsBox').classList.add('open');
+  $('addClientForm').scrollIntoView({behavior: 'smooth', block: 'start'});
   $('newClientName').focus();
 });
 $('cancelClientBtn').addEventListener('click', () => { $('addClientForm').hidden = true; });
@@ -2001,9 +2324,11 @@ $('createClientBtn').addEventListener('click', async () => {
   if (!ok){ showMsg($('addClientMsg'), errText(data.error, data), 'err'); return; }
   $('addClientForm').hidden = true;
   await loadClients();
+  if (data.client) selectDev('c:' + data.client.id, true);
   // QR и ссылка приходят только в ответе на создание — второй раз их не
   // получить (п. 16), поэтому показываем то, что пришло, без запроса.
   if (!data.config){ showMsg($('devicesMsg'), errText(data.configError, data), 'err'); return; }
+  CONFIG_FOR = data.client ? data.client.id : '';
   renderClientConfig(data.config, true);
 });
 
@@ -2017,6 +2342,7 @@ let currentConfigLink = '';
 async function showClientConfig(id){
   const {ok, data} = await api('/api/clients/config?id=' + encodeURIComponent(id));
   if (!ok){ showMsg($('devicesMsg'), errText(data.error, data), 'err'); return; }
+  CONFIG_FOR = id;
   renderClientConfig(data.config, false);
 }
 
@@ -2040,6 +2366,7 @@ function renderClientConfig(cfg, justCreated){
   currentConfigFilename = 'ssh_tunnel-' + cfg.user + '.json';
   currentConfigJSON = cfg.json;
   $('clientConfigCard').hidden = false;
+  $('devsBox').classList.add('open');
   $('clientConfigCard').scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
@@ -2103,13 +2430,16 @@ $('downloadClientConfigBtn').addEventListener('click', () => {
   URL.revokeObjectURL(url);
 });
 
-$('closeClientConfigBtn').addEventListener('click', () => {
+$('closeClientConfigBtn').addEventListener('click', () => closeClientConfig());
+// closeClientConfig — убрать со страницы приватный ключ, ссылку и QR.
+function closeClientConfig(){
+  CONFIG_FOR = '';
   $('clientConfigKey').value = '';
   currentConfigJSON = '';
   currentConfigLink = '';
   $('qrThumb').removeAttribute('src'); $('qrFullImg').removeAttribute('src');
   $('clientConfigCard').hidden = true;
-});
+}
 
 /* ---------- настройки: автозапуск ---------- */
 async function loadAutostart(){
@@ -2447,7 +2777,7 @@ async function loadMesh(){
 }
 function scheduleMesh(){
   clearTimeout(MESH_TIMER);
-  if (TAB !== 'Mesh' || $('viewMain').hidden) return;
+  if ($('viewMain').hidden) return;
   const fast = MESH && MESH.job && MESH.job.running;
   MESH_TIMER = setTimeout(() => {
     if (document.hidden){ scheduleMesh(); return; }
@@ -2493,11 +2823,86 @@ function renderMesh(){
 
   renderJob(m.job);
   renderSelfCard(m, role);
-  $('meshMainView').hidden = role !== 'main';
+  // Что видно на главном, на побочном и без сети.
+  const isMain = role === 'main';
+  ['meshTiles', 'mapCard', 'meshServersCard', 'meshForecastCard', 'meshServiceCard']
+    .forEach(id => { $(id).hidden = !isMain; });
   $('meshSecView').hidden = role !== 'secondary';
-  if (role === 'main') renderMeshMain();
+  $('tabHome').classList.toggle('nomap', !isMain);
+  $('devsBox').classList.toggle('withmap', isMain);
+  $('netsNone').hidden = isMain;
+  $('netsNoneText').textContent = isMain ? '' : t(role === 'secondary' ? 'nets_secondary' : 'nets_off');
+  renderNetChips();
+  renderNets();
+  if (isMain) renderMeshMain(); else $('meshAdminErr').hidden = true;
   if (role === 'secondary') renderMeshSecondary();
+  renderDevList();
+  renderDetail();
 }
+
+/* ---------- выбор сети (вверху) и раздел «Сети» ---------- */
+function netLabel(n, i){ return n.name || t('net_n').replace('{n}', i + 1); }
+function mainNets(){ return (MESH && MESH.effectiveRole === 'main' && MESH.networks) || []; }
+function pickNet(id){ MESH_NET = id; MAP_SIG = ''; renderMesh(); }
+function renderNetChips(){
+  const box = $('netChips');
+  const nets = mainNets();
+  box.hidden = nets.length < 2;
+  if (box.hidden) return;
+  meshDevices(); // поправит MESH_NET, если выбранной сети больше нет
+  const sig = LANG + '|' + MESH_NET + '|' + nets.map(n => n.id + ':' + (n.name || '') + ':' + (n.devices || []).length).join(',');
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  box.innerHTML = '';
+  box.appendChild(el('span', 'lbl', t('mesh_network')));
+  nets.forEach((n, i) => {
+    const b = el('button', n.id === MESH_NET ? 'on' : '', netLabel(n, i) + ' · ' + (n.devices || []).length);
+    b.type = 'button';
+    b.addEventListener('click', () => pickNet(n.id));
+    box.appendChild(b);
+  });
+}
+function renderNets(){
+  const box = $('meshNets');
+  box.innerHTML = '';
+  const nets = mainNets();
+  if (nets.length) meshDevices();
+  nets.forEach((n, i) => {
+    const devs = n.devices || [];
+    const card = el('div', 'card');
+    const h = el('h1', '', netLabel(n, i));
+    if (n.id === MESH_NET && nets.length > 1) h.appendChild(el('span', 'badge ok', t('net_shown'))).style.marginLeft = '8px';
+    if (!devs.length) h.appendChild(el('span', 'badge dim', t('net_empty'))).style.marginLeft = '8px';
+    card.appendChild(h);
+    const kv = (k, v) => {
+      const r = el('div', 'kv');
+      r.appendChild(el('span', 'k', k));
+      r.appendChild(el('span', 'v', v));
+      card.appendChild(r);
+    };
+    kv(t('net_devices'), String(devs.length));
+    kv(t('net_online'), String(devs.filter(d => d.online).length));
+    kv(t('net_id'), n.id.length > 16 ? n.id.slice(0, 16) + '…' : n.id);
+    if (nets.length > 1 && n.id !== MESH_NET){
+      const b = el('button', 'btn ghost small', t('net_show'));
+      b.style.marginTop = '12px';
+      b.addEventListener('click', () => pickNet(n.id));
+      card.appendChild(b);
+    }
+    box.appendChild(card);
+  });
+}
+
+/* ---------- где стоит схема ---------- */
+/* Схема одна (у неё живая раскладка): обычно в «Обзоре», а в «Устройствах»
+   на экране от 1700 px — третьей колонкой. */
+function placeMap(){
+  const wide = TAB === 'Devices' && matchMedia('(min-width:1700px)').matches;
+  const slot = wide ? $('devMapSlot') : $('ovMapSlot');
+  const card = $('mapCard');
+  if (card.parentNode !== slot){ slot.appendChild(card); MAP_SIG = ''; }
+}
+function mapVisible(){ return $('meshMap').getClientRects().length > 0; }
 
 function renderJob(job){
   const recent = job && (job.running || job.error ||
@@ -2531,22 +2936,7 @@ function renderMeshMain(){
   err.hidden = !m.adminError || (m.job && m.job.running);
   err.textContent = t('mesh_admin_err').replace('{e}', m.adminError || '');
 
-  // Выбор сети — если ключей несколько (например, свой и семьи).
-  const nets = m.networks || [];
-  $('meshNetBar').hidden = nets.length < 2;
-  const sel = $('meshNetSel');
-  const want = nets.map(n => n.id + ':' + n.devices.length).join(',');
-  if (sel.dataset.sig !== want){
-    sel.dataset.sig = want;
-    sel.innerHTML = '';
-    nets.forEach((n, i) => {
-      const o = el('option', '', (LANG === 'ru' ? 'Сеть ' : 'Network ') + (i + 1) + ' · ' + n.devices.length);
-      o.value = n.id;
-      sel.appendChild(o);
-    });
-  }
   const devices = meshDevices();
-  sel.value = MESH_NET || '';
 
   // Плитки.
   const online = devices.filter(d => d.online);
@@ -2563,8 +2953,8 @@ function renderMeshMain(){
   animateNum($('tileTraffic'), traffic, fmtBytes);
   $('tileTrafficSub').textContent = t('tile_traffic_sub');
 
-  renderMap(servers, devices);
-  renderMeshDevices(devices);
+  // Невидимую схему не считаем: у неё нет размера, и она тратила бы кадры.
+  if (mapVisible()) renderMap(servers, devices);
   renderForecast(devices);
   renderMeshServers(servers);
 
@@ -3308,49 +3698,17 @@ function focusDevice(id){
   MESH_FILTER = 'all';
   $('meshSearch').value = '';
   document.querySelectorAll('#meshFilter button').forEach(b => b.classList.toggle('on', b.dataset.f === 'all'));
-  renderMeshDevices(meshDevices());
-  const card = document.querySelector('.mdev[data-id="' + CSS.escape(id) + '"]');
-  if (!card) return;
-  card.scrollIntoView({behavior: 'smooth', block: 'center'});
-  card.classList.remove('flash');
-  void card.offsetWidth;
-  card.classList.add('flash');
-}
-
-/* ---------- карточки устройств ---------- */
-const DEV_CARDS = new Map();
-
-function renderMeshDevices(devices){
-  const q = $('meshSearch').value.trim().toLowerCase();
-  const list = devices.filter(d => {
-    if (MESH_FILTER === 'on' && !d.online) return false;
-    if (MESH_FILTER === 'off' && d.online) return false;
-    if (!q) return true;
-    return [d.display, d.name, d.host, d.ip, d.platform, d.os, d.hostname, d.via, serverName(d.server)]
-      .some(v => v && String(v).toLowerCase().includes(q));
-  }).sort((a, b) => (b.online - a.online) || a.display.localeCompare(b.display));
-
-  const box = $('meshDevices');
-  const empty = $('meshDevicesEmpty');
-  empty.hidden = list.length > 0;
-  empty.textContent = devices.length ? t('mesh_no_match') : t('mesh_no_devices');
-
-  const keep = new Set(list.map(d => d.id));
-  for (const [id, card] of DEV_CARDS){
-    if (!keep.has(id)){ card.remove(); DEV_CARDS.delete(id); }
-  }
-  list.forEach((d, i) => {
-    let card = DEV_CARDS.get(d.id);
-    if (!card){
-      card = el('div', 'mdev');
-      card.dataset.id = d.id;
-      DEV_CARDS.set(d.id, card);
-    }
-    if (MESH_EDIT !== d.id) fillDeviceCard(card, d);
-    // Переставляем только если порядок изменился: вставка заново
-    // перезапускает анимацию появления.
-    if (box.children[i] !== card) box.insertBefore(card, box.children[i] || null);
-  });
+  const it = devItems().find(i => i.mesh && i.mesh.id === id);
+  if (!it) return;
+  if (TAB !== 'Devices') showTab('Devices');
+  renderDevList();
+  selectDev(it.key, true);
+  const row = document.querySelector('.drow[data-key="' + CSS.escape(it.key) + '"]');
+  if (!row || !row.getClientRects().length) return;
+  row.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  row.classList.remove('flash');
+  void row.offsetWidth;
+  row.classList.add('flash');
 }
 
 // systemText — «Windows 10 Pro», «Android 14»: название системы один раз,
@@ -3363,78 +3721,10 @@ function systemText(d){
   return os.toLowerCase().includes(name.toLowerCase()) ? os : name + ' ' + os;
 }
 
-function fillDeviceCard(card, d){
-  card.classList.toggle('offline', !d.online);
-  card.innerHTML = '';
-  const top = el('div', 'top');
-  const pic = el('div', 'pic');
-  pic.appendChild(glyphSVG(glyphOf(d.platform)));
-  top.appendChild(pic);
-  const nm = el('div', 'nm');
-  nm.appendChild(el('div', 'n', d.display));
-  nm.appendChild(el('div', 'h', d.host + '.mesh'));
-  top.appendChild(nm);
-  const pencil = el('button', 'icon-btn');
-  pencil.title = t('dev_rename');
-  pencil.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>';
-  pencil.addEventListener('click', () => startRename(card, d));
-  top.appendChild(pencil);
-  top.appendChild(el('span', 'dot' + (d.online ? ' on' : '')));
-  card.appendChild(top);
-
-  const idrow = el('div', 'idrow');
-  idrow.appendChild(el('span', 'ip', d.ip || '—'));
-  const sys = systemText(d);
-  if (sys) idrow.appendChild(el('span', 'sys', sys));
-  card.appendChild(idrow);
-
-  const facts = el('div', 'facts');
-  const fact = (k, v, node) => {
-    const f = el('div');
-    f.appendChild(el('div', 'k', k));
-    const vv = el('div', 'v');
-    if (node) vv.appendChild(node);
-    vv.appendChild(document.createTextNode(v));
-    f.appendChild(vv);
-    facts.appendChild(f);
-  };
-  if (d.online){
-    fact(t('dev_latency'), fmtMs(d.rttMs) + (d.jitterMs ? ' ±' + d.jitterMs : ''), qualBars(d.quality));
-    fact(t('dev_loss'), (d.lossPct || 0) + '%');
-  }
-  const modeText = d.mode ? t('mode_' + d.mode) : '—';
-  fact(t('dev_mode'), modeText.startsWith('mode_') ? d.mode : modeText);
-  if (d.nat) fact(t('dev_nat'), natLabel(d.nat));
-  fact(t('dev_via'), serverName(d.server));
-  if (d.online && d.direct && d.direct.length) fact(t('dev_direct'), directText(d));
-  fact(t('dev_traffic'), '↑' + fmtBytes(d.bytesUp) + ' ↓' + fmtBytes(d.bytesDown));
-  fact(d.online ? t('dev_since') : t('dev_last'), d.online ? fmtAgo(d.connectedAt) : fmtClock(d.lastSeen));
-  if (d.app) fact(t('dev_app'), d.app);
-  fact(t('dev_sessions'), String(d.sessions || 0));
-  card.appendChild(facts);
-
-  const acts = el('div', 'acts');
-  if (d.alias){
-    const reset = el('button', 'btn ghost small', t('dev_reset_name').replace('{n}', d.name));
-    reset.addEventListener('click', () => renameDevice(d, ''));
-    acts.appendChild(reset);
-  }
-  const forget = el('button', 'btn ghost small', t('dev_forget'));
-  forget.addEventListener('click', async () => {
-    const yes = await appConfirm(t('confirm_forget').replace('{n}', d.display), t('confirm_forget_yes'));
-    if (!yes) return;
-    const {ok, data} = await api('/api/mesh/forget', {net: MESH_NET, device: d.id});
-    if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
-    toast(t('forgotten'));
-    loadMesh();
-  });
-  acts.appendChild(forget);
-  card.appendChild(acts);
-}
-
-function startRename(card, d){
+// startRename — имя прямо в шапке карточки: Enter или уход с поля —
+// сохранить, Esc — отменить.
+function startRename(nm, d){
   MESH_EDIT = d.id;
-  const nm = card.querySelector('.nm');
   nm.innerHTML = '';
   const input = el('input');
   input.type = 'text';
@@ -3451,7 +3741,7 @@ function startRename(card, d){
     MESH_EDIT = null;
     const v = input.value.trim();
     if (save && v && v !== d.display) renameDevice(d, v);
-    else fillDeviceCard(card, d);
+    else renderDetail();
   };
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter') finish(true);
@@ -3650,12 +3940,11 @@ $('meshJoinBtn').addEventListener('click', async () => {
   toast(t('saved'));
   loadMesh();
 });
-$('meshNetSel').addEventListener('change', e => { MESH_NET = e.target.value; MAP_SIG = ''; renderMesh(); });
-$('meshSearch').addEventListener('input', () => renderMeshDevices(meshDevices()));
+$('meshSearch').addEventListener('input', () => renderDevList());
 document.querySelectorAll('#meshFilter button').forEach(b => b.addEventListener('click', () => {
   MESH_FILTER = b.dataset.f;
   document.querySelectorAll('#meshFilter button').forEach(x => x.classList.toggle('on', x === b));
-  renderMeshDevices(meshDevices());
+  renderDevList();
 }));
 $('meshAddLinkBtn').addEventListener('click', () => {
   $('meshLinkForm').hidden = false;
@@ -3724,7 +4013,7 @@ $('secRejoinBtn').addEventListener('click', () => {
 let MAP_RESIZE = null;
 addEventListener('resize', () => {
   clearTimeout(MAP_RESIZE);
-  MAP_RESIZE = setTimeout(() => { if (TAB === 'Mesh' && MESH) renderMesh(); }, 150);
+  MAP_RESIZE = setTimeout(() => { placeMap(); if (MESH) renderMesh(); }, 150);
 });
 
 /* ---------- настройки: ёмкость сервера ---------- */
