@@ -16,6 +16,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -250,6 +251,9 @@ func meshConfig(p config.Profile, mode string) *mesh.Config {
 		Mode:          mode,
 		Via:           p.Host,
 		Hostname:      hostname,
+		// Ключ прямых соединений и список сети — на диске: без этого после
+		// перезапуска без сервера устройства друг друга не узнают.
+		StateDir: filepath.Join(config.Dir(), "mesh"),
 	}
 }
 
