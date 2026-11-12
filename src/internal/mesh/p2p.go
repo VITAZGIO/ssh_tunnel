@@ -31,7 +31,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"net/netip"
 	"os"
@@ -65,23 +64,60 @@ type directWire struct {
 	RTTMs float64 `json:"rttMs,omitempty"`
 }
 
+// p2p живёт столько же, сколько Client.Run: управляющее соединение с meshd
+// рвётся и поднимается заново, а прямые соединения при этом не трогаются.
 type p2p struct {
 	c      *Client
-	send   func(wire) error
 	pc     net.PacketConn
 	tr     *quic.Transport
 	ln     *quic.Listener
 	cert   tls.Certificate
 	fp     string
-	stun   *net.UDPAddr
 	ctx    context.Context
 	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
+	// Маяки (beacon.go).
+	bkey  []byte
+	netID string
+	bln   net.PacketConn
+	wake  chan struct{}
+
+	stunKick chan struct{}
 
 	mu       sync.Mutex
+	stun     *net.UDPAddr // STUN сервера, пока он на связи; nil — сервера нет
 	public   netip.AddrPort
 	peers    map[string]*p2pPeer
 	attempts map[string]*p2pAttempt
 	stunWait map[[12]byte]chan netip.AddrPort
+	beaconT  map[string]int64
+	checkAt  map[string]time.Time
+	replyAt  map[string]time.Time
+	dialAt   map[string]time.Time
+}
+
+// send — строка для meshd по текущему управляющему соединению.
+func (p *p2p) send(m wire) error { return p.c.sendCtrl(m) }
+
+// setSTUN — сессия с meshd началась (адрес его STUN) или кончилась (nil).
+func (p *p2p) setSTUN(a *net.UDPAddr) {
+	p.mu.Lock()
+	p.stun = a
+	if a == nil {
+		p.public = netip.AddrPort{}
+	}
+	p.mu.Unlock()
+	select {
+	case p.stunKick <- struct{}{}:
+	default:
+	}
+}
+
+func (p *p2p) stunAddr() *net.UDPAddr {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stun
 }
 
 type p2pPeer struct {
@@ -121,11 +157,13 @@ var quicConfig = &quic.Config{
 	KeepAlivePeriod:      10 * time.Second,
 }
 
-// startP2P открывает сокет прямых соединений и начинает слушать.
-func startP2P(ctx context.Context, c *Client, send func(wire) error, listen func(string) (net.PacketConn, error), stun *net.UDPAddr) (*p2p, error) {
+// startP2P открывает сокет прямых соединений и начинает слушать. Ключ —
+// постоянный (loadIdentity), если есть где его хранить.
+func startP2P(ctx context.Context, c *Client, cert tls.Certificate, fp string) (*p2p, error) {
 	// quic-go жалуется в журнал, что не смог увеличить буфер сокета, —
 	// на скорость прямых соединений между устройствами это почти не влияет.
 	os.Setenv("QUIC_GO_DISABLE_RECEIVE_BUFFER_WARNING", "true")
+	listen := c.cfg.ProbeListen
 	if listen == nil {
 		listen = func(network string) (net.PacketConn, error) { return net.ListenPacket(network, ":0") }
 	}
@@ -133,16 +171,15 @@ func startP2P(ctx context.Context, c *Client, send func(wire) error, listen func
 	if err != nil {
 		return nil, err
 	}
-	cert, fp, err := p2pCert()
-	if err != nil {
-		pc.Close()
-		return nil, err
-	}
 	pctx, cancel := context.WithCancel(ctx)
 	p := &p2p{
-		c: c, send: send, pc: pc, cert: cert, fp: fp, stun: stun, ctx: pctx, cancel: cancel,
+		c: c, pc: pc, cert: cert, fp: fp, ctx: pctx, cancel: cancel,
+		bkey: beaconKeyFor(c.cfg.Key), netID: netID(c.cfg.Key),
+		wake: make(chan struct{}, 1), stunKick: make(chan struct{}, 1),
 		peers: map[string]*p2pPeer{}, attempts: map[string]*p2pAttempt{},
 		stunWait: map[[12]byte]chan netip.AddrPort{},
+		beaconT:  map[string]int64{}, checkAt: map[string]time.Time{},
+		replyAt: map[string]time.Time{}, dialAt: map[string]time.Time{},
 	}
 	p.tr = &quic.Transport{Conn: pc}
 	p.ln, err = p.tr.Listen(p.serverTLS(), quicConfig)
@@ -151,13 +188,16 @@ func startP2P(ctx context.Context, c *Client, send func(wire) error, listen func
 		pc.Close()
 		return nil, err
 	}
+	p.wg.Add(4)
 	go p.readLoop()
 	go p.acceptLoop()
 	go p.stunLoop()
 	go p.healthLoop()
+	p.startBeacons()
 	return p, nil
 }
 
+// close гасит всё и ждёт свои циклы: после Run горутин не остаётся.
 func (p *p2p) close() {
 	p.cancel()
 	p.mu.Lock()
@@ -173,28 +213,14 @@ func (p *p2p) close() {
 	p.ln.Close()
 	p.tr.Close()
 	p.pc.Close()
+	if p.bln != nil {
+		p.bln.Close()
+	}
+	p.wg.Wait()
 }
 
 // ---------- ключи ----------
-
-// p2pCert — свежий ключ на каждое подключение к сети: хранить его незачем,
-// отпечаток и так едет через meshd в каждом предложении.
-func p2pCert() (tls.Certificate, string, error) {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return tls.Certificate{}, "", err
-	}
-	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(365 * 24 * time.Hour),
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, pub, priv)
-	if err != nil {
-		return tls.Certificate{}, "", err
-	}
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: priv}, keyFP(pub), nil
-}
+// Ключ и сертификат — store.go (loadIdentity, p2pCert).
 
 func keyFP(pub ed25519.PublicKey) string {
 	h := sha256.Sum256(pub)
@@ -242,7 +268,9 @@ func (p *p2p) serverTLS() *tls.Config {
 			if err != nil {
 				return err
 			}
-			if !p.expecting(fp) {
+			// Без сервера (маяки) звонят устройства из последнего списка
+			// meshd с запомненным отпечатком.
+			if !p.expecting(fp) && p.c.cache.byFP(fp) == "" {
 				return errors.New("неизвестное устройство")
 			}
 			return nil
@@ -283,6 +311,7 @@ func (p *p2p) expecting(fp string) bool {
 // ---------- UDP: STUN и пробивание ----------
 
 func (p *p2p) readLoop() {
+	defer p.wg.Done()
 	buf := make([]byte, 1500)
 	for {
 		n, from, err := p.tr.ReadNonQUICPacket(p.ctx, buf)
@@ -309,6 +338,8 @@ func (p *p2p) readLoop() {
 			var id [16]byte
 			copy(id[:], b[5:21])
 			p.punchPacket(b[4], id, from)
+		case isBeacon(b):
+			p.onBeacon(b, from)
 		}
 	}
 }
@@ -351,8 +382,12 @@ func (p *p2p) stunQuery() (netip.AddrPort, error) {
 		p.mu.Unlock()
 	}()
 	req := stunRequest(id, false)
+	stun := p.stunAddr()
+	if stun == nil {
+		return netip.AddrPort{}, errNoServer
+	}
 	for try := 0; try < 3; try++ {
-		if _, err := p.tr.WriteTo(req, p.stun); err != nil {
+		if _, err := p.tr.WriteTo(req, stun); err != nil {
 			return netip.AddrPort{}, err
 		}
 		select {
@@ -366,24 +401,35 @@ func (p *p2p) stunQuery() (netip.AddrPort, error) {
 	return netip.AddrPort{}, errors.New("сервер не ответил по UDP")
 }
 
+// stunLoop держит «дырку» в NAT, пока сервер на связи. Без сервера STUN
+// спрашивать не у кого — ждёт следующей сессии (stunKick).
 func (p *p2p) stunLoop() {
+	defer p.wg.Done()
 	first := true
 	for {
-		if ap, err := p.stunQuery(); err == nil {
-			p.mu.Lock()
-			p.public = ap
-			p.mu.Unlock()
-			if first {
-				// Внешний адрес известен — можно сразу искать прямые пути ко
-				// всем устройствам в сети, не дожидаясь, пока к ним пойдут.
-				first = false
-				go p.autoConnect()
+		var wait <-chan time.Time
+		if p.stunAddr() == nil {
+			first = true
+		} else {
+			if ap, err := p.stunQuery(); err == nil {
+				p.mu.Lock()
+				p.public = ap
+				p.mu.Unlock()
+				if first {
+					// Внешний адрес известен — можно сразу искать прямые пути
+					// ко всем устройствам в сети, не дожидаясь, пока к ним
+					// пойдут.
+					first = false
+					go p.autoConnect()
+				}
 			}
+			wait = time.After(20 * time.Second)
 		}
 		select {
 		case <-p.ctx.Done():
 			return
-		case <-time.After(20 * time.Second):
+		case <-p.stunKick:
+		case <-wait:
 		}
 	}
 }
@@ -434,7 +480,11 @@ func (p *p2p) routeIP() (netip.Addr, bool) {
 	if dial == nil {
 		dial = net.Dial
 	}
-	conn, err := dial("udp4", p.stun.String())
+	stun := p.stunAddr()
+	if stun == nil {
+		return netip.Addr{}, false
+	}
+	conn, err := dial("udp4", stun.String())
 	if err != nil {
 		return netip.Addr{}, false
 	}
@@ -481,6 +531,12 @@ func (p *p2p) autoConnect() {
 // неудач реже.
 func (p *p2p) connect(peerIP string, auto bool) {
 	p.mu.Lock()
+	if p.stun == nil {
+		// Сервера нет (или он старый, без прямых): сводить некому — без
+		// него пути ищут маяки.
+		p.mu.Unlock()
+		return
+	}
 	peer := p.peers[peerIP]
 	if peer == nil {
 		peer = &p2pPeer{}
@@ -505,6 +561,10 @@ func (p *p2p) connect(peerIP string, auto bool) {
 	p.mu.Unlock()
 
 	if err := p.send(wire{Op: "p2p", To: peerIP, Call: hex.EncodeToString(a.id[:]), Cands: p.candidates(), FP: p.fp}); err != nil {
+		// Сервер пропал между делом — это не неудача пробивания.
+		p.mu.Lock()
+		peer.lastTry = time.Time{}
+		p.mu.Unlock()
 		p.dropAttempt(a)
 		return
 	}
@@ -651,6 +711,7 @@ func (p *p2p) punch(a *p2pAttempt) {
 }
 
 func (p *p2p) acceptLoop() {
+	defer p.wg.Done()
 	for {
 		conn, err := p.ln.Accept(p.ctx)
 		if err != nil {
@@ -670,6 +731,12 @@ func (p *p2p) acceptLoop() {
 		}
 		p.mu.Unlock()
 		if match == nil {
+			// Без предложения через meshd — звонок по маяку: только от
+			// устройства из последнего списка с тем же отпечатком.
+			if ip := p.c.cache.byFP(fp); ip != "" {
+				p.adopt(ip, conn)
+				continue
+			}
 			conn.CloseWithError(1, "")
 			continue
 		}
@@ -693,9 +760,35 @@ func (p *p2p) adopt(peerIP string, conn quic.Connection) {
 	peer.conn, peer.fails = conn, 0
 	p.mu.Unlock()
 	p.c.log("info", fmt.Sprintf("Сеть устройств: прямое соединение с %s (%s)", peerIP, conn.RemoteAddr()))
+	// Запомнить отпечаток (рукопожатие его уже проверило) и рабочий адрес:
+	// по ним устройство найдётся без сервера.
+	fp, _ := peerFP(conn)
+	addr := ""
+	if ua, ok := conn.RemoteAddr().(*net.UDPAddr); ok {
+		if ap := ua.AddrPort(); ap.Addr().Unmap().Is4() {
+			addr = netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port()).String()
+		}
+	}
+	p.c.cache.worked(peerIP, fp, addr)
+	p.c.saveCache()
 	go p.serve(peerIP, conn)
 	p.measure(peerIP)
 	p.report()
+}
+
+// forget закрывает прямые пути к устройствам, которых больше нет в списке
+// meshd (убраны в панели).
+func (p *p2p) forget(ips []string) {
+	for _, ip := range ips {
+		p.mu.Lock()
+		peer := p.peers[ip]
+		delete(p.peers, ip)
+		p.mu.Unlock()
+		if peer != nil && peer.conn != nil {
+			peer.conn.CloseWithError(0, "")
+			p.c.log("info", "Сеть устройств: "+ip+" убран из сети — прямое соединение закрыто")
+		}
+	}
 }
 
 func (p *p2p) drop(peerIP string, conn quic.Connection, why error) {
@@ -711,6 +804,7 @@ func (p *p2p) drop(peerIP string, conn quic.Connection, why error) {
 	if gone {
 		p.c.log("info", fmt.Sprintf("Сеть устройств: прямое соединение с %s пропало (%v) — дальше через сервер", peerIP, why))
 		p.report()
+		p.kick() // без сервера — искать путь заново маяками
 	}
 }
 
@@ -870,6 +964,7 @@ func (p *p2p) ping(peerIP string) (time.Duration, bool) {
 }
 
 func (p *p2p) healthLoop() {
+	defer p.wg.Done()
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -889,6 +984,9 @@ func (p *p2p) healthLoop() {
 		}
 		p.report()
 		p.autoConnect()
+		// Не записалось с первого раза — запишется сейчас (без изменений
+		// файл не трогается).
+		p.c.saveCache()
 	}
 }
 
