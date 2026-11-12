@@ -174,21 +174,21 @@
 
   /* ---------- обзор: схема занимает свободное место ---------- */
   .ov{grid-template-columns:minmax(0,1fr);
-      grid-template-areas:"head" "tiles" "map" "status" "clients" "traffic"}
+      grid-template-areas:"head" "tiles" "map" "status" "clients" "journal" "traffic"}
   .ov > .sec-head{grid-area:head} .ov-tiles{grid-area:tiles;margin:0}
   .ov-map{grid-area:map;min-width:0} .ov-status{grid-area:status}
-  .ov-clients{grid-area:clients} .ov-traffic{grid-area:traffic}
+  .ov-clients{grid-area:clients} .ov-traffic{grid-area:traffic} .ov-journal{grid-area:journal;min-width:0}
   @media (min-width:1100px){
     .ov{grid-template-columns:minmax(0,2fr) minmax(340px,1fr);
-        grid-template-areas:"head head" "tiles tiles" "map status" "map clients" "traffic traffic"}
-    .ov.nomap{grid-template-areas:"head head" "tiles tiles" "status clients" "traffic traffic";
+        grid-template-areas:"head head" "tiles tiles" "map status" "map clients" "map journal" "traffic traffic"}
+    .ov.nomap{grid-template-areas:"head head" "tiles tiles" "status clients" "journal journal" "traffic traffic";
         grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)}
   }
   @media (min-width:1900px){
     .ov{grid-template-columns:minmax(0,2.2fr) minmax(360px,1fr) minmax(360px,1fr);
-        grid-template-areas:"head head head" "tiles tiles tiles" "map status traffic" "map clients traffic"}
+        grid-template-areas:"head head head" "tiles tiles tiles" "map status traffic" "map clients traffic" "map journal journal"}
     .ov.nomap{grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) minmax(0,1.3fr);
-        grid-template-areas:"head head head" "tiles tiles tiles" "status clients traffic"}
+        grid-template-areas:"head head head" "tiles tiles tiles" "status clients traffic" "journal journal traffic"}
   }
   .ov-map .map-wrap svg{height:clamp(360px, calc(100vh - 330px), 960px)}
   .ov.nomap .ov-map{display:none}
@@ -249,6 +249,7 @@
   .help{color:var(--dim);font-size:13px;line-height:1.55;max-width:80ch}
   .help p{margin:0 0 10px}
   .help b{color:var(--text)}
+  .acc-sec{grid-template-columns:minmax(0,1fr)}
   @media (min-width:1100px){
     .acc-sec{grid-template-columns:minmax(0,2fr) minmax(300px,1fr)}
   }
@@ -262,6 +263,77 @@
   @media (max-width:560px){.acc-rule{grid-template-columns:1fr auto 1fr}
     .acc-rule input{grid-column:1/3}}
 
+  /* ---------- режим показа ---------- */
+  .demo-banner{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 14px;padding:10px 14px;
+       border-radius:10px;border:1px dashed var(--warn);background:rgba(232,179,57,.12);font-size:13px}
+  .demo-banner b{color:var(--warn)}
+
+  /* ---------- журнал ---------- */
+  .journal{max-height:440px;overflow-y:auto}
+  .jr-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;padding:7px 6px;
+       border-bottom:1px solid var(--line);font-size:13px;border-radius:6px}
+  .jr-row:last-child{border-bottom:none}
+  .jr-row time{font:12px var(--mono);color:var(--dim);white-space:nowrap;padding-top:1px}
+  .jr-row .badge{margin-left:8px;vertical-align:1px}
+  .jr-row.denied{background:rgba(229,72,77,.08)}
+  .jr-row.denied .tx{color:var(--err);font-weight:600}
+  .jr-row.marker .tx{color:var(--dim);font-style:italic}
+
+  /* ---------- сети ---------- */
+  .net-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+  .card h1.net-title{display:flex;align-items:center;gap:4px;margin:0;min-width:0}
+  .net-name{cursor:text;overflow:hidden;text-overflow:ellipsis}
+  .net-name.unnamed{color:var(--dim)}
+  input.net-name{font-size:15px;padding:5px 8px;min-width:min(260px,70vw)}
+  .net-note{margin:10px 0 0!important}
+
+  /* ---------- доступ: простой режим ---------- */
+  .acc-main,.acc-side{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;align-content:start;min-width:0}
+  .sm-status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border-radius:9px;
+       margin-bottom:12px;font-size:13px}
+  .sm-status.on{background:rgba(47,191,113,.10)} .sm-status.on b{color:var(--ok)}
+  .sm-status.off{background:rgba(232,179,57,.14)} .sm-status.off b{color:var(--warn)}
+  .sm-status span{color:var(--dim);flex:1;min-width:180px}
+  .sm-table{border-collapse:collapse;font-size:12.5px}
+  .sm-table th{font-size:11px;color:var(--dim);font-weight:600;padding:4px 5px;max-width:92px;
+       overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+  .sm-table th.l,.sm-table td.l{text-align:left}
+  .sm-table td{padding:3px 5px;text-align:center;border-top:1px solid var(--line)}
+  .sm-table td.l{white-space:nowrap;padding-right:14px}
+  .sm-table td.l .nm{font-weight:600;margin-right:4px}
+  .sm-table td.l .badge{margin-left:4px}
+  .cell{width:34px;height:28px;border-radius:7px;border:1px solid var(--line);background:var(--card2);
+       color:var(--dim);font:inherit;font-weight:700;cursor:pointer}
+  .cell:hover{border-color:var(--accent)}
+  .cell.y{background:color-mix(in srgb, var(--ok) 20%, var(--card2));
+       border-color:color-mix(in srgb, var(--ok) 50%, var(--line));color:var(--ok)}
+  .cell.part{color:var(--warn)}
+  .cell.lock{cursor:not-allowed;border-style:dashed;opacity:.8}
+  .cell.self{display:inline-block;width:34px;border:0;background:none;line-height:28px;cursor:default}
+  #smList{display:none}
+  @media (max-width:760px){ #smTable,.sm-tnote{display:none} #smList{display:grid;gap:10px} }
+  .sm-item{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--card2)}
+  .sm-ih{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+  .sm-checks{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px}
+  .sm-checks label{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+  .sm-checks label.lock{opacity:.7;cursor:not-allowed}
+  .sm-checks input{accent-color:var(--accent-muted)}
+  .card p.sm-counts{margin:12px 0 0}
+  .sm-k{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin:12px 0 6px}
+  .sm-k > span{margin-right:4px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;max-width:100%}
+  .seg button{padding:6px 12px;border:0;background:var(--card2);color:var(--dim);font:inherit;
+       font-size:12.5px;font-weight:600;cursor:pointer}
+  .seg button + button{border-left:1px solid var(--line)}
+  .seg button.on{background:var(--accent-muted);color:#fff}
+  .ck-form{display:grid;gap:8px}
+  .ck-form select{width:100%;min-width:0}
+  .ck-form label{font-size:12px;color:var(--dim)}
+  .verdict{margin-top:4px;padding:10px 12px;border-radius:9px;font-size:13px;background:var(--card2);line-height:1.45}
+  .verdict.y{background:rgba(47,191,113,.12);color:var(--ok)}
+  .verdict.n{background:rgba(229,72,77,.12);color:var(--err)}
+  #confirmText{white-space:pre-line}
+
   /* ---------- QR: маленький в карточке, во весь экран по нажатию ---------- */
   #qrThumb{width:190px;height:190px;border-radius:8px;background:#fff;padding:8px;
            cursor:zoom-in}
@@ -274,7 +346,7 @@
                   border-radius:10px;border:1px solid var(--line);background:var(--card);
                   color:var(--text);font-size:22px;line-height:1;cursor:pointer}
   .dialog{background:var(--card);border:1px solid var(--line);border-radius:13px;
-          width:100%;max-width:360px;padding:18px}
+          width:100%;max-width:440px;padding:18px}
 
   .row-inline{display:flex;gap:8px;flex-wrap:wrap}
   .chk{display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer}
@@ -590,6 +662,9 @@
   <main>
     <!-- Служба сети не отвечает — видно в любом разделе. -->
     <div class="msg err" id="meshAdminErr" hidden></div>
+    <!-- Режим показа (ssh_tunnel_panel -demo): данные выдуманы. -->
+    <div class="demo-banner" id="demoBanner" hidden><b data-i18n="demo_title">Режим показа</b>
+      <span data-i18n="demo_text">Данные выдуманы и живут только в памяти — на сервере ничего не меняется.</span></div>
 
     <!-- ======== ОБЗОР ======== -->
     <section id="tabHome" class="ov nomap">
@@ -680,6 +755,19 @@
         <div class="scroll-x">
           <table class="list" id="trafficByClient"></table>
         </div>
+      </div>
+
+      <!-- журнал сети устройств: новые сверху -->
+      <div class="card ov-journal" id="jrCard" hidden>
+        <h1><span data-i18n="jr_title">Журнал</span><button class="hint" data-hint="hint_jr">?</button></h1>
+        <div class="chips" id="jrFilter" style="margin-bottom:10px">
+          <button data-f="all" data-i18n="jr_all">Все</button>
+          <button data-f="conn" data-i18n="jr_conn">Подключения</button>
+          <button data-f="denied" data-i18n="jr_denied">Отказы</button>
+        </div>
+        <div class="msg err" id="jrOldHint" hidden></div>
+        <div class="msg err" id="jrErr" hidden></div>
+        <div class="journal" id="journal"></div>
       </div>
     </section>
 
@@ -809,32 +897,68 @@
     <section id="tabAccess" class="acc-sec" hidden>
       <div class="sec-head">
         <h1 class="page-title" data-i18n="nav_access">Доступ</h1>
-        <p class="page-sub" data-i18n="access_sub">Кто к кому может подключаться в сети устройств.
-          Группы конкретного устройства — в его карточке в разделе «Устройства», кнопка «Права».</p>
+        <p class="page-sub" data-i18n="access_sub">Кто к кому может подключаться в сети устройств.</p>
       </div>
-      <!-- права доступа в сети устройств -->
-      <div class="card" id="accessCard">
-        <h1><span data-i18n="acc_title">Права доступа</span><button class="hint" data-hint="hint_acc">?</button></h1>
-        <div id="accessMsg"></div>
-        <label class="acc-line"><input type="checkbox" id="accEnabled"> <span data-i18n="acc_enabled">Правила включены</span></label>
-        <h2 data-i18n="acc_groups">Группы</h2>
-        <div id="accGroups" class="acc-checks"></div>
-        <div class="row-inline">
-          <input type="text" id="accNewGroup" data-i18n-ph="acc_new_group_ph" placeholder="Новая группа" style="flex:1">
-          <button class="btn ghost small" id="accAddGroupBtn" data-i18n="acc_add">Добавить</button>
+      <div class="acc-main">
+        <!-- простой режим: роли и галочки поверх групп и правил -->
+        <div class="card" id="smCard">
+          <h1><span data-i18n="sm_title">Кто к кому может подключаться</span><button class="hint" data-hint="hint_sm">?</button></h1>
+          <div id="smStatus"></div>
+          <div id="smMsg"></div>
+          <div class="msg err" id="smOldHint" hidden></div>
+          <div id="smOff" hidden>
+            <p class="note" data-i18n="sm_off_note">Простой режим ещё не включён.</p>
+            <button class="btn" id="smEnableBtn" data-i18n="sm_enable">Включить простой режим</button>
+          </div>
+          <div id="smBody" hidden>
+            <p class="note sm-tnote" data-i18n="sm_table_note">Строка — кто подключается, столбец — к кому. Нажми на клетку.</p>
+            <p class="note" id="smShared" hidden></p>
+            <p class="note" id="smForeign" hidden></p>
+            <div class="scroll-x" id="smTable"></div>
+            <div id="smList"></div>
+            <div class="empty" id="smEmpty" data-i18n="sm_empty" hidden>В этой сети пока нет устройств</div>
+            <p class="note sm-counts" id="smCounts"></p>
+          </div>
         </div>
-        <h2 style="margin-top:14px"><span data-i18n="acc_rules">Правила</span><button class="hint" data-hint="hint_acc_rules">?</button></h2>
-        <div id="accRules"></div>
-        <div class="row-inline" style="margin-top:10px">
-          <button class="btn ghost small" id="accAddRuleBtn" data-i18n="acc_add_rule">+ Правило</button>
-          <button class="btn" id="accSaveBtn" data-i18n="save">Сохранить</button>
+        <!-- права доступа в сети устройств -->
+        <div class="card" id="accessCard" hidden>
+          <h1><span data-i18n="acc_adv">Расширенное: группы и правила</span><button class="hint" data-hint="hint_acc">?</button></h1>
+          <div id="accessMsg"></div>
+          <label class="acc-line"><input type="checkbox" id="accEnabled"> <span data-i18n="acc_enabled">Правила включены</span></label>
+          <h2 data-i18n="acc_groups">Группы</h2>
+          <div id="accGroups" class="acc-checks"></div>
+          <div class="row-inline">
+            <input type="text" id="accNewGroup" data-i18n-ph="acc_new_group_ph" placeholder="Новая группа" style="flex:1">
+            <button class="btn ghost small" id="accAddGroupBtn" data-i18n="acc_add">Добавить</button>
+          </div>
+          <h2 style="margin-top:14px"><span data-i18n="acc_rules">Правила</span><button class="hint" data-hint="hint_acc_rules">?</button></h2>
+          <div id="accRules"></div>
+          <div class="row-inline" style="margin-top:10px">
+            <button class="btn ghost small" id="accAddRuleBtn" data-i18n="acc_add_rule">+ Правило</button>
+            <button class="btn" id="accSaveBtn" data-i18n="save">Сохранить</button>
+          </div>
         </div>
       </div>
-      <!-- Те же тексты, что в подсказках «?», — раскрытыми: место справа
-           всё равно свободно. -->
-      <div class="card acc-help">
-        <h1 data-i18n="acc_help_title">Как это работает</h1>
-        <div class="help" id="accHelp"></div>
+      <div class="acc-side">
+        <div class="card">
+          <h1><span data-i18n="ck_title">Проверка</span><button class="hint" data-hint="hint_ck">?</button></h1>
+          <div class="ck-form">
+            <label for="ckFrom" data-i18n="ck_from">Кто подключается</label><select id="ckFrom"></select>
+            <label for="ckTo" data-i18n="ck_to">К кому</label><select id="ckTo"></select>
+            <label for="ckPort" data-i18n="ck_port">Что открывает</label><select id="ckPort"></select>
+            <div class="verdict" id="ckVerdict"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h1 data-i18n="sm_roles_title">Роли</h1>
+          <div class="help" id="smRolesHelp"></div>
+          <button class="btn ghost small" id="accAdvBtn" style="margin-top:6px" data-i18n="acc_adv">Расширенное: группы и правила</button>
+        </div>
+        <!-- Те же тексты, что в подсказках «?», — раскрытыми. -->
+        <div class="card acc-help">
+          <h1 data-i18n="acc_help_title">Как это работает</h1>
+          <div class="help" id="accHelp"></div>
+        </div>
       </div>
     </section>
 
@@ -850,6 +974,7 @@
         <p class="note" id="netsNoneText" style="margin:0"></p>
       </div>
 
+      <div class="msg err" id="netsOldHint" hidden></div>
       <div class="cards" id="meshNets"></div>
 
       <div class="cards">
@@ -1687,9 +1812,11 @@ function applyI18N(){
   // Списки собираются кодом, поэтому их надо перерисовать целиком.
   // Справка в «Доступе» — те же тексты, что в «?» (свои строки, не ввод людей).
   $('accHelp').innerHTML = t('hint_acc') + t('hint_acc_rules');
+  $('smRolesHelp').innerHTML = t('sm_roles_help');
   if (!$('viewMain').hidden){
     renderAll();
-    if (MESH){ MAP_SIG = ''; $('netChips').dataset.sig = ''; renderMesh(); }
+    if (MESH){ MAP_SIG = ''; $('netChips').dataset.sig = ''; $('ckFrom').dataset.sig = ''; renderMesh(); }
+    renderJournal();
   }
 }
 $('lang').addEventListener('change', e => {
@@ -1796,7 +1923,9 @@ async function loadSession(){
   if (!data.authenticated){ showView('Login'); return; }
   if (data.mustChange){ showView('MustChange'); return; }
   showView('Main');
+  $('demoBanner').hidden = !data.demo;
   showTab(TAB);
+  loadAccess();
   // Данные сети нужны почти всем разделам: схема и плитки, список
   // устройств, сети, роль сервера в настройках.
   loadMesh();
@@ -2108,6 +2237,9 @@ function renderDetail(){
     box.appendChild(part);
   }
 
+  // --- доступ: роль и «куда может ходить» ---
+  renderDevAccess(box, d);
+
   // --- вход на сервер (клиент SSH) ---
   const part = el('div', 'dpart');
   const h = el('h2');
@@ -2159,14 +2291,29 @@ async function loadAccess(){
   const {ok, data} = await api('/api/access');
   if (!ok) return;
   ACCESS = data.access || {};
+  // Как на сервере — для простого режима; ACCESS ниже получает заготовку
+  // «все → все» для редактора.
+  ACCESS_RAW = JSON.parse(JSON.stringify(ACCESS));
+  ACCESS_RAW.groups = ACCESS_RAW.groups || [];
+  ACCESS_RAW.rules = ACCESS_RAW.rules || [];
   ACCESS.groups = ACCESS.groups || [];
   ACCESS.rules = ACCESS.rules || [];
   // Первое включение: начинаем с «все → все», чтобы ничего не отвалилось.
   if (!ACCESS.rules.length && !ACCESS.enabled) ACCESS.rules = [{from:'*', to:'*', ports:''}];
   renderAccess();
+  renderSimple();
+  renderDetail();
 }
 function groupLabel(g){
-  return g === '*' ? t('acc_all') : g === '@servers' ? t('acc_servers') : g;
+  if (g === '*') return t('acc_all');
+  if (g === '@servers') return t('acc_servers');
+  // Группы простого режима — по-человечески: роль или имя устройства.
+  if (SM_ROLE_OF[g]) return t('sm_role_' + SM_ROLE_OF[g]) + ' (' + g + ')';
+  if (SM_PERSONAL.test(g)){
+    const c = CLIENTS.find(x => x.username === g.slice(1));
+    if (c) return c.name + ' (' + t('sm_personal_g') + ')';
+  }
+  return g;
 }
 function accNote(box, key){
   const e = document.createElement('span');
@@ -2181,7 +2328,7 @@ function renderAccess(){
   ACCESS.groups.forEach(g => {
     const chip = document.createElement('span');
     chip.className = 'g';
-    chip.textContent = g;
+    chip.textContent = groupLabel(g);
     const x = document.createElement('button');
     x.textContent = '×';
     x.addEventListener('click', () => {
@@ -2265,7 +2412,7 @@ function openClientAccess(id){
     cb.type = 'checkbox'; cb.value = g;
     cb.checked = (c.groups || []).includes(g);
     l.appendChild(cb);
-    l.appendChild(document.createTextNode(g));
+    l.appendChild(document.createTextNode(groupLabel(g)));
     box.appendChild(l);
   });
   if (!ACCESS.groups.length) accNote(box, 'acc_no_groups');
@@ -2772,6 +2919,7 @@ async function loadMesh(){
   if (ok){
     MESH = data;
     renderMesh();
+    if (!JR.timer && !JR.busy) loadJournal();
   }
   scheduleMesh();
 }
@@ -2834,6 +2982,7 @@ function renderMesh(){
   $('netsNoneText').textContent = isMain ? '' : t(role === 'secondary' ? 'nets_secondary' : 'nets_off');
   renderNetChips();
   renderNets();
+  if (isMain){ fillCheckSelects(); renderSimple(); }
   if (isMain) renderMeshMain(); else $('meshAdminErr').hidden = true;
   if (role === 'secondary') renderMeshSecondary();
   renderDevList();
@@ -2862,37 +3011,6 @@ function renderNetChips(){
     box.appendChild(b);
   });
 }
-function renderNets(){
-  const box = $('meshNets');
-  box.innerHTML = '';
-  const nets = mainNets();
-  if (nets.length) meshDevices();
-  nets.forEach((n, i) => {
-    const devs = n.devices || [];
-    const card = el('div', 'card');
-    const h = el('h1', '', netLabel(n, i));
-    if (n.id === MESH_NET && nets.length > 1) h.appendChild(el('span', 'badge ok', t('net_shown'))).style.marginLeft = '8px';
-    if (!devs.length) h.appendChild(el('span', 'badge dim', t('net_empty'))).style.marginLeft = '8px';
-    card.appendChild(h);
-    const kv = (k, v) => {
-      const r = el('div', 'kv');
-      r.appendChild(el('span', 'k', k));
-      r.appendChild(el('span', 'v', v));
-      card.appendChild(r);
-    };
-    kv(t('net_devices'), String(devs.length));
-    kv(t('net_online'), String(devs.filter(d => d.online).length));
-    kv(t('net_id'), n.id.length > 16 ? n.id.slice(0, 16) + '…' : n.id);
-    if (nets.length > 1 && n.id !== MESH_NET){
-      const b = el('button', 'btn ghost small', t('net_show'));
-      b.style.marginTop = '12px';
-      b.addEventListener('click', () => pickNet(n.id));
-      card.appendChild(b);
-    }
-    box.appendChild(card);
-  });
-}
-
 /* ---------- где стоит схема ---------- */
 /* Схема одна (у неё живая раскладка): обычно в «Обзоре», а в «Устройствах»
    на экране от 1700 px — третьей колонкой. */
@@ -4049,6 +4167,994 @@ $('capSaveBtn').addEventListener('click', async () => {
   toast(t('cap_saved').replace('{n}', data.maxDevices));
 });
 
+/* ---------- тексты: сети, журнал, простой режим доступа, режим показа ---------- */
+Object.assign(I18N.ru, {
+  demo_title:'Режим показа', demo_text:'Данные выдуманы и живут только в памяти — на сервере ничего не меняется.',
+  old_meshd:'Служба сети (meshd) на сервере старая: имена и удаление сетей, журнал и проверка доступа заработают после обновления — «Настройки» → «Обновить meshd». Остальное работает как раньше.',
+
+  net_rename:'Переименовать сеть', net_name_ph:'имя сети', net_renamed:'Имя сети сохранено',
+  net_name_cleared:'Имя убрано — сеть снова называется по номеру',
+  net_of:'из', net_online_short:'в сети', net_created:'Появилась', net_autoremove:'Удалится сама',
+  net_empty_note:'В сети нет устройств. Если ни одно не подключится, служба сети удалит её сама через 7 дней после того, как она опустела.',
+  net_empty_note_old:'В сети нет устройств.',
+  net_delete:'Удалить сеть', net_deleted:'Сеть удалена',
+  net_del_confirm:'Удалить сеть «{name}»?\n\nОтключатся все её устройства: {n} (сейчас в сети — {on}).\n\nВажно: сеть вернётся — пустая и без имени — как только любое из этих устройств снова подключится со своим ключом сети. Чтобы она не вернулась, сначала убери ключ этой сети в программе на каждом из них (или удали их из «Устройств»).',
+  net_del_confirm_empty:'Удалить пустую сеть «{name}»?',
+
+  jr_title:'Журнал', jr_all:'Все', jr_conn:'Подключения', jr_denied:'Отказы',
+  jr_none:'Событий пока нет', jr_none_filter:'Таких событий пока нет',
+  hint_jr:'<p>Что происходило в сети устройств: кто подключился и отключился, кому отказано по правилам доступа, что переименовали и удалили.</p><p>Журнал хранит служба сети в памяти: после её перезапуска он начинается заново, а уже показанные строки остаются здесь.</p>',
+  ev_restart:'Служба сети перезапустилась — журнал начат заново',
+  ev_connect:'{d} подключилось', ev_disconnect:'{d} отключилось', ev_new:'Новое устройство: {d}',
+  ev_denied:'Отказано: {d} → {p}, {port}', ev_rename_dev:'Устройство переименовано: «{d}»',
+  ev_rename_net:'Сеть {n} теперь называется «{t}»', ev_rename_net_clear:'У сети {n} убрано имя',
+  ev_forget:'{d} убрано из сети', ev_net_delete:'Сеть «{n}» удалена',
+  ev_server_up:'Сервер {s} на связи', ev_server_down:'Сервер {s} пропал',
+  port_ssh:'SSH', port_rdp:'Удалённый стол', port_files:'Файлы', port_clip:'Общий буфер', port_any:'любой порт', port_n:'порт {n}',
+
+  access_sub:'Кто к кому может подключаться в сети устройств. Простой режим — роли и галочки; группы и правила целиком — в «Расширенном».',
+  sm_title:'Кто к кому может подключаться',
+  hint_sm:'<p>Права принадлежат <b>пользователю SSH</b>, под которым устройство вошло на сервер, а не самому устройству: сервер узнаёт его по ключу, подделать нельзя.</p><p>Под капотом это те же группы и правила, что в «Расширенном»: простой режим заводит группы с «~» и правила между ними. Правила, сделанные руками, он не трогает — что они разрешают, отмечено пунктирной рамкой и здесь не снимается.</p>',
+  sm_on:'Правила включены', sm_on_d:'Устройства видят и открывают только то, что разрешено ниже.',
+  sm_off:'Правила выключены', sm_off_d:'Сейчас все видят всех: правила ниже начнут действовать, когда их включишь.',
+  sm_turn_on:'Включить правила', sm_turn_off:'Выключить (все видят всех)',
+  sm_enable_norules:'Правил пока нет: после включения устройства сети перестанут видеть друг друга. Включить?',
+  sm_off_note:'Простой режим ещё не включён: права заданы только группами и правилами в «Расширенном» (или не заданы вовсе).',
+  sm_enable:'Включить простой режим', sm_enable_yes:'Включить',
+  sm_enable_empty:'Каждое устройство получит роль «Моё устройство»: ходит ко всем, кроме гостей. Дальше — галочками и ролями.',
+  sm_enable_default:'Сейчас действует одно правило «Все → Все» — оно разрешает всё, и галочкам нечего было бы снимать. Оно будет заменено ролью «Моё устройство» у каждого устройства: разрешено останется то же самое.',
+  sm_enable_foreign:'Устройства, пришедшие через другой сервер не под своим пользователем этой панели, после замены сами подключаться не смогут — к ним можно будет только тем, у кого «Ко всем».',
+  sm_enable_hand:'В правах уже есть правила, сделанные руками: {n}. Простой режим их не меняет и не удаляет — всё, что они разрешают, будет отмечено пунктиром и в таблице не снимается. Сейчас ничего не изменится: устройства только получат роль «Моё устройство» как метку.',
+  sm_enable_strange:'Группы с «~» в начале простой режим считает своими. Эти он не узнаёт и оставит как есть: {list}.',
+  sm_table_note:'Строка — кто подключается, столбец — к кому. Нажми на клетку: ✓ — можно, · — нельзя, ◐ — только на часть портов (правило из «Расширенного»).',
+  sm_who_whom:'кто ↓  к кому →', sm_servers:'Серверы', sm_servers_d:'Серверы сети (сам этот сервер и побочные), если к ним пускают — «Сети» → «Сервер в сети устройств»',
+  sm_shared:'Одной строкой — устройства под одним пользователем SSH (один файл настроек на нескольких машинах): сервер их не различает, права у них общие. Это: {list}.',
+  sm_foreign:'Без своих галочек — устройства, вошедшие через другой сервер не под пользователем этой панели: {list}. К ним можно только с «Ко всем» или по правилам из «Расширенного».',
+  sm_foreign_tag:'с другого сервера', sm_n_dev:'{n} устр.', sm_self:'между собой',
+  sm_empty:'В этой сети пока нет устройств',
+  sm_counts:'Групп: {g} из {gm}, правил: {r} из {rm}.',
+  sm_partial:'Разрешено только на часть портов — правилом из «Расширенного». Нажми, чтобы разрешить на все.',
+  sm_locked:'Разрешено правилом из «Расширенного»: {r}. Снять его можно только там.',
+  sm_locked_foreign:'Это устройство вошло не под пользователем этой панели — его права задаются только правилами из «Расширенного».',
+  sm_err_groups:'Не сохранено: понадобилось бы групп {n}, а можно не больше {max}. Убери лишние группы в «Расширенном» или дай устройствам одинаковые роли.',
+  sm_err_rules:'Не сохранено: понадобилось бы правил {n}, а можно не больше {max}. Чем больше устройств с одинаковыми галочками и ролями, тем меньше правил.',
+  sm_err_verify:'Не сохранено: эти галочки не получается точно записать правилами (мешают правила из «Расширенного»). Ничего не изменилось.',
+  sm_role:'Роль', sm_role_mine:'Моё устройство', sm_role_server:'Сервер', sm_role_guest:'Гость', sm_role_none:'роль не выбрана',
+  sm_role_mine_d:'Ходит ко всем, кроме гостей', sm_role_server_d:'К нему ходят, сам никуда', sm_role_guest_d:'Только интернет: сеть не видит, к нему никто',
+  sm_personal_g:'личная',
+  sm_roles_title:'Роли',
+  sm_roles_help:'<p><b>Моё устройство</b> — ходит ко всем, кроме гостей.</p><p><b>Сервер</b> — к нему ходят, сам никуда.</p><p><b>Гость</b> — только интернет: сеть не видит, к нему никто.</p><p>Роль — заготовка: после неё галочки можно поправить. Роль и галочки — в карточке устройства («Устройства») или в таблице.</p>',
+  sm_where:'Куда может ходить', sm_to_all:'Ко всем', sm_to_none:'Никуда',
+  dev_part_access:'Доступ',
+  sm_dev_inactive:'Простой режим доступа выключен — права заданы группами и правилами.',
+  sm_open_access:'Открыть «Доступ»',
+  sm_dev_shared:'Права общие с {list}: под одним пользователем SSH.',
+  acc_adv:'Расширенное: группы и правила',
+  ck_title:'Проверка', ck_from:'Кто подключается', ck_to:'К кому', ck_port:'Что открывает',
+  hint_ck:'Спрашивает саму службу сети — ответ тот же, что получит устройство при соединении.',
+  ck_need_two:'Нужны хотя бы два устройства в сети', ck_same:'Это одно и то же устройство',
+  ck_yes:'Да: {a} может подключиться к {b} — {port}.', ck_by_rule:'Правило №{n}: {r}.',
+  ck_yes_off:'Да: правила выключены — сейчас все видят всех.', ck_no:'Нет: для {a} → {b} ({port}) разрешения нет.',
+  ck_server:'Серверы сами соединения не открывают.', ck_unknown:'Устройство не найдено в сети — возможно, его только что убрали.',
+  ck_visible:'В списке друг друга они видны: в обратную сторону что-то разрешено.',
+});
+Object.assign(I18N.en, {
+  demo_title:'Demo mode', demo_text:'The data is made up and lives only in memory — nothing changes on the server.',
+  old_meshd:'The device network service (meshd) on the server is old: network names and deletion, the journal and the access check will work after an update — Settings → “Update meshd”. Everything else works as before.',
+
+  net_rename:'Rename network', net_name_ph:'network name', net_renamed:'Network name saved',
+  net_name_cleared:'Name removed — the network is called by its number again',
+  net_of:'of', net_online_short:'online', net_created:'Created', net_autoremove:'Removes itself',
+  net_empty_note:'No devices in this network. If none connects, the network service removes it by itself 7 days after it became empty.',
+  net_empty_note_old:'No devices in this network.',
+  net_delete:'Delete network', net_deleted:'Network deleted',
+  net_del_confirm:'Delete network “{name}”?\n\nAll its devices will be disconnected: {n} (online now — {on}).\n\nImportant: the network comes back — empty and unnamed — as soon as any of these devices connects again with its network key. To keep it gone, first remove this network key in the app on each of them (or delete them in “Devices”).',
+  net_del_confirm_empty:'Delete empty network “{name}”?',
+
+  jr_title:'Journal', jr_all:'All', jr_conn:'Connections', jr_denied:'Refusals',
+  jr_none:'No events yet', jr_none_filter:'No such events yet',
+  hint_jr:'<p>What happened in the device network: who connected and disconnected, who was refused by access rules, what was renamed or deleted.</p><p>The network service keeps the journal in memory: after a restart it starts over, rows already shown stay here.</p>',
+  ev_restart:'The network service restarted — the journal started over',
+  ev_connect:'{d} connected', ev_disconnect:'{d} disconnected', ev_new:'New device: {d}',
+  ev_denied:'Refused: {d} → {p}, {port}', ev_rename_dev:'Device renamed: “{d}”',
+  ev_rename_net:'Network {n} is now called “{t}”', ev_rename_net_clear:'Network {n} name removed',
+  ev_forget:'{d} removed from the network', ev_net_delete:'Network “{n}” deleted',
+  ev_server_up:'Server {s} is online', ev_server_down:'Server {s} went offline',
+  port_ssh:'SSH', port_rdp:'Remote desktop', port_files:'Files', port_clip:'Shared clipboard', port_any:'any port', port_n:'port {n}',
+
+  access_sub:'Who can connect to whom in the device network. Simple mode — roles and checkboxes; full groups and rules — in “Advanced”.',
+  sm_title:'Who can connect to whom',
+  hint_sm:'<p>Rights belong to the <b>SSH user</b> the device logged in with, not to the device itself: the server knows it by its key, it cannot be faked.</p><p>Under the hood these are the same groups and rules as in “Advanced”: simple mode creates groups starting with “~” and rules between them. Rules made by hand are left alone — what they allow has a dashed border and cannot be unticked here.</p>',
+  sm_on:'Rules are on', sm_on_d:'Devices see and open only what is allowed below.',
+  sm_off:'Rules are off', sm_off_d:'Right now everyone sees everyone: the rules below apply once you turn them on.',
+  sm_turn_on:'Turn rules on', sm_turn_off:'Turn off (everyone sees everyone)',
+  sm_enable_norules:'There are no rules yet: once turned on, devices will stop seeing each other. Turn on?',
+  sm_off_note:'Simple mode is not on yet: rights are set only by groups and rules in “Advanced” (or not at all).',
+  sm_enable:'Turn on simple mode', sm_enable_yes:'Turn on',
+  sm_enable_empty:'Every device gets the “My device” role: it reaches everyone except guests. Then — checkboxes and roles.',
+  sm_enable_default:'There is one rule “All → All” now — it allows everything, so there would be nothing to untick. It will be replaced by the “My device” role on every device: exactly the same stays allowed.',
+  sm_enable_foreign:'Devices that came through another server not under their own user of this panel will not be able to connect by themselves after the replacement — only devices with “To all” will reach them.',
+  sm_enable_hand:'There are hand-made rules already: {n}. Simple mode does not change or delete them — what they allow gets a dashed border and cannot be unticked in the table. Nothing changes now: devices only get the “My device” role as a label.',
+  sm_enable_strange:'Simple mode treats groups starting with “~” as its own. It does not recognise these and leaves them as they are: {list}.',
+  sm_table_note:'Row — who connects, column — to whom. Tap a cell: ✓ — allowed, · — not, ◐ — only some ports (a rule from “Advanced”).',
+  sm_who_whom:'who ↓  to whom →', sm_servers:'Servers', sm_servers_d:'Network servers (this one and secondary ones), if devices are let in — Networks → “Server in the device network”',
+  sm_shared:'One row — devices under one SSH user (one settings file on several machines): the server cannot tell them apart, their rights are shared. These: {list}.',
+  sm_foreign:'No own checkboxes — devices that came through another server not under a user of this panel: {list}. Only “To all” or rules from “Advanced” reach them.',
+  sm_foreign_tag:'via another server', sm_n_dev:'{n} dev.', sm_self:'among themselves',
+  sm_empty:'No devices in this network yet',
+  sm_counts:'Groups: {g} of {gm}, rules: {r} of {rm}.',
+  sm_partial:'Allowed only on some ports — by a rule from “Advanced”. Tap to allow all ports.',
+  sm_locked:'Allowed by a rule from “Advanced”: {r}. It can only be removed there.',
+  sm_locked_foreign:'This device did not log in under a user of this panel — its rights come only from rules in “Advanced”.',
+  sm_err_groups:'Not saved: it would take {n} groups, the limit is {max}. Remove extra groups in “Advanced” or give devices the same roles.',
+  sm_err_rules:'Not saved: it would take {n} rules, the limit is {max}. The more devices share roles and checkboxes, the fewer rules.',
+  sm_err_verify:'Not saved: these checkboxes cannot be written as rules exactly (rules from “Advanced” get in the way). Nothing changed.',
+  sm_role:'Role', sm_role_mine:'My device', sm_role_server:'Server', sm_role_guest:'Guest', sm_role_none:'no role',
+  sm_role_mine_d:'Reaches everyone except guests', sm_role_server_d:'Others reach it, it reaches nobody', sm_role_guest_d:'Internet only: does not see the network, nobody reaches it',
+  sm_personal_g:'own',
+  sm_roles_title:'Roles',
+  sm_roles_help:'<p><b>My device</b> — reaches everyone except guests.</p><p><b>Server</b> — others reach it, it reaches nobody.</p><p><b>Guest</b> — internet only: does not see the network, nobody reaches it.</p><p>A role is a starting point: adjust the checkboxes afterwards. Role and checkboxes — in the device card (“Devices”) or in the table.</p>',
+  sm_where:'May connect to', sm_to_all:'To all', sm_to_none:'Nowhere',
+  dev_part_access:'Access',
+  sm_dev_inactive:'Simple access mode is off — rights are set by groups and rules.',
+  sm_open_access:'Open “Access”',
+  sm_dev_shared:'Rights are shared with {list}: one SSH user.',
+  acc_adv:'Advanced: groups and rules',
+  ck_title:'Check', ck_from:'Who connects', ck_to:'To whom', ck_port:'What it opens',
+  hint_ck:'Asks the network service itself — the answer is the same a device gets when connecting.',
+  ck_need_two:'At least two devices are needed in the network', ck_same:'This is the same device',
+  ck_yes:'Yes: {a} can connect to {b} — {port}.', ck_by_rule:'Rule #{n}: {r}.',
+  ck_yes_off:'Yes: rules are off — everyone sees everyone.', ck_no:'No: there is no permission for {a} → {b} ({port}).',
+  ck_server:'Servers do not open connections themselves.', ck_unknown:'Device not found in the network — maybe it was just removed.',
+  ck_visible:'They do see each other in the list: something is allowed the other way.',
+});
+
+/* ======================================================================
+   Сети, журнал и простой режим доступа (заход 2, ТЗ 5)
+   ====================================================================== */
+
+/* ---------- старый meshd ---------- */
+// Старый meshd отвечает на новые ручки текстом meshsvc.ErrUnsupported —
+// страница показывает подсказку обновить meshd и работает дальше.
+const OLD_MESHD = 'эта версия meshd не умеет этого';
+let OLD_SEEN = false;
+function isOldMeshd(data){
+  const old = !!(data && typeof data.error === 'string' && data.error.startsWith(OLD_MESHD));
+  if (old && !OLD_SEEN){ OLD_SEEN = true; renderOldHints(); }
+  return old;
+}
+function meshErr(data){ return isOldMeshd(data) ? t('old_meshd') : errOf(data); }
+// Старый meshd не присылает дату появления сети — так его видно и без ошибки.
+function oldMeshdLikely(){
+  const nets = mainNets();
+  return OLD_SEEN || (nets.length > 0 && nets.every(n => !n.created));
+}
+function renderOldHints(){
+  const old = oldMeshdLikely();
+  ['netsOldHint', 'jrOldHint', 'smOldHint'].forEach(id => {
+    const e = $(id);
+    if (!e) return;
+    e.hidden = !old;
+    e.textContent = t('old_meshd');
+  });
+}
+document.querySelectorAll('[data-go-settings]').forEach(b => b.addEventListener('click', () => showTab('Settings')));
+
+// Текст ошибки сервера: перевод по коду, если он есть, иначе как прислали.
+function errOf(data){
+  const code = (data && data.error) || 'internal';
+  return (I18N[LANG] && I18N[LANG]['err_' + code]) || (code === 'internal' ? t('err_internal') : code);
+}
+function fill(key, vals){
+  let s = t(key);
+  Object.keys(vals || {}).forEach(k => { s = s.split('{' + k + '}').join(vals[k]); });
+  return s;
+}
+function fmtDay(unix){
+  if (!unix) return '—';
+  return new Date(unix * 1000).toLocaleDateString(LANG === 'ru' ? 'ru-RU' : 'en-US', {day:'numeric', month:'long', year:'numeric'});
+}
+
+/* ---------- раздел «Сети»: имя, удаление ---------- */
+const NET_TTL = 7 * 86400; // пустая сеть удаляется сама через 7 дней (meshd)
+let NET_EDIT = null;       // id сети, которую сейчас переименовывают
+
+function renderNets(){
+  const box = $('meshNets');
+  renderOldHints();
+  // Идёт ввод имени — не смахиваем поле очередным опросом.
+  if (NET_EDIT && box.querySelector('input.net-name')) return;
+  box.innerHTML = '';
+  const nets = mainNets();
+  if (nets.length) meshDevices();
+  nets.forEach((n, i) => {
+    const devs = n.devices || [];
+    const card = el('div', 'card net-card');
+    const top = el('div', 'net-top');
+    const h = el('h1', 'net-title');
+    const name = el('span', 'net-name' + (n.name ? '' : ' unnamed'), netLabel(n, i));
+    name.title = t('net_rename');
+    name.addEventListener('click', () => startNetRename(n, i, h));
+    h.appendChild(name);
+    const pencil = el('button', 'icon-btn');
+    pencil.type = 'button';
+    pencil.title = t('net_rename');
+    pencil.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>';
+    pencil.addEventListener('click', () => startNetRename(n, i, h));
+    h.appendChild(pencil);
+    top.appendChild(h);
+    if (n.id === MESH_NET && nets.length > 1) top.appendChild(el('span', 'badge ok', t('net_shown')));
+    if (!devs.length) top.appendChild(el('span', 'badge warn', t('net_empty')));
+    card.appendChild(top);
+
+    const kv = (k, v) => {
+      const r = el('div', 'kv');
+      r.appendChild(el('span', 'k', k));
+      r.appendChild(el('span', 'v', v));
+      card.appendChild(r);
+    };
+    kv(t('net_devices'), devs.length ? devs.filter(d => d.online).length + ' ' + t('net_of') + ' ' + devs.length + ' ' + t('net_online_short') : '0');
+    if (n.created) kv(t('net_created'), fmtDay(n.created));
+    if (!devs.length && n.emptySince) kv(t('net_autoremove'), fmtDay(n.emptySince + NET_TTL));
+    kv(t('net_id'), n.id.length > 16 ? n.id.slice(0, 16) + '…' : n.id);
+    if (!devs.length) card.appendChild(el('p', 'note net-note', t(n.emptySince ? 'net_empty_note' : 'net_empty_note_old')));
+
+    const acts = el('div', 'dacts');
+    if (nets.length > 1 && n.id !== MESH_NET){
+      const b = el('button', 'btn ghost small', t('net_show'));
+      b.addEventListener('click', () => pickNet(n.id));
+      acts.appendChild(b);
+    }
+    const del = el('button', 'btn danger small', t('net_delete'));
+    del.addEventListener('click', () => deleteNet(n, i));
+    acts.appendChild(del);
+    card.appendChild(acts);
+    box.appendChild(card);
+  });
+}
+
+function startNetRename(n, i, h){
+  NET_EDIT = n.id;
+  h.innerHTML = '';
+  const inp = el('input', 'net-name');
+  inp.type = 'text';
+  inp.maxLength = 64;
+  inp.value = n.name || '';
+  inp.placeholder = t('net_n').replace('{n}', i + 1) + ' — ' + t('net_name_ph');
+  h.appendChild(inp);
+  inp.focus();
+  inp.select();
+  let done = false;
+  const finish = save => {
+    if (done) return;
+    done = true;
+    NET_EDIT = null;
+    const v = inp.value.trim();
+    if (save && v !== (n.name || '')) saveNetName(n, v); else renderNets();
+  };
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ e.preventDefault(); finish(true); }
+    if (e.key === 'Escape'){ e.preventDefault(); finish(false); }
+  });
+  inp.addEventListener('blur', () => finish(true));
+}
+
+async function saveNetName(n, name){
+  const {ok, data} = await api('/api/mesh/net/rename', {net: n.id, name});
+  if (!ok){ toast(meshErr(data), 'err'); renderNets(); return; }
+  toast(name ? t('net_renamed') : t('net_name_cleared'));
+  loadMesh();
+  loadJournal();
+}
+
+async function deleteNet(n, i){
+  const devs = n.devices || [];
+  const label = netLabel(n, i);
+  const msg = devs.length
+    ? fill('net_del_confirm', {name: label, n: devs.length, on: devs.filter(d => d.online).length})
+    : fill('net_del_confirm_empty', {name: label});
+  if (!await appConfirm(msg, t('net_delete'))) return;
+  const {ok, data} = await api('/api/mesh/net/delete', {net: n.id});
+  if (!ok){ toast(meshErr(data), 'err'); return; }
+  toast(t('net_deleted'));
+  if (MESH_NET === n.id) MESH_NET = null;
+  loadMesh();
+  loadJournal();
+}
+
+/* ---------- журнал на «Обзоре» ---------- */
+/* Опрос с after=<последний seq>. Журнал meshd живёт в памяти: после
+   перезапуска meshd seq снова с 1 — ответ с seq меньше нашего after (или
+   новое время старта meshd) значит «начать заново». Старые строки при этом
+   остаются, ключ записи — «эпоха:seq», так повторов не бывает. */
+const JR_MAX = 200;
+const JR = {seq: 0, epoch: 0, items: [], keys: new Set(), filter: localStorage.getItem('panelJr') || 'all',
+            timer: null, busy: false, started: 0, old: false, err: ''};
+const JR_CONN = ['connect', 'disconnect', 'new-device', 'server-up', 'server-down'];
+
+function jrRestart(){
+  JR.seq = 0;
+  JR.epoch++;
+  if (JR.items.length) JR.items.push({k: 'r' + JR.epoch, marker: true, time: Date.now() / 1000});
+}
+
+async function loadJournal(){
+  clearTimeout(JR.timer);
+  if ($('viewMain').hidden) return;
+  const main = MESH && MESH.effectiveRole === 'main';
+  $('jrCard').hidden = !main;
+  if (main && !JR.busy){
+    if (MESH.startedAt && JR.started && MESH.startedAt !== JR.started) jrRestart();
+    if (MESH.startedAt) JR.started = MESH.startedAt;
+    JR.busy = true;
+    try {
+      for (let page = 0; page < 6; page++){
+        const after = JR.seq;
+        const {ok, data} = await api('/api/mesh/events?after=' + after + '&limit=1000');
+        if (!ok){ JR.old = isOldMeshd(data); JR.err = JR.old ? '' : meshErr(data); break; }
+        JR.old = false; JR.err = '';
+        if (after > 0 && data.seq < after){ jrRestart(); continue; }
+        const evs = data.events || [];
+        evs.forEach(e => {
+          const k = JR.epoch + ':' + e.seq;
+          if (JR.keys.has(k)) return;
+          JR.keys.add(k);
+          JR.items.push({k, e, time: e.time});
+          if (e.seq > JR.seq) JR.seq = e.seq;
+        });
+        if (evs.length < 1000) break;
+      }
+      if (JR.items.length > JR_MAX) JR.items.splice(0, JR.items.length - JR_MAX).forEach(x => JR.keys.delete(x.k));
+    } catch (e) { /* сеть моргнула — следующий опрос */ }
+    JR.busy = false;
+    renderJournal();
+  }
+  JR.timer = setTimeout(loadJournal, document.hidden ? 15000 : 5000);
+}
+
+// Имя устройства по id: сначала в сети события, потом во всех; не нашлось —
+// id как есть (устройство могли уже убрать).
+function evName(net, id){
+  if (!id) return '';
+  const nets = (MESH && MESH.networks) || [];
+  const order = nets.filter(n => n.id === net).concat(nets.filter(n => n.id !== net));
+  for (const n of order){
+    const d = (n.devices || []).find(x => x.id === id);
+    if (d) return d.display || d.name || id;
+  }
+  const s = ((MESH && MESH.servers) || []).find(x => x.id === id);
+  return s ? s.name : id;
+}
+function evNet(id){
+  const nets = (MESH && MESH.networks) || [];
+  const i = nets.findIndex(n => n.id === id);
+  if (i >= 0) return netLabel(nets[i], i);
+  return id ? id.slice(0, 8) + '…' : '';
+}
+const PORT_KEYS = {22: 'port_ssh', 3389: 'port_rdp', 47835: 'port_files', 47837: 'port_clip'};
+function portText(p){
+  if (!p) return t('port_any');
+  return PORT_KEYS[p] ? t(PORT_KEYS[p]) + ' (' + p + ')' : t('port_n').replace('{n}', p);
+}
+function evText(e){
+  const d = evName(e.net, e.device), p = evName(e.net, e.peer);
+  switch (e.type){
+    case 'connect': return fill('ev_connect', {d});
+    case 'disconnect': return fill('ev_disconnect', {d});
+    case 'new-device': return fill('ev_new', {d: e.text || d});
+    case 'denied': return fill('ev_denied', {d, p, port: portText(e.port)});
+    case 'rename':
+      if (e.device) return fill('ev_rename_dev', {d: e.text || d});
+      return e.text ? fill('ev_rename_net', {n: evNet(e.net), t: e.text}) : fill('ev_rename_net_clear', {n: evNet(e.net)});
+    case 'forget': return fill('ev_forget', {d});
+    case 'net-delete': return fill('ev_net_delete', {n: e.text || evNet(e.net)});
+    case 'server-up': return fill('ev_server_up', {s: e.text || d});
+    case 'server-down': return fill('ev_server_down', {s: e.text || d});
+  }
+  return e.type + (e.text ? ': ' + e.text : '');
+}
+function jrTime(unix){
+  const d = new Date(unix * 1000), now = new Date();
+  const loc = LANG === 'ru' ? 'ru-RU' : 'en-US';
+  const hm = d.toLocaleTimeString(loc, {hour: '2-digit', minute: '2-digit'});
+  return d.toDateString() === now.toDateString() ? hm : d.toLocaleDateString(loc, {day: '2-digit', month: '2-digit'}) + ' ' + hm;
+}
+function renderJournal(){
+  document.querySelectorAll('#jrFilter button').forEach(b => b.classList.toggle('on', b.dataset.f === JR.filter));
+  renderOldHints();
+  const box = $('journal');
+  box.innerHTML = '';
+  const many = ((MESH && MESH.networks) || []).length > 1;
+  const list = JR.items.filter(x => x.marker ? JR.filter === 'all'
+    : JR.filter === 'denied' ? x.e.type === 'denied'
+    : JR.filter === 'conn' ? JR_CONN.includes(x.e.type) : true).slice().reverse();
+  $('jrErr').hidden = !JR.err;
+  $('jrErr').textContent = JR.err;
+  list.forEach(x => {
+    const row = el('div', 'jr-row' + (x.marker ? ' marker' : x.e.type === 'denied' ? ' denied' : ''));
+    row.appendChild(el('time', '', jrTime(x.time)));
+    const txt = el('span', 'tx', x.marker ? t('ev_restart') : evText(x.e));
+    if (!x.marker && many && x.e.net) txt.appendChild(el('span', 'badge dim', evNet(x.e.net)));
+    row.appendChild(txt);
+    box.appendChild(row);
+  });
+  if (!list.length && !JR.old) box.appendChild(el('div', 'empty', t(JR.items.length ? 'jr_none_filter' : 'jr_none')));
+}
+$('jrFilter').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  JR.filter = b.dataset.f;
+  localStorage.setItem('panelJr', JR.filter);
+  renderJournal();
+});
+
+/* ---------- простой режим доступа ---------- */
+/* Поверх обычной политики (/api/access: группы + правила, членство —
+   /api/clients/groups). Простому режиму принадлежат только группы с «~»:
+     ~mine, ~server, ~guest — роли (метка роли и общий источник правил);
+     ~tun_<16 hex>          — личная группа SSH-пользователя, заводится,
+                              только когда без неё не выразить строку;
+   и правила «~группа → ~группа | * | @servers» без портов. Всё остальное —
+   ручное из «Расширенного»: сохраняется как есть, стоит в начале списка, а
+   то, что оно разрешает, в таблице под замком.
+   Таблица (кто → к кому, любой порт) пересчитывается из правил тем же
+   решением, что у meshd, и при сохранении собирается обратно в правила
+   заново целиком; перед отправкой результат проверяется обратным
+   пересчётом — не совпало или не влезло в 64 группы / 256 правил —
+   ничего не сохраняется. */
+const SM_ROLES = ['mine', 'server', 'guest'];
+const SM_GROUP = {mine: '~mine', server: '~server', guest: '~guest'};
+const SM_ROLE_OF = {'~mine': 'mine', '~server': 'server', '~guest': 'guest'};
+const SM_PERSONAL = /^~tun_[0-9a-f]{16}$/;
+const SM_MAX_GROUPS = 64, SM_MAX_RULES = 256;
+const SRV = '@servers';
+let ACCESS_RAW = {enabled: false, groups: [], rules: []}; // как на сервере, без заготовки редактора
+let SM_WORK = null, SM_REV = 0, SM_TIMER = null, SM_SAVING = false;
+
+function smOwn(g){ return typeof g === 'string' && g.startsWith('~'); }
+function smOwnRule(r){ return !String(r.ports || '').trim() && smOwn(r.from) && (smOwn(r.to) || r.to === '*' || r.to === SRV); }
+function smActive(){ return (ACCESS_RAW.groups || []).some(g => SM_ROLE_OF[g]); }
+function smHand(){ return (ACCESS_RAW.rules || []).filter(r => !smOwnRule(r)); }
+function smClients(){
+  const by = {};
+  CLIENTS.forEach(c => { if (c.username) by[c.username] = c; });
+  return by;
+}
+function smRoleOf(groups){
+  for (const g of groups || []) if (SM_ROLE_OF[g]) return SM_ROLE_OF[g];
+  return '';
+}
+// Решение meshd (policy.member/match) для «любого порта»: подходит только
+// правило без портов. partial — есть правило только на часть портов.
+function smMember(groupsOf, user, g){
+  if (g === '*') return true;
+  if (user === SRV) return g === SRV;
+  return (groupsOf[user] || []).includes(g);
+}
+function smMatch(rules, groupsOf, from, to){
+  if (from === SRV) return -1;
+  for (let i = 0; i < rules.length; i++){
+    const r = rules[i];
+    if (!String(r.ports || '').trim() && smMember(groupsOf, from, r.from) && smMember(groupsOf, to, r.to)) return i;
+  }
+  return -1;
+}
+function smPartial(rules, groupsOf, from, to){
+  return rules.some(r => String(r.ports || '').trim() && smMember(groupsOf, from, r.from) && smMember(groupsOf, to, r.to));
+}
+// Сколько устройств у пользователя во всех сетях: у одиночного «к себе»
+// ничего не значит, и этой клеткой можно пожертвовать ради короткого правила.
+function smDevCount(){
+  const n = {};
+  ((MESH && MESH.networks) || []).forEach(net => (net.devices || []).forEach(d => { if (d.user) n[d.user] = (n[d.user] || 0) + 1; }));
+  return n;
+}
+function smGroupsOf(){
+  const g = {};
+  CLIENTS.forEach(c => { if (c.username) g[c.username] = (c.groups || []).slice(); });
+  return g;
+}
+
+// smDecode — таблица и роли из того, что сейчас на сервере.
+function smDecode(){
+  const by = smClients(), users = Object.keys(by).sort(), groupsOf = smGroupsOf();
+  const rules = ACCESS_RAW.rules || [];
+  const M = {}, roles = {};
+  users.forEach(a => {
+    roles[a] = smRoleOf(groupsOf[a]);
+    M[a] = {};
+    users.concat([SRV]).forEach(b => { M[a][b] = smMatch(rules, groupsOf, a, b) >= 0; });
+  });
+  return {M, roles};
+}
+function smCopy(w){ return {M: JSON.parse(JSON.stringify(w.M)), roles: Object.assign({}, w.roles)}; }
+function smCur(){ return SM_WORK || smDecode(); }
+
+// smEncode — правила и группы для таблицы M и ролей roles. hand — ручные
+// правила, которые остаются как есть (по умолчанию — те, что на сервере).
+function smEncode(M, roles, hand){
+  hand = hand || smHand();
+  const by = smClients(), users = Object.keys(by).sort(), cols = users.concat([SRV]);
+  const cnt = smDevCount();
+  const free = a => (cnt[a] || 0) <= 1;           // «к себе» не важно
+  const handGroupsOf = u => (by[u].groups || []).filter(g => !smOwn(g));
+  const members = R => users.filter(u => roles[u] === R);
+
+  // Ручные правила считаем при «все личные группы есть»: они могут на них
+  // ссылаться. Итог всё равно проверяется обратным пересчётом.
+  const probe = {};
+  users.forEach(u => { probe[u] = handGroupsOf(u).concat(roles[u] ? [SM_GROUP[roles[u]]] : [], ['~' + u]); });
+  const H = {};
+  users.forEach(a => { H[a] = {}; cols.forEach(b => { H[a][b] = smMatch(hand, probe, a, b) >= 0; }); });
+
+  const sig = {};
+  users.forEach(a => {
+    const row = M[a] || {};
+    const ok = c => !!row[c] || (c === a && free(a));
+    const left = new Set(cols.filter(c => row[c] && !H[a][c] && !(c === a && free(a))));
+    // Всё нужное уже дают ручные правила — своих не надо.
+    if (!left.size){ sig[a] = []; return; }
+    if (cols.every(ok)){ sig[a] = ['*']; return; }
+    const out = [];
+    {
+      SM_ROLES.forEach(R => {
+        const mem = members(R);
+        if (mem.length && mem.some(m => left.has(m)) && mem.every(ok)){
+          out.push(SM_GROUP[R]);
+          mem.forEach(m => left.delete(m));
+        }
+      });
+      if (left.delete(SRV)) out.push(SRV);
+      left.forEach(b => out.push('~' + b));
+    }
+    sig[a] = out.sort();
+  });
+
+  const own = [], personal = new Set(), done = new Set();
+  const emit = (from, targets) => targets.forEach(to => {
+    own.push({from, to, ports: ''});
+    if (SM_PERSONAL.test(to)) personal.add(to.slice(1));
+  });
+  // Источник — роль: её правила получает каждый в роли, поэтому берём самую
+  // частую строку среди тех, что никому в роли не дают лишнего; у кого
+  // строка шире — добавка личной группой.
+  const covers = (m, g) => {
+    const row = M[m] || {};
+    const ok = c => !!row[c] || (c === m && free(m));
+    if (g === '*') return cols.every(ok);
+    if (g === SRV) return ok(SRV);
+    if (SM_ROLE_OF[g]) return members(SM_ROLE_OF[g]).every(ok);
+    if (SM_PERSONAL.test(g)) return ok(g.slice(1));
+    return false;
+  };
+  SM_ROLES.forEach(R => {
+    const mem = members(R);
+    if (!mem.length) return;
+    const counts = {};
+    mem.forEach(m => { const k = sig[m].join('|'); counts[k] = (counts[k] || 0) + 1; });
+    let base = null, baseN = 0;
+    Object.keys(counts).forEach(k => {
+      const tg = k ? k.split('|') : [];
+      if (tg.length && counts[k] > baseN && mem.every(m => tg.every(g => covers(m, g)))){ base = tg; baseN = counts[k]; }
+    });
+    if (!base) return;
+    emit(SM_GROUP[R], base);
+    mem.forEach(m => {
+      const extra = sig[m].filter(g => !base.includes(g));
+      if (extra.length){ personal.add(m); emit('~' + m, extra); }
+      done.add(m);
+    });
+  });
+  users.forEach(a => {
+    if (done.has(a) || !sig[a].length) return;
+    personal.add(a);
+    emit('~' + a, sig[a]);
+  });
+  // Личные и прочие «~»-группы, на которые ссылаются ручные правила, остаются.
+  const keepOwn = new Set();
+  hand.forEach(r => [r.from, r.to].forEach(g => {
+    if (!smOwn(g)) return;
+    keepOwn.add(g);
+    if (SM_PERSONAL.test(g) && by[g.slice(1)]) personal.add(g.slice(1));
+  }));
+
+  const clientGroups = {};
+  users.forEach(u => {
+    clientGroups[u] = [...new Set(handGroupsOf(u).concat(roles[u] ? [SM_GROUP[roles[u]]] : [],
+      personal.has(u) ? ['~' + u] : []))].sort();
+  });
+  const handGroups = (ACCESS_RAW.groups || []).filter(g => !smOwn(g));
+  const groups = [...new Set(handGroups.concat(Object.values(SM_GROUP), [...personal].map(u => '~' + u), [...keepOwn]))].sort();
+  const rules = hand.concat(own);
+
+  if (groups.length > SM_MAX_GROUPS) return {error: fill('sm_err_groups', {n: groups.length, max: SM_MAX_GROUPS})};
+  if (rules.length > SM_MAX_RULES) return {error: fill('sm_err_rules', {n: rules.length, max: SM_MAX_RULES})};
+  for (const a of users) for (const b of cols){
+    if (b === a && free(a)) continue;
+    if ((smMatch(rules, clientGroups, a, b) >= 0) !== !!(M[a] && M[a][b])) return {error: t('sm_err_verify')};
+  }
+  return {groups, rules, clientGroups, own: own.length};
+}
+
+// Сохранение: группы сначала добавляются (правила и членство на них
+// ссылаются), потом меняется членство, потом лишние группы убираются —
+// сервер не даёт убрать группу, в которой ещё кто-то есть.
+async function smSaveNow(M, roles, hand){
+  const enc = smEncode(M, roles, hand);
+  if (enc.error){ smMsg(enc.error, 'err'); toast(enc.error, 'err'); return false; }
+  const union = [...new Set((ACCESS_RAW.groups || []).concat(enc.groups))].sort();
+  if (union.length > SM_MAX_GROUPS){
+    const e = fill('sm_err_groups', {n: union.length, max: SM_MAX_GROUPS});
+    smMsg(e, 'err'); toast(e, 'err'); return false;
+  }
+  const fail = data => { const e = errOf(data); smMsg(e, 'err'); toast(e, 'err'); return false; };
+  let r = await api('/api/access', {enabled: !!ACCESS_RAW.enabled, groups: union, rules: enc.rules});
+  if (!r.ok) return fail(r.data);
+  let warn = r.data.warning || '';
+  const by = smClients();
+  for (const u of Object.keys(enc.clientGroups)){
+    const before = [...new Set(by[u].groups || [])].sort().join('|');
+    if (before === enc.clientGroups[u].join('|')) continue;
+    r = await api('/api/clients/groups', {id: by[u].id, groups: enc.clientGroups[u]});
+    if (!r.ok){ await smReload(); return fail(r.data); }
+    warn = r.data.warning || warn;
+  }
+  if (union.length !== enc.groups.length){
+    r = await api('/api/access', {enabled: !!ACCESS_RAW.enabled, groups: enc.groups, rules: enc.rules});
+    if (!r.ok){ await smReload(); return fail(r.data); }
+    warn = r.data.warning || warn;
+  }
+  await smReload();
+  smMsg(warn || t('acc_saved'), warn ? 'err' : 'ok');
+  return true;
+}
+async function smReload(){ await loadClients(); await loadAccess(); }
+
+// Правка: копится в SM_WORK, уходит одним сохранением через полсекунды
+// после последнего нажатия; пока сохраняется — следующее ждёт.
+function smEdit(fn){
+  if (!SM_WORK) SM_WORK = smCopy(smDecode());
+  fn(SM_WORK);
+  SM_REV++;
+  renderSimple();
+  renderDetail();
+  clearTimeout(SM_TIMER);
+  SM_TIMER = setTimeout(smFlush, 500);
+}
+async function smFlush(){
+  if (SM_SAVING || !SM_WORK) return;
+  SM_SAVING = true;
+  const rev = SM_REV, snap = smCopy(SM_WORK);
+  const ok = await smSaveNow(snap.M, snap.roles);
+  SM_SAVING = false;
+  if (!ok || rev === SM_REV) SM_WORK = null; else { smFlush(); return; }
+  renderSimple();
+  renderDetail();
+  runCheck();
+}
+function smMsg(text, kind){ showMsg($('smMsg'), text, kind); }
+
+// Замки: что разрешено ручными правилами, простому режиму не снять.
+function smLock(a, b){
+  const by = smClients();
+  if (!by[a] || (b !== SRV && !by[b])) return 'foreign';
+  const groupsOf = smGroupsOf();
+  const hand = smHand();
+  const i = smMatch(hand, groupsOf, a, b);
+  if (i >= 0) return 'hand:' + groupLabel(hand[i].from) + ' → ' + groupLabel(hand[i].to);
+  return '';
+}
+function smToggle(a, b){
+  const lock = smLock(a, b);
+  if (lock){ toast(lock === 'foreign' ? t('sm_locked_foreign') : fill('sm_locked', {r: lock.slice(5)}), 'err'); return; }
+  smEdit(w => { w.M[a][b] = !w.M[a][b]; });
+}
+function smCols(){ return Object.keys(smClients()).sort().concat([SRV]); }
+function smRow(a, val){
+  smEdit(w => smCols().forEach(b => { if (!val && smLock(a, b)) return; w.M[a][b] = val; }));
+}
+// Роли — заготовки: «Моё» ходит ко всем, кроме гостей; «Сервер» сам
+// никуда; «Гость» никуда и к нему никто. Дальше — галочками.
+function smSetRole(a, R){
+  smEdit(w => {
+    w.roles[a] = R;
+    smCols().forEach(b => {
+      const want = R === 'mine' && (b === SRV || w.roles[b] !== 'guest');
+      if (want || !smLock(a, b)) w.M[a][b] = want;
+    });
+    Object.keys(w.M).forEach(x => {
+      if (R === 'guest' && x !== a && !smLock(x, a)) w.M[x][a] = false;
+      // Новичок с ролью «Моё» видит всех «Моих» и наоборот.
+      if (R === 'mine' && x !== a && w.roles[x] === 'mine' && !smLock(x, a)) w.M[x][a] = true;
+    });
+  });
+}
+
+// Строки таблицы: SSH-пользователи, у которых есть устройства в выбранной
+// сети. Несколько устройств под одним пользователем — одна строка.
+function smLines(){
+  const by = smClients(), lines = [], seen = {};
+  meshDevices().forEach(d => {
+    const u = d.user || '';
+    const key = by[u] ? u : '?' + (u || d.id);
+    if (!seen[key]){ seen[key] = {key, user: u, client: by[u] || null, devices: []}; lines.push(seen[key]); }
+    seen[key].devices.push(d);
+  });
+  lines.forEach(l => {
+    l.name = l.devices.length === 1 ? (l.devices[0].display || l.devices[0].name) : (l.client ? l.client.name : l.devices[0].display);
+  });
+  return lines.sort((a, b) => (!a.client - !b.client) || a.name.localeCompare(b.name));
+}
+function roleTag(R){ return el('span', 'badge ' + (R === 'mine' ? 'ok' : R === 'guest' ? 'warn' : R ? 'dim' : 'err'), t('sm_role_' + (R || 'none'))); }
+
+function renderSimple(){
+  const card = $('smCard');
+  if (!card) return;
+  const main = MESH && MESH.effectiveRole === 'main';
+  renderOldHints();
+  const active = smActive();
+  $('smStatus').innerHTML = '';
+  const st = el('div', 'sm-status ' + (ACCESS_RAW.enabled ? 'on' : 'off'));
+  st.appendChild(el('b', '', t(ACCESS_RAW.enabled ? 'sm_on' : 'sm_off')));
+  st.appendChild(el('span', '', t(ACCESS_RAW.enabled ? 'sm_on_d' : 'sm_off_d')));
+  const tg = el('button', 'btn small ' + (ACCESS_RAW.enabled ? 'ghost' : ''), t(ACCESS_RAW.enabled ? 'sm_turn_off' : 'sm_turn_on'));
+  tg.addEventListener('click', smSetEnabled);
+  st.appendChild(tg);
+  $('smStatus').appendChild(st);
+
+  $('smOff').hidden = active;
+  $('smBody').hidden = !active;
+  if (!active || !main) return;
+
+  const w = smCur(), lines = smLines(), by = smClients();
+  const cols = lines.filter(l => l.client);
+  const shared = lines.filter(l => l.client && l.devices.length > 1);
+  $('smShared').hidden = !shared.length;
+  $('smShared').textContent = shared.length ? fill('sm_shared', {list: shared.map(l => l.devices.map(d => d.display).join(' + ')).join('; ')}) : '';
+  const foreign = lines.filter(l => !l.client);
+  $('smForeign').hidden = !foreign.length;
+  $('smForeign').textContent = foreign.length ? fill('sm_foreign', {list: foreign.map(l => l.name).join(', ')}) : '';
+
+  const cellState = (a, b) => {
+    const ua = a.user, ub = b === SRV ? SRV : b.user;
+    if (a.client && (b === SRV || b.client)){
+      const self = b !== SRV && a.key === b.key;
+      if (self && a.devices.length < 2 && (smDevCount()[ua] || 0) < 2) return {self: true};
+      const lock = smLock(ua, ub);
+      const on = !!(w.M[ua] && w.M[ua][ub]);
+      const part = !on && smPartial(ACCESS_RAW.rules || [], smGroupsOf(), ua, ub);
+      return {on, lock, part, ua, ub};
+    }
+    // Чужой пользователь: только то, что дают ручные правила и «→ *».
+    const groupsOf = smGroupsOf();
+    return {on: smMatch(ACCESS_RAW.rules || [], groupsOf, ua || '?', ub || '?') >= 0, lock: 'foreign', ua, ub};
+  };
+  const mkCell = (a, b) => {
+    const s = cellState(a, b);
+    if (s.self) return el('span', 'cell self', '—');
+    const c = el('button', 'cell' + (s.on ? ' y' : '') + (s.lock ? ' lock' : '') + (s.part ? ' part' : ''), s.on ? '✓' : s.part ? '◐' : '·');
+    c.type = 'button';
+    c.title = s.lock === 'foreign' ? t('sm_locked_foreign') : s.lock ? fill('sm_locked', {r: s.lock.slice(5)})
+      : s.part ? t('sm_partial') : '';
+    c.addEventListener('click', () => smToggle(s.ua, s.ub));
+    return c;
+  };
+  const srvName = t('sm_servers');
+
+  // Таблица (компьютер).
+  const tbl = el('table', 'sm-table');
+  const hr = el('tr');
+  hr.appendChild(el('th', 'l', t('sm_who_whom')));
+  cols.forEach(l => { const th = el('th', '', l.name); th.title = l.name; hr.appendChild(th); });
+  const ths = el('th', '', srvName); ths.title = t('sm_servers_d'); hr.appendChild(ths);
+  tbl.appendChild(hr);
+  lines.forEach(a => {
+    const tr = el('tr');
+    const td = el('td', 'l');
+    td.appendChild(el('span', 'nm', a.name));
+    if (a.devices.length > 1) td.appendChild(el('span', 'badge dim', fill('sm_n_dev', {n: a.devices.length})));
+    td.appendChild(a.client ? roleTag(w.roles[a.user]) : el('span', 'badge dim', t('sm_foreign_tag')));
+    tr.appendChild(td);
+    cols.forEach(b => { const c = el('td'); c.appendChild(mkCell(a, b)); tr.appendChild(c); });
+    const c = el('td'); c.appendChild(mkCell(a, SRV)); tr.appendChild(c);
+    tbl.appendChild(tr);
+  });
+  const wrap = $('smTable');
+  wrap.innerHTML = '';
+  wrap.appendChild(tbl);
+
+  // Список (телефон): по устройству — галочки «куда может ходить».
+  const list = $('smList');
+  list.innerHTML = '';
+  lines.forEach(a => {
+    const box = el('div', 'sm-item');
+    const h = el('div', 'sm-ih');
+    h.appendChild(el('b', '', a.name));
+    h.appendChild(a.client ? roleTag(w.roles[a.user]) : el('span', 'badge dim', t('sm_foreign_tag')));
+    box.appendChild(h);
+    const checks = el('div', 'sm-checks');
+    cols.concat([SRV]).forEach(b => {
+      const s = cellState(a, b);
+      if (s.self) return;
+      const lab = el('label', s.lock ? 'lock' : '');
+      const cb = el('input');
+      cb.type = 'checkbox';
+      cb.checked = s.on;
+      cb.disabled = !!s.lock;
+      cb.title = s.lock === 'foreign' ? t('sm_locked_foreign') : s.lock ? fill('sm_locked', {r: s.lock.slice(5)}) : '';
+      cb.addEventListener('change', () => smToggle(s.ua, s.ub));
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(' ' + (b === SRV ? srvName : b.key === a.key ? t('sm_self') : b.name)));
+      checks.appendChild(lab);
+    });
+    box.appendChild(checks);
+    list.appendChild(box);
+  });
+  $('smEmpty').hidden = lines.length > 0;
+  $('smCounts').textContent = fill('sm_counts', {g: (ACCESS_RAW.groups || []).length, gm: SM_MAX_GROUPS,
+    r: (ACCESS_RAW.rules || []).length, rm: SM_MAX_RULES});
+}
+
+async function smSetEnabled(){
+  const on = !ACCESS_RAW.enabled;
+  if (on && !(ACCESS_RAW.rules || []).length && !await appConfirm(t('sm_enable_norules'), t('sm_turn_on'))) return;
+  const {ok, data} = await api('/api/access', {enabled: on, groups: ACCESS_RAW.groups || [], rules: ACCESS_RAW.rules || []});
+  if (!ok){ smMsg(errOf(data), 'err'); return; }
+  await loadAccess();
+  smMsg(data.warning || t('acc_saved'), data.warning ? 'err' : 'ok');
+  runCheck();
+}
+
+// Включить простой режим. Ручные правила не трогаются никогда, кроме одного
+// случая с явного согласия: единственное правило «все → все» (так начинает
+// редактор) заменяется ролью «Моё» у всех — иначе галочкам нечего снимать.
+async function smEnable(){
+  const hand = smHand();
+  const by = smClients();
+  const lone = hand.length === 1 && hand[0].from === '*' && hand[0].to === '*' && !String(hand[0].ports || '').trim();
+  const strange = (ACCESS_RAW.groups || []).filter(g => smOwn(g) && !SM_ROLE_OF[g] && !(SM_PERSONAL.test(g) && by[g.slice(1)]));
+  const foreign = ((MESH && MESH.networks) || []).some(n => (n.devices || []).some(d => !by[d.user]));
+  let msg;
+  if (!hand.length) msg = t('sm_enable_empty');
+  else if (lone) msg = t('sm_enable_default') + (foreign ? '\n\n' + t('sm_enable_foreign') : '');
+  else msg = fill('sm_enable_hand', {n: hand.length});
+  if (strange.length) msg += '\n\n' + fill('sm_enable_strange', {list: strange.join(', ')});
+  if (!await appConfirm(msg, t('sm_enable_yes'))) return;
+  const keep = lone ? [] : hand;
+  const w = smDecode();
+  // При смене «все → все» таблица считается заново: роль «Моё» у всех.
+  Object.keys(w.roles).forEach(u => { if (!w.roles[u]) w.roles[u] = 'mine'; });
+  if (lone || !hand.length){
+    Object.keys(w.M).forEach(a => Object.keys(w.M[a]).forEach(b => {
+      w.M[a][b] = w.roles[a] === 'mine' && (b === SRV || w.roles[b] !== 'guest');
+    }));
+  }
+  await smSaveNow(w.M, w.roles, keep);
+}
+
+/* ---------- «Куда может ходить» в карточке устройства ---------- */
+function renderDevAccess(box, d){
+  if (!d || !(MESH && MESH.effectiveRole === 'main')) return;
+  const by = smClients();
+  const part = el('div', 'dpart');
+  const h = el('h2');
+  h.appendChild(el('span', '', t('dev_part_access')));
+  part.appendChild(h);
+  if (!d.user){ part.appendChild(el('p', 'note', t('old_meshd'))); box.appendChild(part); return; }
+  if (!by[d.user]){ part.appendChild(el('p', 'note', t('sm_locked_foreign'))); box.appendChild(part); return; }
+  if (!smActive()){
+    part.appendChild(el('p', 'note', t('sm_dev_inactive')));
+    const go = el('button', 'btn ghost small', t('sm_open_access'));
+    go.addEventListener('click', () => showTab('Access'));
+    part.appendChild(go);
+    box.appendChild(part);
+    return;
+  }
+  const w = smCur(), a = d.user;
+  if (!ACCESS_RAW.enabled) part.appendChild(el('p', 'msg err', t('sm_off_d')));
+  const mates = meshDevices().filter(x => x.user === a && x.id !== d.id);
+  if (mates.length) part.appendChild(el('p', 'note', fill('sm_dev_shared', {list: mates.map(x => x.display).join(', ')})));
+
+  part.appendChild(el('div', 'k sm-k', t('sm_role')));
+  const seg = el('div', 'seg');
+  SM_ROLES.forEach(R => {
+    const b = el('button', w.roles[a] === R ? 'on' : '', t('sm_role_' + R));
+    b.type = 'button';
+    b.title = t('sm_role_' + R + '_d');
+    b.addEventListener('click', () => smSetRole(a, R));
+    seg.appendChild(b);
+  });
+  part.appendChild(seg);
+
+  const kh = el('div', 'k sm-k');
+  kh.appendChild(el('span', '', t('sm_where')));
+  const all = el('button', 'btn ghost small', t('sm_to_all'));
+  all.addEventListener('click', () => smRow(a, true));
+  const none = el('button', 'btn ghost small', t('sm_to_none'));
+  none.addEventListener('click', () => smRow(a, false));
+  kh.appendChild(all);
+  kh.appendChild(none);
+  part.appendChild(kh);
+  const checks = el('div', 'sm-checks');
+  const lines = smLines().filter(l => l.client);
+  const targets = lines.map(l => ({b: l.user, name: l.user === a ? t('sm_self') : l.name, self: l.user === a}))
+    .filter(x => !x.self || mates.length).concat([{b: SRV, name: t('sm_servers')}]);
+  targets.forEach(x => {
+    const lock = smLock(a, x.b);
+    const lab = el('label', lock ? 'lock' : '');
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.checked = !!(w.M[a] && w.M[a][x.b]);
+    cb.disabled = !!lock;
+    cb.title = lock ? fill('sm_locked', {r: lock.slice(5)}) : '';
+    cb.addEventListener('change', () => smToggle(a, x.b));
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(' ' + x.name));
+    checks.appendChild(lab);
+  });
+  part.appendChild(checks);
+  box.appendChild(part);
+}
+
+/* ---------- проверка «может ли A к B» ---------- */
+const CK_PORTS = [[22, 'port_ssh'], [3389, 'port_rdp'], [47835, 'port_files'], [47837, 'port_clip'], [0, 'port_any']];
+function fillCheckSelects(){
+  const devs = meshDevices();
+  const sig = LANG + '|' + MESH_NET + '|' + devs.map(d => d.id + ':' + d.display).join(',');
+  const from = $('ckFrom'), to = $('ckTo'), port = $('ckPort');
+  if (from.dataset.sig === sig) return;
+  from.dataset.sig = sig;
+  const keep = [from.value, to.value, port.value];
+  [from, to].forEach(s => {
+    s.innerHTML = '';
+    devs.forEach(d => { const o = el('option', '', d.display || d.name); o.value = d.id; s.appendChild(o); });
+  });
+  port.innerHTML = '';
+  CK_PORTS.forEach(([p, k]) => { const o = el('option', '', t(k) + (p ? ' (' + p + ')' : '')); o.value = p; port.appendChild(o); });
+  if (devs.some(d => d.id === keep[0])) from.value = keep[0];
+  if (devs.some(d => d.id === keep[1])) to.value = keep[1]; else if (devs.length > 1) to.selectedIndex = 1;
+  if (keep[2] !== '') port.value = keep[2];
+  runCheck();
+}
+let CK_SEQ = 0;
+async function runCheck(){
+  const v = $('ckVerdict');
+  if (!v) return;
+  const from = $('ckFrom').value, to = $('ckTo').value, port = Number($('ckPort').value || 0);
+  const name = id => evName(MESH_NET, id);
+  if (!from || !to){ v.className = 'verdict'; v.textContent = t('ck_need_two'); return; }
+  if (from === to){ v.className = 'verdict n'; v.textContent = t('ck_same'); return; }
+  const seq = ++CK_SEQ;
+  const {ok, data} = await api('/api/mesh/check', {net: MESH_NET, from, to, port});
+  if (seq !== CK_SEQ) return;
+  if (!ok){ v.className = 'verdict n'; v.textContent = meshErr(data); return; }
+  const vals = {a: name(from), b: name(to), port: portText(port)};
+  let text;
+  switch (data.reason){
+    case 'rule': {
+      const r = (ACCESS_RAW.rules || [])[data.rule];
+      text = fill('ck_yes', vals) + (r ? ' ' + fill('ck_by_rule', {n: data.rule + 1, r: groupLabel(r.from) + ' → ' + groupLabel(r.to) + (r.ports ? ' (' + r.ports + ')' : '')}) : '');
+      break;
+    }
+    case 'policy off': text = fill('ck_yes_off', vals); break;
+    case 'no rule': text = fill('ck_no', vals); break;
+    case 'server cannot initiate': text = t('ck_server'); break;
+    case 'unknown device': text = t('ck_unknown'); break;
+    default: text = data.reason || '';
+  }
+  if (data.reason === 'no rule' && data.visible) text += ' ' + t('ck_visible');
+  v.className = 'verdict ' + (data.allowed ? 'y' : 'n');
+  v.textContent = text;
+}
+['ckFrom', 'ckTo', 'ckPort'].forEach(id => $(id).addEventListener('change', runCheck));
+$('smEnableBtn').addEventListener('click', smEnable);
+$('accAdvBtn').addEventListener('click', () => {
+  const open = $('accessCard').hidden;
+  $('accessCard').hidden = !open;
+  localStorage.setItem('panelAccAdv', open ? '1' : '');
+  if (open) $('accessCard').scrollIntoView({behavior: 'smooth', block: 'start'});
+});
+if (localStorage.getItem('panelAccAdv')) $('accessCard').hidden = false;
 applyI18N();
 loadSession();
 // Трафик и число сессий на сервере пересчитываются раз в 15 секунд
