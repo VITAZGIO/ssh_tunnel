@@ -1915,6 +1915,9 @@ function cell(row, text, cls){
 
 /* ---------- данные ---------- */
 let CLIENTS = [];
+// Клиенты хоть раз пришли: до этого таблицу доступа не рисуем — без списка
+// клиентов все устройства выглядят «с другого сервера».
+let CLIENTS_READY = false;
 let TRAFFIC = null;
 let PERIOD = localStorage.getItem('panelPeriod') || 'month';
 
@@ -1947,9 +1950,12 @@ async function loadClients(){
   const {ok, data} = await api('/api/clients');
   if (!ok) return;
   CLIENTS = data.clients || [];
+  const first = !CLIENTS_READY;
+  CLIENTS_READY = true;
   renderHomeClients();
   renderDevList();
   renderDetail();
+  if (first) renderSimple();
 }
 
 async function loadTraffic(){
@@ -4904,7 +4910,7 @@ function renderSimple(){
 
   $('smOff').hidden = active;
   $('smBody').hidden = !active;
-  if (!active || !main) return;
+  if (!active || !main || !CLIENTS_READY) return;
 
   const w = smCur(), lines = smLines(), by = smClients();
   const cols = lines.filter(l => l.client);
