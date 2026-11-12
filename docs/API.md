@@ -330,3 +330,29 @@ Invoke-RestMethod "$($a.url)/api/calendar/events?from=2026-11-01&to=2026-11-08" 
 Invoke-RestMethod "$($a.url)/api/clipboard/push?kind=text" -Headers $h -Method Post -Body 'привет'
 (Invoke-RestMethod "$($a.url)/api/traffic?period=month" -Headers $h).top | Select-Object -First 5 name, total
 ```
+
+## Docker (ТЗ 7, Linux)
+
+Отвечают, только пока плагин «Docker» добавлен и включён (иначе 404). Правила
+ядра ставит только VPN-версия (`ssh_tunnel_vpn_linux`); в обычной выбор
+сохраняется, но не действует (`vpn:false`).
+
+- `GET /api/docker` — `available` (видно ли Docker API), `error` (почему нет:
+  нет сокета, нет прав), `vpn`, `kernel` (`up` — адаптер VPN поднят, `full` —
+  туннель включён, `rules` — сколько правил в ядре, `error`), `containers`
+  (`id`, `name`, `image`, `state`, `project`, `service`, `netMode`
+  bridge|host|none|container, `parent`, `networks[{name, ip, ip6}]`, `choice`
+  — выбор для самого контейнера, `label` — что велит метка
+  `ssh_tunnel.route`, `effective` — что действует, `from`
+  label|container|project|default|parent|fixed, `switchable`, `why`/`whyEn`),
+  `projects[{name, choice, count}]`.
+- `POST /api/docker/set` `{"container":"<имя или ID>","route":"host|tunnel|direct"}`
+  или `{"project":"<проект compose>","route":…}` — весь проект разом (выбор
+  отдельных служб проекта снимается). Контейнер в сети хоста или другого
+  контейнера — 400 с причиной.
+
+```bash
+ssh_tunnel_linux docker                                 # список (GET /api/docker)
+ssh_tunnel_linux docker set container=web route=tunnel  # через сервер
+ssh_tunnel_linux docker set project=shop route=direct   # весь проект напрямую
+```

@@ -23,6 +23,7 @@ import (
 	"sshtunnel/android/core"
 	"sshtunnel/internal/config"
 	core2 "sshtunnel/internal/core"
+	"sshtunnel/internal/docker"
 	"sshtunnel/internal/events"
 )
 
@@ -52,6 +53,9 @@ type sys struct {
 	servers    []netip.Addr
 
 	pin pins
+
+	// dk — правила контейнеров Docker (docker_linux.go).
+	dk *dockerKernel
 }
 
 func newSys(bus *events.Bus) *sys {
@@ -64,6 +68,8 @@ func newSys(bus *events.Bus) *sys {
 	if n := dropStalePins(); n > 0 {
 		bus.Warnf("Снял %d маршрутов, оставшихся от аварийно закрытого прошлого запуска", n)
 	}
+	s.dk = newDockerKernel(s)
+	docker.SetKernel(s.dk)
 	return s
 }
 
@@ -298,6 +304,9 @@ func (s *sys) configureDNS(full bool) error {
 
 // close возвращает то, что не исчезает вместе с интерфейсом.
 func (s *sys) close() {
+	// Сначала контейнеры: без адаптера им — как компьютеру (выключил VPN
+	// сам человек — это не обрыв туннеля).
+	s.dk.onClose()
 	// Маршруты через настоящую карту живут и без TUN — снимаем сами.
 	s.setDirectPins(false)
 	s.unpinServers()
@@ -496,6 +505,7 @@ func (s *sys) apply(p core2.VPNPlan) error {
 		s.unpinServers()
 	}
 	s.setDirectPins(p.PinDirect)
+	s.dk.onApply(s.full)
 	return nil
 }
 
