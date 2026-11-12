@@ -32,7 +32,7 @@ func (t *Tunnel) rules() core.Rules {
 	t.mu.RUnlock()
 	return core.Rules{
 		Bypass:         !t.bypassOff.Load(),
-		Mesh:           t.cfg.Mesh != nil && !t.meshPaused.Load(),
+		Mesh:           !t.meshPaused.Load() && (t.cfg.Mesh != nil || !t.ownMesh),
 		Draining:       t.draining.Load(),
 		LocalViaTunnel: t.localViaTunnel.Load(),
 		Policy:         policy,
@@ -73,7 +73,7 @@ func (t *Tunnel) dialRoute(route core.Route, target string) (net.Conn, error) {
 	case core.RouteDirect:
 		return t.dialDirect("tcp", target, 15*time.Second)
 	case core.RouteMesh:
-		m := t.mesh.Load()
+		m := t.Mesh()
 		if m == nil {
 			return nil, errMeshNotReady
 		}

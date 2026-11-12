@@ -114,15 +114,7 @@ func (a *App) connectFrom(ctx context.Context, cfg config.Config, candidates []c
 			tun.Stop()
 			return errNotConnected
 		}
-		a.tun = tun
-		a.running = true
-		a.proxyURL = "http://" + httpAddr
-		if a.net != nil {
-			a.proxyURL = "" // локального прокси в режиме VPN нет
-		} else {
-			a.sysProxyArgs = &sysProxyArgs{cfg: cfg, p: p, httpAddr: httpAddr, socksAddr: socksAddr}
-		}
-		a.effectiveProfile = p.ID
+		a.adoptLocked(tun, cfg, p, socksAddr, httpAddr)
 		a.mu.Unlock()
 
 		if i > 0 {
@@ -134,6 +126,46 @@ func (a *App) connectFrom(ctx context.Context, cfg config.Config, candidates []c
 		return nil
 	}
 	return lastErr
+}
+
+// adoptLocked делает tun текущим туннелем. Под a.mu.
+func (a *App) adoptLocked(tun *tunnel.Tunnel, cfg config.Config, p config.Profile, socksAddr, httpAddr string) {
+	a.tun = tun
+	a.running = true
+	a.proxyURL = "http://" + httpAddr
+	if a.net != nil {
+		a.proxyURL = "" // локального прокси в режиме VPN нет
+	} else {
+		a.sysProxyArgs = &sysProxyArgs{cfg: cfg, p: p, httpAddr: httpAddr, socksAddr: socksAddr}
+	}
+	a.effectiveProfile = p.ID
+}
+
+// startLocalOnly поднимает туннель к p без сервера (tunnel.Config.
+// ServerOptional): локальные слушатели или адаптер, решения ядра и путь
+// сети устройств к серверу, который появится, когда сервер ответит. Нужен,
+// когда сервер не отвечает, а сеть устройств включена.
+func (a *App) startLocalOnly(ctx context.Context, cfg config.Config, p config.Profile, gen int64) error {
+	tunCfg, socksAddr, httpAddr := a.tunnelConfig(cfg, p)
+	tunCfg.ServerOptional = true
+	tun := tunnel.New(tunCfg, a.Bus)
+	a.mu.Lock()
+	m := a.modes
+	a.mu.Unlock()
+	tun.SetBypass(m.Bypass)
+	tun.SetMeshPaused(!m.Mesh)
+	if err := startTunnel(ctx, tun); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	if a.gen != gen || ctx.Err() != nil {
+		a.mu.Unlock()
+		tun.Stop()
+		return errNotConnected
+	}
+	a.adoptLocked(tun, cfg, p, socksAddr, httpAddr)
+	a.mu.Unlock()
+	return nil
 }
 
 // startTunnel поднимает туннель: отмена ctx прерывает подключение, но после
@@ -220,6 +252,7 @@ func (a *App) tunnelConfig(cfg config.Config, p config.Profile) (_ tunnel.Config
 		LocalViaTunnel:  p.LocalViaTunnel,
 		UDPRelayEnabled: p.UDPRelayEnabled,
 		Mesh:            meshConfig(p, mode),
+		MeshHost:        a.meshHost,
 	}
 	a.mu.Lock()
 	netLayer := a.net
@@ -338,6 +371,17 @@ func (a *App) failoverTo(cfg config.Config, candidates []config.Profile, idx int
 	a.mu.Unlock()
 	if err != nil {
 		a.Bus.Errorf("не удалось перейти на запасной сервер: %v", err)
+		if a.meshWanted() {
+			// Сеть устройств нужна и без сервера: туннель остаётся местным
+			// (сервер ищется в фоне), гаснет только обход.
+			a.mu.Lock()
+			gen := a.gen
+			a.mu.Unlock()
+			if lerr := a.startLocalOnly(context.Background(), cfg, candidates[0], gen); lerr == nil {
+				a.machine.ServerLost(err)
+				return
+			}
+		}
 		// Связи больше нет: ядро выключит кнопки с этой ошибкой и снимет
 		// адаптер и прокси — интернет не должен остаться в пустом туннеле.
 		a.machine.LinkLost(err)

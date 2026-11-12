@@ -41,6 +41,12 @@
   «Обход», `bypass+mesh` — «Обход + сеть устройств».
 - `link`: связь с сервером — `stopped`, `connecting`, `connected`,
   `reconnecting`, `error`.
+- `meshLink`, `meshDirect` (только пока «Сеть устройств» включена): как
+  живёт сеть — `online` (через сервер), `local` (сервера нет, на прямой связи
+  `meshDirect` устройств), `error` (нет ни сервера, ни соседей),
+  `connecting`. Сеть устройств работает и без сервера: тогда `tunnel` —
+  `error` с причиной, `mesh` — `on`, `mode` — `mesh`, `link` —
+  `reconnecting` (сервер ищется в фоне).
 
 `POST /api/state` с `{"tunnel": true}`, `{"mesh": false}` или обоими — «хочу».
 Каждая кнопка меняет только своё. Ответ — состояние сразу после просьбы
