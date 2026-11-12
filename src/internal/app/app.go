@@ -91,6 +91,11 @@ type App struct {
 
 	stateMu   sync.Mutex
 	lastState string // последнее разосланное состояние ядра (см. publishState)
+
+	// meshHost — клиент сети устройств. Живёт по кнопке «Сеть устройств», а
+	// не по туннелю: без сервера, при переподключении и переходе на запасной
+	// сервер он тот же самый (см. tunnel.MeshHost, mesh.go).
+	meshHost *tunnel.MeshHost
 }
 
 // NetLayer заворачивает в туннель весь трафик системы — вместо системного
@@ -141,6 +146,7 @@ func New(cfg config.Config) *App {
 		tunneled: routing.NewDirectList(active.TunnelHosts),
 		seenApps: map[string]struct{}{},
 	}
+	a.meshHost = tunnel.NewMeshHost(tunnel.MeshLog(a.Bus))
 	a.machine = core.NewMachine((*driver)(a), core.Options{
 		Save:      a.saveWant,
 		Changed:   a.publishState,
@@ -464,8 +470,33 @@ func (a *App) startLink(ctx context.Context) error {
 		a.mu.Unlock()
 	}
 
+	// Сеть устройств нужна — её клиент поднимается сразу, ещё до сервера:
+	// кэш на диске, прямые соединения и маяки работают и без него.
+	meshOn := a.meshWanted()
+	if meshOn {
+		a.ensureMesh(candidates[0], true)
+	}
+
 	err := a.connectFrom(ctx, cfg, candidates, 0, gen)
-	if err != nil && ctx.Err() != nil {
+	if err == nil {
+		return nil
+	}
+	if meshOn && ctx.Err() == nil && !errors.Is(err, errNotConnected) {
+		// Сервера нет, а сеть устройств нужна: туннель поднимается без него
+		// (слушатели, адаптер, решения ядра), сервер ищется в фоне. Обход при
+		// этом гаснет с той же ошибкой — см. core.ServerDownError.
+		if lerr := a.startLocalOnly(ctx, cfg, candidates[0], gen); lerr == nil {
+			a.Bus.Warnf("Сервер недоступен (%v) — сеть устройств работает без него, сервер ищу в фоне", err)
+			return &core.ServerDownError{Err: err}
+		}
+	}
+	// Связь не поднялась совсем (или подключение отменили) — ядро её не
+	// снимет (снимать нечего), поэтому клиент сети гасим здесь. Если он
+	// нужен (смена сервера), следующее подключение поднимет его снова.
+	if meshOn {
+		a.meshHost.Stop()
+	}
+	if ctx.Err() != nil {
 		return ctx.Err() // отменили — это не ошибка подключения
 	}
 	return err
@@ -662,43 +693,43 @@ func (a *App) SpeedTest() (speedtest.Result, error) {
 }
 
 // MeshStatus — состояние сети устройств для экрана. State "off" — сеть
-// выключена в настройках или туннель не работает.
+// выключена в настройках, "stopped" — кнопка выключена.
 func (a *App) MeshStatus() mesh.Status {
-	a.mu.Lock()
-	tun, cfg := a.tun, a.cfg
-	a.mu.Unlock()
-	if tun != nil {
-		if m := tun.Mesh(); m != nil {
-			return m.Status()
-		}
+	if m := a.meshHost.Client(); m != nil {
+		return m.Status()
 	}
+	cfg := a.Config()
 	if cfg.Active().MeshEnabled {
 		return mesh.Status{State: "stopped"}
 	}
 	return mesh.Status{State: "off"}
 }
 
-// Mesh — клиент сети устройств работающего туннеля (nil — нет). Вместе с
-// DialApp делает App источником сети для приложений (internal/devnet).
-func (a *App) Mesh() *mesh.Client {
-	a.mu.Lock()
-	tun := a.tun
-	a.mu.Unlock()
-	if tun == nil {
-		return nil
-	}
-	return tun.Mesh()
-}
+// Mesh — клиент сети устройств (nil — кнопка выключена). Живёт и без
+// сервера. Вместе с DialApp делает App источником сети для приложений
+// (internal/devnet).
+func (a *App) Mesh() *mesh.Client { return a.meshHost.Client() }
 
 // DialApp — соединение от имени программы: путь выбирает ядро.
 func (a *App) DialApp(network, addr string) (net.Conn, error) {
 	a.mu.Lock()
 	tun := a.tun
 	a.mu.Unlock()
-	if tun == nil {
-		return nil, devnet.ErrOff
+	if tun != nil {
+		return tun.DialApp(addr)
 	}
-	return tun.DialApp(addr)
+	// Туннеля нет (ещё подключается) — ядро всё равно решает: в сеть
+	// устройств, если её клиент жив; иначе приложению — обычный путь.
+	if a.decideNoTunnel(addr) == core.RouteMesh {
+		return a.meshHost.Client().DialPeer(addr)
+	}
+	return nil, devnet.ErrOff
+}
+
+// decideNoTunnel — решение ядра для соединения самой программы, пока
+// туннеля нет: обхода нет, сеть устройств — если её клиент работает.
+func (a *App) decideNoTunnel(addr string) core.Route {
+	return core.Decide(core.Rules{Mesh: a.meshHost.Running()}, core.Conn{Target: addr})
 }
 
 // ProxyURL — адрес HTTP-прокси для подсказок в интерфейсе.

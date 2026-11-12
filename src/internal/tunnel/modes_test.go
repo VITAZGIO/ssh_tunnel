@@ -38,7 +38,7 @@ func TestMeshPause(t *testing.T) {
 	tun.SetMeshPaused(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tun.startMesh(ctx)
+	tun.startMesh()
 	if tun.Mesh() != nil {
 		t.Fatal("сеть на паузе, а клиент поднят")
 	}
@@ -55,5 +55,5 @@ func TestMeshPause(t *testing.T) {
 		t.Fatal("пауза не погасила сеть")
 	}
 	cancel()
-	tun.wg.Wait()
+	tun.meshHost.Stop()
 }

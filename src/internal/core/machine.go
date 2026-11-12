@@ -35,6 +35,23 @@ type Driver interface {
 // ErrNoMesh — кнопку «Сеть устройств» нажали, а у сервера сети нет.
 var ErrNoMesh = errors.New("сеть устройств не настроена для этого сервера: включи её в настройках сервера")
 
+// ServerDownError — Connect поднял местную часть (сеть устройств, слушатели,
+// то, к чему применяется режим), а сервер не ответил. Связь для ядра при
+// этом поднята: сеть устройств работает без сервера (кэш, прямые соединения,
+// маяки), а сервер платформа ищет в фоне. Круглая кнопка гаснет с ошибкой
+// Err — без сервера обхода нет, — а «Сеть устройств» остаётся включённой.
+type ServerDownError struct{ Err error }
+
+func (e *ServerDownError) Error() string { return e.Err.Error() }
+func (e *ServerDownError) Unwrap() error { return e.Err }
+
+// MeshReporter — необязательная часть Driver: как сейчас живёт сеть
+// устройств (State клиента: online, local, error, connecting…, и сколько
+// устройств видно напрямую). Есть — попадает в State.MeshLink.
+type MeshReporter interface {
+	MeshLink() (state string, direct int)
+}
+
 // Options — необязательные связи Machine с остальной программой.
 type Options struct {
 	// Save запоминает выбор человека (обе кнопки) — для восстановления после
@@ -204,6 +221,25 @@ func (m *Machine) LinkLost(err error) {
 	m.poke()
 }
 
+// ServerLost — сервер пропал (не поднялся и запасной), но местная часть
+// жива и сеть устройств нужна: связь для ядра остаётся, круглая кнопка гаснет
+// с этой ошибкой, а режим применяется заново — уже без обхода. Платформа к
+// этому моменту уже держит туннель без сервера.
+func (m *Machine) ServerLost(err error) {
+	m.mu.Lock()
+	if !m.linkUp {
+		m.mu.Unlock()
+		return
+	}
+	if m.want.Tunnel {
+		m.want.Tunnel, m.errT = false, m.failureLocked(err)
+	}
+	m.lastErr = err
+	m.reapply = true
+	m.mu.Unlock()
+	m.poke()
+}
+
 // Want — чего сейчас хочет человек.
 func (m *Machine) Want() Want {
 	m.mu.Lock()
@@ -264,6 +300,12 @@ func (m *Machine) SetModule(mod Module) {
 func (m *Machine) State() State {
 	link, detail := m.drv.Link()
 	avail := m.drv.MeshAvailable()
+	// Спрашивается до замка: платформа отвечает под своими замками.
+	var meshLink string
+	var meshDirect int
+	if r, ok := m.drv.(MeshReporter); ok {
+		meshLink, meshDirect = r.MeshLink()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	st := State{MeshAvailable: avail, Detail: detail, Seq: m.seq, Mode: ModeOff}
@@ -281,6 +323,9 @@ func (m *Machine) State() State {
 	}
 	st.Tunnel = button(m.want.Tunnel, m.hasApplied && m.applied.Bypass, m.errT)
 	st.Mesh = button(m.want.Mesh, m.hasApplied && m.applied.Mesh, m.errM)
+	if st.Mesh.Phase == PhaseOn {
+		st.MeshLink, st.MeshDirect = meshLink, meshDirect
+	}
 	ids := make([]string, 0, len(m.modules))
 	for id := range m.modules {
 		ids = append(ids, id)
@@ -531,7 +576,9 @@ func (m *Machine) startConnectLocked() {
 		defer m.connWG.Done()
 		err := m.drv.Connect(ctx)
 		cancelled := ctx.Err() != nil
-		if err != nil {
+		var down *ServerDownError
+		local := errors.As(err, &down)
+		if err != nil && !local {
 			cancel()
 		}
 
@@ -542,6 +589,14 @@ func (m *Machine) startConnectLocked() {
 			// Поднялась, даже если отмену нажали в последний миг: следующий
 			// шаг снимет её, если она больше никому не нужна.
 			m.linkUp, m.linkCancel = true, cancel
+		case local:
+			// Местная часть поднята, сервера нет: сеть устройств работает
+			// без него, обход — нет.
+			m.linkUp, m.linkCancel = true, cancel
+			m.lastErr = down.Err
+			if m.want.Tunnel {
+				m.want.Tunnel, m.errT = false, m.failureLocked(down.Err)
+			}
 		case cancelled:
 			// Отменили — это не ошибка подключения.
 		default:

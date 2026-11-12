@@ -100,6 +100,13 @@ type State struct {
 	// error (см. events.State*). Detail — подробность (адрес сервера).
 	Link   string `json:"link"`
 	Detail string `json:"detail,omitempty"`
+	// MeshLink — как живёт сеть устройств, пока её кнопка включена: online
+	// (через сервер), local (сервера нет, MeshDirect устройств напрямую),
+	// error (сервера нет и соседей не видно), connecting. Пусто — кнопка не
+	// включена или платформа не сообщает. MeshDirect — сколько устройств
+	// сейчас на прямой связи.
+	MeshLink   string `json:"meshLink,omitempty"`
+	MeshDirect int    `json:"meshDirect,omitempty"`
 	// Modules — статусы модулей для «Диагностики», по ID.
 	Modules []Module `json:"modules,omitempty"`
 	// Seq растёт с каждым изменением: экран отбрасывает устаревшее.

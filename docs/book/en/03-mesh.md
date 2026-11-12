@@ -38,5 +38,13 @@ without the server — devices in the same local network find each other on
 their own within about half a minute. A device with no direct path cannot be
 reached without the server, and the app says so right away.
 
+This also works when there is no server from the very start: the PC
+rebooted and the home internet is down. The "Device network" button turns
+on, and the status line says "no server, direct: 2" (how many devices are
+seen) or "no connection, no neighbours in sight". The round button turns
+off with an error meanwhile: without the server there is no bypass. When
+the internet is back, the device network connects to the server by itself;
+turn the round button on again (or autostart will).
+
 A device removed in the panel while you were without the server stops being
 let in as soon as this device talks to the server again.

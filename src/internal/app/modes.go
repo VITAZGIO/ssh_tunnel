@@ -176,6 +176,28 @@ func (d *driver) Connect(ctx context.Context) error { return d.app().startLink(c
 func (d *driver) Disconnect() {
 	a := d.app()
 	a.stop(!a.hardStop.Load())
+	// Связь снимают и при смене сервера (Restart) — тогда сеть устройств,
+	// если она нужна, живёт дальше; снимают совсем — гаснет и она.
+	if !a.meshWanted() {
+		a.meshHost.Stop()
+	}
+}
+
+// MeshLink — как живёт сеть устройств (core.MeshReporter): состояние
+// клиента и сколько устройств на прямой связи.
+func (d *driver) MeshLink() (string, int) {
+	c := d.app().meshHost.Client()
+	if c == nil {
+		return "", 0
+	}
+	st := c.Status()
+	n := 0
+	for _, p := range st.Peers {
+		if p.Direct {
+			n++
+		}
+	}
+	return st.State, n
 }
 
 func (d *driver) Link() (string, string) {
@@ -202,6 +224,15 @@ func (d *driver) Apply(m core.Modes, h core.Hygiene) error {
 	if tun == nil {
 		return errors.New("нет связи с сервером")
 	}
+	if m.Bypass && !tun.ServerReached() {
+		// Туннель поднят без сервера (ради сети устройств): обход без
+		// сервера невозможен. Подтолкнуть пул и подождать чуть-чуть —
+		// вдруг сервер уже вернулся.
+		if err := waitServer(tun, applyServerWait); err != nil {
+			return err
+		}
+	}
+	a.ensureMesh(p, m.Mesh)
 
 	tun.SetBypass(m.Bypass)
 	tun.SetMeshPaused(!m.Mesh)
@@ -224,6 +255,45 @@ func (d *driver) Apply(m core.Modes, h core.Hygiene) error {
 	a.mu.Unlock()
 	a.logModeChange(prev, m)
 	return nil
+}
+
+// applyServerWait — сколько Apply ждёт сервер, когда обход включают на
+// туннеле, поднятом без сервера. Переменная — для тестов.
+var applyServerWait = 5 * time.Second
+
+// waitServer подталкивает пул и ждёт основной слот не дольше d. Не дождался
+// — ошибка последней попытки (по ней экран покажет причину).
+func waitServer(tun *tunnel.Tunnel, d time.Duration) error {
+	tun.Kick()
+	deadline := time.Now().Add(d)
+	for !tun.ServerUp() {
+		if time.Now().After(deadline) {
+			if err := tun.ServerErr(); err != nil {
+				return err
+			}
+			return tunnel.ErrNoServer
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return nil
+}
+
+// meshWanted — кнопка «Сеть устройств» включена и сеть у сервера есть.
+func (a *App) meshWanted() bool { return a.machine.Want().Mesh && a.meshConfigured() }
+
+// ensureMesh запускает (on) или гасит клиента сети устройств с настройками
+// профиля p. Тот же клиент с теми же настройками не пересоздаётся.
+func (a *App) ensureMesh(p config.Profile, on bool) {
+	if !on {
+		a.meshHost.Stop()
+		return
+	}
+	tc, _, _ := a.tunnelConfig(a.Config(), p)
+	if mc := tc.MeshConfig(); mc != nil {
+		a.meshHost.Start(*mc)
+	} else {
+		a.meshHost.Stop()
+	}
 }
 
 // logModeChange пишет в журнал, что включилось и что выключилось.

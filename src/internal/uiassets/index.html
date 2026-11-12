@@ -2011,8 +2011,9 @@ const I18N = {
     to_top:'Наверх', dev_name:'Имя', dev_domain:'Домен', dev_domain_ip:'Домен · IP', mesh_no_peers:'Других устройств пока нет',
     mesh_new_confirm:'Создать новую сеть? Это устройство уйдёт из прежней, и остальным понадобится новый ключ.',
     mesh_not_saved:'новый ключ — не забудь «Сохранить»',
-    mesh_state_online:'В сети', mesh_state_connecting:'Подключаюсь', mesh_state_error:'Нет связи',
-    mesh_state_stopped:'Туннель выключен', mesh_state_off:'Выключена',
+    mesh_state_online:'В сети', mesh_state_connecting:'Подключаюсь', mesh_state_error:'Нет связи, соседей не видно',
+    mesh_state_local:'Без сервера, напрямую: ',
+    mesh_state_stopped:'Выключена кнопкой', mesh_state_off:'Выключена',
     vps_install_mesh:'Заодно поставить сеть устройств (как NetBird)',
     vps_install_mesh_note:'Твои устройства увидят друг друга по именам вида «ноутбук.mesh» — через этот сервер, '+
       'без белых адресов и проброса портов. Слушает только 127.0.0.1. После установки включи «Сеть устройств» '+
@@ -2328,8 +2329,9 @@ const I18N = {
     to_top:'Top', dev_name:'Name', dev_domain:'Domain', dev_domain_ip:'Domain · IP', mesh_no_peers:'No other devices yet',
     mesh_new_confirm:'Create a new network? This device will leave the old one, and the others will need the new key.',
     mesh_not_saved:'new key — remember to Save',
-    mesh_state_online:'Online', mesh_state_connecting:'Connecting', mesh_state_error:'No connection',
-    mesh_state_stopped:'Tunnel is off', mesh_state_off:'Off',
+    mesh_state_online:'Online', mesh_state_connecting:'Connecting', mesh_state_error:'No connection, no neighbours in sight',
+    mesh_state_local:'No server, direct: ',
+    mesh_state_stopped:'Turned off', mesh_state_off:'Off',
     vps_install_mesh:'Also install the device network (like NetBird)',
     vps_install_mesh_note:'Your devices will see each other by names like "laptop.mesh" — through this server, '+
       'no public IPs or port forwarding needed. Listens only on 127.0.0.1. After installing, turn on '+
@@ -3981,14 +3983,18 @@ function natText(n){
 function renderMesh(st){
   const peers = (st.peers || []);
   const online = peers.filter(p => p.online).length;
-  $('meshMainCount').textContent = st.state === 'online' ? online + ' / ' + peers.length : tr('mesh_state_' + st.state) || st.state;
-  const meshOn = st.state === 'online';
+  // Без сервера («local») на связи те, до кого есть прямой путь: экран
+  // только показывает, что сказал клиент сети (mesh.Status).
+  const direct = peers.filter(p => p.direct && !p.self).length;
+  const stText = st.state === 'local' ? tr('mesh_state_local') + direct : (tr('mesh_state_' + st.state) || st.state);
+  $('meshMainCount').textContent = st.state === 'online' ? online + ' / ' + peers.length : stText;
+  const meshOn = st.state === 'online' || st.state === 'local';
   $('toMeshMain').classList.toggle('on', meshOn);
   $('devWrap').classList.toggle('on', meshOn);
   renderDevRows(peers);
-  let state = tr('mesh_state_' + st.state) || st.state;
+  let state = stText;
   if(st.state === 'online' && st.self && st.self.host) state += ' — ' + st.self.host + '.mesh (' + st.self.ip + ')';
-  if(st.error) state += ': ' + st.error;
+  if(st.error && st.state !== 'local') state += ': ' + st.error;
   if(st.nat) state += '\n' + tr('mesh_nat') + ': ' + natText(st.nat);
   $('meshState').textContent = state;
   $('meshState').style.whiteSpace = 'pre-line';

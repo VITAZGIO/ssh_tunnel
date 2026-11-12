@@ -9,8 +9,8 @@ import (
 )
 
 // DialSelf — соединение самой программы (календарь к Nextcloud): через
-// работающий туннель, где путь выбирает ядро. Туннель выключен — напрямую;
-// сеть устройств тогда недоступна.
+// работающий туннель, где путь выбирает ядро. Туннель выключен — напрямую,
+// а «.mesh» — в сеть устройств, если её клиент жив (он живёт и без туннеля).
 func (a *App) DialSelf(ctx context.Context, addr string) (net.Conn, error) {
 	a.mu.Lock()
 	tun := a.tun
@@ -18,7 +18,10 @@ func (a *App) DialSelf(ctx context.Context, addr string) (net.Conn, error) {
 	if tun != nil {
 		return tun.DialSelf(addr)
 	}
-	if core.IsMeshTarget(addr) {
+	switch a.decideNoTunnel(addr) {
+	case core.RouteMesh:
+		return a.meshHost.Client().DialPeer(addr)
+	case core.RouteBlock:
 		return nil, errors.New("сеть устройств выключена — включи её на главном экране")
 	}
 	var d net.Dialer

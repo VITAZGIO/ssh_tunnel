@@ -156,6 +156,18 @@ type Config struct {
 	// выключена.
 	Mesh *mesh.Config
 
+	// MeshHost — внешний хозяин клиента сети устройств (см. meshhost.go):
+	// клиент живёт по кнопке «Сеть устройств», а не по пулу, туннель лишь
+	// даёт ему путь к серверу. nil — туннель держит клиента сам, как раньше:
+	// столько, сколько живёт пул (так работает Android).
+	MeshHost *MeshHost
+
+	// ServerOptional — подняться и без сервера: первое SSH-соединение не
+	// ждётся, локальные слушатели и сеть устройств работают сразу, а пул
+	// подключается в фоне, как после обрыва. Нужен, когда включена сеть
+	// устройств: ей сервер не обязателен.
+	ServerOptional bool
+
 	// DrainTimeout — сколько после «Отключить» держать локальные слушатели
 	// живыми, водя трафик напрямую (см. Drain и docs/DRAIN_SPEC.md). Ноль
 	// означает defaultDrainTimeout; тесты ставят сюда миллисекунды, чтобы не
@@ -262,14 +274,18 @@ type Tunnel struct {
 	drainMu    sync.Mutex
 	drainTimer *time.Timer
 
-	// mesh — клиент сети устройств, пока пул жив (см. startMesh).
-	mesh atomic.Pointer[mesh.Client]
-	// meshCancel гасит клиента сети устройств отдельно от пула — для кнопки
-	// «Сеть» на главном экране (см. SetMeshPaused). Под mu.
-	meshCancel context.CancelFunc
+	// meshHost — хозяин клиента сети устройств: внешний (Config.MeshHost)
+	// или свой (ownMesh), который живёт столько же, сколько пул.
+	meshHost *MeshHost
+	ownMesh  bool
 	// meshPaused — сеть устройств выключена кнопкой, хотя в настройках
 	// сервера включена.
 	meshPaused atomic.Bool
+	// serverSeen — с сервером хоть раз было живое соединение (после
+	// ServerOptional его может не быть вовсе). dialErr — чем кончилась
+	// последняя неудачная попытка основного слота.
+	serverSeen atomic.Bool
+	dialErr    atomic.Pointer[errBox]
 	// bypassOff — обход блокировок выключен: туннель держится только ради
 	// сети устройств, а всё остальное идёт напрямую (см. SetBypass).
 	bypassOff atomic.Bool
@@ -295,8 +311,14 @@ type stats struct {
 	total  atomic.Int64
 }
 
+// errBox — ошибка для atomic.Pointer.
+type errBox struct{ err error }
+
 func New(cfg Config, bus *events.Bus) *Tunnel {
-	t := &Tunnel{cfg: cfg, bus: bus}
+	t := &Tunnel{cfg: cfg, bus: bus, meshHost: cfg.MeshHost}
+	if t.meshHost == nil {
+		t.meshHost, t.ownMesh = NewMeshHost(MeshLog(bus)), true
+	}
 	t.localViaTunnel.Store(cfg.LocalViaTunnel)
 	t.SetDNSMode(cfg.FakeIP, cfg.RealIP)
 	t.state.Store(events.StateStopped)
@@ -453,8 +475,23 @@ func (t *Tunnel) StartContext(parent context.Context) error {
 
 	go t.keepDirectResolved(t.ctx)
 
-	t.setState(events.StateConnected, fmt.Sprintf("%s:%d", t.cfg.Host, t.cfg.SSHPort))
+	t.reportStarted()
 	return nil
+}
+
+// reportStarted — состояние после успешного старта: «подключён», если
+// основной слот уже на связи, иначе (ServerOptional) — «переподключение» с
+// причиной: местная часть работает, сервер ищется в фоне.
+func (t *Tunnel) reportStarted() {
+	if t.primaryUp() {
+		t.setState(events.StateConnected, fmt.Sprintf("%s:%d", t.cfg.Host, t.cfg.SSHPort))
+		return
+	}
+	if b := t.dialErr.Load(); b != nil {
+		t.reportDialErr(events.StateReconnecting, b.err)
+		return
+	}
+	t.setState(events.StateReconnecting, ErrNoServer.Error())
 }
 
 // loadSigner читает приватный ключ текущего сервера. Отдельно от Start,
@@ -493,6 +530,16 @@ func (t *Tunnel) startPool() error {
 	// Resume поле перезаписывается, пока горутины прежнего пула ещё живы.
 	ctx := t.poolCtx
 
+	t.mu.RLock()
+	optional := t.cfg.ServerOptional
+	t.mu.RUnlock()
+	if optional {
+		// Без сервера: пул пустой, основной слот подключится в фоне (как
+		// после обрыва), а всё местное работает уже сейчас.
+		t.launchPool(ctx, nil, nil)
+		return nil
+	}
+
 	// Первое соединение поднимаем синхронно: если сервер недоступен или ключ
 	// не подходит, пользователь должен узнать об этом сразу, а не из лога.
 	first, wire, err := t.dialFirst(ctx)
@@ -507,7 +554,13 @@ func (t *Tunnel) startPool() error {
 		t.reportDialErr(events.StateError, err)
 		return err
 	}
+	t.launchPool(ctx, first, wire)
+	return nil
+}
 
+// launchPool заводит слоты пула и фоновые горутины. first — уже поднятое
+// первое соединение; nil — основной слот подключится сам в фоне.
+func (t *Tunnel) launchPool(ctx context.Context, first *ssh.Client, wire *wireConn) {
 	n := t.cfg.PoolSize
 	if n < 1 {
 		n = 1
@@ -516,7 +569,11 @@ func (t *Tunnel) startPool() error {
 	for i := range links {
 		links[i] = &link{}
 	}
-	links[0].setWire(first, wire)
+	if first != nil {
+		links[0].setWire(first, wire)
+		t.serverSeen.Store(true)
+		t.dialErr.Store(nil)
+	}
 	t.mu.Lock()
 	t.links = links
 	t.mu.Unlock()
@@ -529,60 +586,111 @@ func (t *Tunnel) startPool() error {
 	go t.publishStats(ctx)
 	t.wg.Add(1)
 	go t.pingLoop(ctx)
-	t.startMesh(ctx)
-	return nil
+	t.startMesh()
 }
 
-// startMesh поднимает клиента сети устройств — он живёт столько же, сколько
-// пул: без связи с сервером сети устройств нет.
-func (t *Tunnel) startMesh(ctx context.Context) {
-	t.mu.RLock()
-	cfg := t.cfg.Mesh
-	t.mu.RUnlock()
-	if cfg == nil || cfg.Key == "" || t.meshPaused.Load() {
-		t.mesh.Store(nil)
-		return
+// MeshLog — строки клиента сети устройств в журнал программы.
+func MeshLog(bus *events.Bus) func(level, text string) {
+	return func(level, text string) {
+		if level == "warn" {
+			bus.Warnf("%s", text)
+		} else {
+			bus.Infof("%s", text)
+		}
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	t.mu.Lock()
-	if t.meshCancel != nil {
-		t.meshCancel()
+}
+
+// MeshConfig — настройки клиента сети устройств для этого туннеля: Mesh из
+// настроек плюс то, как проверке NAT ходить мимо туннеля. nil — сети нет.
+func (c Config) MeshConfig() *mesh.Config {
+	if c.Mesh == nil || c.Mesh.Key == "" {
+		return nil
 	}
-	t.meshCancel = cancel
-	t.mu.Unlock()
-	mc := *cfg
+	mc := *c.Mesh
 	// Проверка NAT идёт мимо туннеля — теми же сокетами, что и соединения
 	// «напрямую» (на Android и в режиме VPN они помечены).
 	if mc.ProbeListen == nil {
-		lc := net.ListenConfig{Control: t.cfg.ProtectSocket}
+		lc := net.ListenConfig{Control: c.ProtectSocket}
 		mc.ProbeListen = func(network string) (net.PacketConn, error) {
 			return lc.ListenPacket(context.Background(), network, ":0")
 		}
 	}
 	if mc.ProbeDial == nil {
-		d := net.Dialer{Control: t.cfg.ProtectSocket}
+		d := net.Dialer{Control: c.ProtectSocket}
 		mc.ProbeDial = d.Dial
 	}
 	if mc.ProbeResolver == nil {
-		mc.ProbeResolver = t.cfg.Resolver
+		mc.ProbeResolver = c.Resolver
 	}
-	c := mesh.New(mc, t.Dial, func(level, text string) {
-		if level == "warn" {
-			t.bus.Warnf("%s", text)
-		} else {
-			t.bus.Infof("%s", text)
-		}
-	})
-	t.mesh.Store(c)
-	t.wg.Add(1)
-	go func() {
-		defer t.wg.Done()
-		c.Run(ctx)
-	}()
+	return &mc
 }
 
-// Mesh — клиент сети устройств, если она включена и туннель работает.
-func (t *Tunnel) Mesh() *mesh.Client { return t.mesh.Load() }
+// startMesh даёт клиенту сети устройств путь к серверу через этот пул. Свой
+// клиент (без Config.MeshHost) заодно и запускается — он живёт столько же,
+// сколько пул; внешний запускает и гасит его хозяин по кнопке.
+func (t *Tunnel) startMesh() {
+	t.meshHost.Attach(t, t.serverDial)
+	if !t.ownMesh || t.meshPaused.Load() {
+		return
+	}
+	t.mu.RLock()
+	mc := t.cfg.MeshConfig()
+	t.mu.RUnlock()
+	if mc == nil {
+		return
+	}
+	t.meshHost.Start(*mc)
+}
+
+// stopMesh — пул больше не жив: путь к серверу снимается, свой клиент
+// гаснет. Внешний клиент живёт дальше — без сервера.
+func (t *Tunnel) stopMesh() {
+	t.meshHost.Detach(t)
+	if t.ownMesh {
+		t.meshHost.Stop()
+	}
+}
+
+// serverDial — шов ServerDial для клиента сети устройств: соединение через
+// пул, а нет живого слота — сразу ErrNoServer, без ожидания (клиент сам
+// повторит со своей паузой).
+func (t *Tunnel) serverDial(network, addr string) (net.Conn, error) {
+	if t.draining.Load() || (t.ctx != nil && t.ctx.Err() != nil) {
+		return nil, ErrNoServer
+	}
+	conn, err, hadLink := t.tryDial(network, addr)
+	if !hadLink {
+		return nil, ErrNoServer
+	}
+	return conn, err
+}
+
+// ServerUp — основной слот пула сейчас на связи с сервером.
+func (t *Tunnel) ServerUp() bool { return !t.draining.Load() && t.primaryUp() }
+
+// ServerReached — с сервером хоть раз было живое соединение (туннель,
+// поднятый с ServerOptional, мог не видеть сервера вовсе).
+func (t *Tunnel) ServerReached() bool { return t.serverSeen.Load() }
+
+// ServerErr — почему основной слот сейчас не на связи; nil — неизвестно или
+// всё в порядке.
+func (t *Tunnel) ServerErr() error {
+	if b := t.dialErr.Load(); b != nil {
+		return b.err
+	}
+	return nil
+}
+
+// Mesh — клиент сети устройств, если она включена (и не на паузе).
+func (t *Tunnel) Mesh() *mesh.Client {
+	if t.meshPaused.Load() {
+		return nil
+	}
+	return t.meshHost.Client()
+}
+
+// MeshHost — хозяин клиента сети устройств этого туннеля.
+func (t *Tunnel) MeshHost() *MeshHost { return t.meshHost }
 
 // MeshConfigured — сеть устройств включена в настройках сервера (неважно,
 // поставлена ли она сейчас на паузу кнопкой).
@@ -599,24 +707,20 @@ func (t *Tunnel) SetMeshPaused(paused bool) {
 	if t.meshPaused.Swap(paused) == paused {
 		return
 	}
+	if !t.ownMesh {
+		return // внешним клиентом управляет его хозяин; здесь — только правила
+	}
 	if paused {
-		t.mesh.Store(nil)
-		t.mu.Lock()
-		cancel := t.meshCancel
-		t.meshCancel = nil
-		t.mu.Unlock()
-		if cancel != nil {
-			cancel()
-		}
+		t.meshHost.Stop()
 		return
 	}
-	// Включаем обратно, только если пул жив: без сервера сети нет, а при
-	// следующем подключении startMesh поднимет её сам.
+	// Свой клиент включаем обратно, только если пул жив: при следующем
+	// подключении startMesh поднимет его сам.
 	t.mu.RLock()
 	ctx := t.poolCtx
 	t.mu.RUnlock()
 	if ctx != nil && ctx.Err() == nil && !t.draining.Load() {
-		t.startMesh(ctx)
+		t.startMesh()
 	}
 }
 
@@ -637,7 +741,7 @@ func (t *Tunnel) viaServer() bool { return !t.draining.Load() && !t.bypassOff.Lo
 
 // meshTarget — цель ведёт в сеть устройств, и сеть включена.
 func (t *Tunnel) meshTarget(target string) *mesh.Client {
-	if m := t.mesh.Load(); m != nil && m.Match(target) {
+	if m := t.Mesh(); m != nil && m.Match(target) {
 		return m
 	}
 	return nil
@@ -849,7 +953,7 @@ func (t *Tunnel) Drain() {
 	if t.poolCancel != nil {
 		t.poolCancel()
 	}
-	t.mesh.Store(nil)
+	t.stopMesh()
 	for _, l := range t.snapLinks() {
 		l.set(nil)
 	}
@@ -956,7 +1060,7 @@ func (t *Tunnel) Resume() error {
 		t.Stop()
 		return err
 	}
-	t.setState(events.StateConnected, fmt.Sprintf("%s:%d", t.cfg.Host, t.cfg.SSHPort))
+	t.reportStarted()
 	t.bus.Infof("Туннель снова включён — уже открытые соединения пошли через сервер")
 	return nil
 }
@@ -1017,7 +1121,7 @@ func (t *Tunnel) Stop() {
 	t.drainMu.Unlock()
 
 	t.cancel()
-	t.mesh.Store(nil)
+	t.stopMesh()
 	// Stop может прийти одновременно с двух сторон — конец слива по таймеру
 	// и «выход» человека; список слушателей трогаем под замком.
 	t.mu.Lock()
@@ -1308,6 +1412,7 @@ func (t *Tunnel) keepLinkAlive(ctx context.Context, l *link, idx int) {
 					return
 				}
 				if idx == 0 {
+					t.dialErr.Store(&errBox{err})
 					t.reportDialErr(events.StateReconnecting, err)
 				}
 				select {
@@ -1327,9 +1432,17 @@ func (t *Tunnel) keepLinkAlive(ctx context.Context, l *link, idx int) {
 			l.setWire(c, w)
 			backoff = time.Second
 			misses = 0
+			seen := t.serverSeen.Swap(true)
+			if idx == 0 {
+				t.dialErr.Store(nil)
+			}
 			if t.State() == events.StateReconnecting {
 				t.setState(events.StateConnected, fmt.Sprintf("%s:%d", t.cfg.Host, t.cfg.SSHPort))
-				t.bus.Infof("Связь с сервером восстановлена")
+				if seen {
+					t.bus.Infof("Связь с сервером восстановлена")
+				} else {
+					t.bus.Infof("Сервер появился — подключились")
+				}
 			}
 			continue
 		}

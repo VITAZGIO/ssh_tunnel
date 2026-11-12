@@ -136,6 +136,27 @@ type coreState struct {
 	Mode          string `json:"mode"`
 	Link          string `json:"link"`
 	Detail        string `json:"detail"`
+	// MeshLink — как живёт включённая сеть устройств (core.State.MeshLink),
+	// MeshDirect — сколько устройств на прямой связи.
+	MeshLink   string `json:"meshLink"`
+	MeshDirect int    `json:"meshDirect"`
+}
+
+// meshLinkText — MeshLink по-человечески; пусто — не печатать.
+func meshLinkText(state string, direct int) string {
+	switch state {
+	case "":
+		return ""
+	case "online":
+		return "через сервер"
+	case "local":
+		return fmt.Sprintf("без сервера, напрямую: %d", direct)
+	case "error":
+		return "нет связи, соседей не видно"
+	case "connecting":
+		return "подключаюсь…"
+	}
+	return state
 }
 
 var phaseText = map[string]string{"off": "выключен", "connecting": "подключаюсь…", "on": "включён", "error": "ошибка"}
@@ -162,6 +183,9 @@ func (r *runner) printState(raw []byte) error {
 	line("Туннель:", st.Tunnel.Phase, st.Tunnel.Error)
 	if st.MeshAvailable {
 		line("Сеть устройств:", st.Mesh.Phase, st.Mesh.Error)
+		if t := meshLinkText(st.MeshLink, st.MeshDirect); t != "" {
+			fmt.Fprintf(r.out, "%-16s %s\n", "Устройства:", t)
+		}
 	}
 	m := modeText[st.Mode]
 	if m == "" {
