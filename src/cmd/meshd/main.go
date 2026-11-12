@@ -64,6 +64,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -99,6 +100,13 @@ const (
 	pingEvery = 15 * time.Second
 	// maxField — предел для строк, которые устройство рассказывает о себе.
 	maxField = 64
+	// emptyNetKeep — пустая сеть (без устройств) удаляется сама через столько
+	// после того, как из неё убрали последнее устройство.
+	emptyNetKeep = 7 * 24 * time.Hour
+	// maxEvents — размер журнала событий в памяти.
+	maxEvents = 1000
+	// maxNetName — предел длины имени сети (в символах).
+	maxNetName = 64
 )
 
 // meshRange — адреса устройств. Диапазон 198.18.0.0/15 зарезервирован под
@@ -265,6 +273,12 @@ func (l *linkStats) quality() string {
 
 type network struct {
 	Devices map[string]*device `json:"devices"`
+	// Name — имя сети из панели (необязательное). Created — когда сеть
+	// появилась, EmptySince — с какого момента в ней нет устройств (0 — есть);
+	// оба в секундах unix. В старых файлах состояния этих полей нет.
+	Name       string `json:"name,omitempty"`
+	Created    int64  `json:"created,omitempty"`
+	EmptySince int64  `json:"emptySince,omitempty"`
 }
 
 type call struct {
@@ -308,6 +322,13 @@ type server struct {
 	saveMu   sync.Mutex
 	dirty    chan struct{}
 	started  time.Time
+	// now — часы; в тестах подменяются.
+	now func() time.Time
+	// events — журнал событий (кольцо на maxEvents), evSeq — номер последнего.
+	// Только в памяти: после перезапуска meshd журнал пуст, нумерация
+	// начинается заново.
+	events []event
+	evSeq  int64
 }
 
 func newServer(path string) *server {
@@ -322,6 +343,7 @@ func newServer(path string) *server {
 		connUser:  procConnUser,
 		dirty:     make(chan struct{}, 1),
 		started:   time.Now(),
+		now:       time.Now,
 	}
 	s.load()
 	s.loadPolicy()
@@ -357,8 +379,27 @@ func (s *server) load() {
 				delete(n.Devices, did)
 			}
 		}
+		// Старые файлы без created/emptySince: дата создания — по самому
+		// раннему устройству, пустая сеть считается пустой с этого момента.
+		if n.Created == 0 {
+			for _, d := range n.Devices {
+				if u := unixOrZero(d.FirstSeen); u != 0 && (n.Created == 0 || u < n.Created) {
+					n.Created = u
+				}
+			}
+			if n.Created == 0 {
+				n.Created = now.Unix()
+			}
+		}
+		if len(n.Devices) == 0 && n.EmptySince == 0 {
+			n.EmptySince = now.Unix()
+		}
+		if len(n.Devices) > 0 {
+			n.EmptySince = 0
+		}
 		s.nets[id] = n
 	}
+	s.pruneLocked(now)
 }
 
 // saveLoop пишет состояние на диск не чаще раза в секунду.
@@ -659,10 +700,11 @@ func (s *server) control(conn net.Conn, m msg) {
 			writeMsg(conn, msg{Op: "error", Error: "на сервере слишком много сетей"})
 			return
 		}
-		n = &network{Devices: map[string]*device{}}
+		n = &network{Devices: map[string]*device{}, Created: s.now().Unix()}
 		s.nets[id] = n
 	}
 	d := n.Devices[m.Device]
+	newDevice := false
 	if d == nil {
 		if len(n.Devices) >= maxDevicesPerNet {
 			s.mu.Unlock()
@@ -677,6 +719,8 @@ func (s *server) control(conn net.Conn, m msg) {
 		}
 		d = &device{ID: m.Device, IP: ip}
 		n.Devices[m.Device] = d
+		n.EmptySince = 0
+		newDevice = true
 	}
 	if d.ctrl != nil {
 		// То же устройство подключилось заново (сменилась сеть) — старое
@@ -706,6 +750,10 @@ func (s *server) control(conn net.Conn, m msg) {
 	d.ctrl = c
 	c.send(msg{Op: "welcome", V: protoVersion, IP: d.IP, Host: d.Host, Peers: s.peersLocked(n, d), Stun: s.stunPorts})
 	s.broadcastLocked(n)
+	if newDevice {
+		s.emitLocked(event{Type: "new-device", Net: id, Device: d.ID, Text: d.displayName()})
+	}
+	s.emitLocked(event{Type: "connect", Net: id, Device: d.ID, Text: d.displayName()})
 	s.mu.Unlock()
 	s.markDirty()
 
@@ -741,6 +789,7 @@ func (s *server) control(conn net.Conn, m msg) {
 		d.direct = nil
 		d.LastSeen = time.Now()
 		s.broadcastLocked(n)
+		s.emitLocked(event{Type: "disconnect", Net: id, Device: d.ID, Text: d.displayName()})
 	}
 	s.mu.Unlock()
 	s.markDirty()
@@ -846,6 +895,7 @@ func (s *server) relayLink(conn net.Conn, m msg) {
 	rec.LastSeen = time.Now()
 	s.relays[id] = r
 	s.broadcastAllLocked()
+	s.emitLocked(event{Type: "server-up", Device: id, Text: rec.Name})
 	s.mu.Unlock()
 	s.markDirty()
 	log.Printf("подключился сервер %q (%s), адрес в сети %s", r.Name, r.Host, rec.IP)
@@ -869,6 +919,7 @@ func (s *server) relayLink(conn net.Conn, m msg) {
 			rec.LastSeen = time.Now()
 		}
 		s.broadcastAllLocked()
+		s.emitLocked(event{Type: "server-down", Device: id, Text: r.Name})
 	}
 	s.mu.Unlock()
 	s.markDirty()
@@ -914,6 +965,7 @@ func (s *server) dial(conn net.Conn, m msg) {
 	}
 	if ip, ok := s.serverTargetLocked(n, m.To); ok {
 		if !s.policy.allowed(user, serversGroup, m.Port) {
+			s.emitLocked(event{Type: "denied", Net: id, Device: from.ID, Peer: m.To, Port: m.Port, Text: "server"})
 			s.mu.Unlock()
 			fail(deniedText)
 			return
@@ -934,6 +986,7 @@ func (s *server) dial(conn net.Conn, m msg) {
 		return
 	}
 	if !s.policy.allowed(user, target.User, m.Port) {
+		s.emitLocked(event{Type: "denied", Net: id, Device: from.ID, Peer: target.ID, Port: m.Port})
 		s.mu.Unlock()
 		fail(deniedText)
 		return
@@ -1092,8 +1145,11 @@ type adminDevice struct {
 }
 
 type adminNetwork struct {
-	ID      string        `json:"id"`
-	Devices []adminDevice `json:"devices"`
+	ID         string        `json:"id"`
+	Name       string        `json:"name"`
+	Created    int64         `json:"created"`
+	EmptySince int64         `json:"emptySince"` // 0 — в сети есть устройства
+	Devices    []adminDevice `json:"devices"`
 }
 
 // adminServer — подключённый побочный сервер глазами панели.
@@ -1142,9 +1198,9 @@ func round1(v float64) float64 { return math.Round(v*10) / 10 }
 func (s *server) adminState() adminState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st := adminState{Version: version, StartedAt: s.started.Unix()}
+	st := adminState{Version: version, StartedAt: s.started.Unix(), Networks: []adminNetwork{}}
 	for id, n := range s.nets {
-		an := adminNetwork{ID: id}
+		an := adminNetwork{ID: id, Name: n.Name, Created: n.Created, EmptySince: n.EmptySince}
 		for _, d := range n.Devices {
 			ad := adminDevice{
 				ID: d.ID, Name: d.Name, Alias: d.Alias, Display: d.displayName(),
@@ -1211,6 +1267,7 @@ func (s *server) rename(netID, devID, alias string) error {
 	d := n.Devices[devID]
 	d.Alias = alias
 	d.Host = s.uniqueHostLocked(n, devID, d.displayName())
+	s.emitLocked(event{Type: "rename", Net: netID, Device: devID, Text: d.displayName()})
 	s.broadcastLocked(n)
 	s.markDirty()
 	return nil
@@ -1231,9 +1288,226 @@ func (s *server) forget(netID, devID string) error {
 		d.ctrl.conn.Close()
 		d.ctrl = nil
 	}
+	if len(n.Devices) == 0 {
+		n.EmptySince = s.now().Unix()
+	}
+	s.emitLocked(event{Type: "forget", Net: netID, Device: devID, Text: d.displayName()})
 	s.broadcastLocked(n)
 	s.markDirty()
 	return nil
+}
+
+// ---------- сети: имя, удаление, уборка пустых ----------
+
+// validNetName — имя сети из панели: пустое (убрать имя) или до maxNetName
+// символов без управляющих. Пробелы по краям срезаются до проверки.
+func validNetName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if len([]rune(name)) > maxNetName {
+		return "", errors.New("имя сети длиннее 64 символов")
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return "", errors.New("недопустимый символ в имени сети")
+		}
+	}
+	return name, nil
+}
+
+// renameNet задаёт сети имя; пустое — убрать.
+func (s *server) renameNet(netID, name string) error {
+	name, err := validNetName(name)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := s.nets[netID]
+	if n == nil {
+		return errors.New("нет такой сети")
+	}
+	n.Name = name
+	s.emitLocked(event{Type: "rename", Net: netID, Text: name})
+	s.markDirty()
+	return nil
+}
+
+// deleteNet удаляет сеть целиком: устройства, которые сейчас на связи,
+// отключаются, состояние сети стирается, адреса освобождаются.
+//
+// Сеть берётся из ключа, который знают устройства, поэтому она может
+// появиться снова: как только какое-нибудь устройство подключится с тем же
+// ключом, создастся новая пустая сеть (без имени, с новой датой создания) и
+// устройство получит в ней новый адрес. Чтобы сеть исчезла насовсем, ключ
+// нужно убрать с устройств.
+func (s *server) deleteNet(netID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := s.nets[netID]
+	if n == nil {
+		return errors.New("нет такой сети")
+	}
+	for _, d := range n.Devices {
+		if d.ctrl != nil {
+			d.ctrl.conn.Close()
+			d.ctrl = nil
+		}
+	}
+	// Вызовы, ждущие устройства этой сети, никому уже не нужны.
+	for _, cl := range s.calls {
+		if cl.net == netID {
+			select {
+			case cl.answer <- answer{err: "сеть удалена"}:
+			default:
+			}
+		}
+	}
+	delete(s.nets, netID)
+	s.emitLocked(event{Type: "net-delete", Net: netID, Text: n.Name})
+	s.markDirty()
+	return nil
+}
+
+// pruneLocked удаляет сети, в которых нет устройств уже emptyNetKeep. Сеть с
+// устройствами не удаляется никогда. Под s.mu.
+func (s *server) pruneLocked(now time.Time) {
+	for id, n := range s.nets {
+		if len(n.Devices) > 0 {
+			n.EmptySince = 0
+			continue
+		}
+		if n.EmptySince == 0 {
+			n.EmptySince = now.Unix()
+			continue
+		}
+		if now.Sub(time.Unix(n.EmptySince, 0)) >= emptyNetKeep {
+			delete(s.nets, id)
+			s.emitLocked(event{Type: "net-delete", Net: id, Text: "пустая сеть убрана автоматически"})
+			s.markDirty()
+		}
+	}
+}
+
+func (s *server) prune() {
+	s.mu.Lock()
+	s.pruneLocked(s.now())
+	s.mu.Unlock()
+}
+
+// pruneLoop раз в час убирает старые пустые сети.
+func (s *server) pruneLoop() {
+	for range time.Tick(time.Hour) {
+		s.prune()
+	}
+}
+
+// ---------- журнал событий ----------
+
+// event — одна запись журнала. Net/Device/Peer — id; Text — подпись для
+// человека. Журнал живёт только в памяти.
+type event struct {
+	Seq    int64  `json:"seq"`
+	Time   int64  `json:"time"`
+	Type   string `json:"type"`
+	Net    string `json:"net,omitempty"`
+	Device string `json:"device,omitempty"`
+	Peer   string `json:"peer,omitempty"`
+	Port   int    `json:"port,omitempty"`
+	Text   string `json:"text,omitempty"`
+}
+
+// emitLocked дописывает событие в журнал. Под s.mu.
+func (s *server) emitLocked(e event) {
+	s.evSeq++
+	e.Seq = s.evSeq
+	e.Time = s.now().Unix()
+	if len(s.events) >= maxEvents {
+		copy(s.events, s.events[1:])
+		s.events = s.events[:maxEvents-1]
+	}
+	s.events = append(s.events, e)
+}
+
+// eventsAfter — события с seq > after, самые новые последними, не больше limit
+// (по умолчанию 200, максимум maxEvents). Если событий больше лимита —
+// самые новые из них.
+func (s *server) eventsAfter(after int64, limit int) (int64, []event) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > maxEvents {
+		limit = maxEvents
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []event{}
+	for _, e := range s.events {
+		if e.Seq > after {
+			out = append(out, e)
+		}
+	}
+	if len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return s.evSeq, out
+}
+
+// ---------- проверка доступа ----------
+
+type checkResult struct {
+	Allowed bool   `json:"allowed"`
+	Rule    int    `json:"rule"` // индекс правила или -1
+	Reason  string `json:"reason"`
+	Visible bool   `json:"visible"`
+}
+
+// userOfLocked — пользователь устройства (или serversGroup для сервера) по
+// id; ok=false — такого нет. Под s.mu.
+func (s *server) userOfLocked(n *network, id string) (user string, isServer, ok bool) {
+	if d := n.Devices[id]; d != nil {
+		return d.User, false, true
+	}
+	if id == selfIP {
+		return serversGroup, true, true
+	}
+	if _, found := s.relayRecs[id]; found {
+		return serversGroup, true, true
+	}
+	return "", false, false
+}
+
+// check отвечает, может ли устройство from открыть соединение к to на порт.
+// Решает тот же policy, что и dial.
+func (s *server) check(netID, from, to string, port int) (checkResult, error) {
+	if port < 0 || port > 65535 {
+		return checkResult{}, errors.New("неверный порт")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := s.nets[netID]
+	if n == nil {
+		return checkResult{}, errors.New("нет такой сети")
+	}
+	fu, fromServer, ok1 := s.userOfLocked(n, from)
+	tu, _, ok2 := s.userOfLocked(n, to)
+	if !ok1 || !ok2 {
+		return checkResult{Rule: -1, Reason: "unknown device"}, nil
+	}
+	res := checkResult{Rule: -1, Visible: s.policy.visible(fu, tu)}
+	switch {
+	case fromServer:
+		res.Reason = "server cannot initiate"
+	case !s.policy.Enabled:
+		res.Allowed, res.Reason = true, "policy off"
+	default:
+		res.Rule = s.policy.match(fu, tu, port)
+		if res.Rule >= 0 {
+			res.Allowed, res.Reason = true, "rule"
+		} else {
+			res.Reason = "no rule"
+		}
+	}
+	return res, nil
 }
 
 func (s *server) adminHandler() http.Handler {
@@ -1255,6 +1529,10 @@ func (s *server) adminHandler() http.Handler {
 		Name    string `json:"name"`
 		Enabled *bool  `json:"enabled"`
 		Ports   string `json:"ports"`
+		// Для /v1/check.
+		From string `json:"from"`
+		To   string `json:"to"`
+		Port int    `json:"port"`
 	}
 	decode := func(r *http.Request) (req, error) {
 		var q req
@@ -1306,6 +1584,34 @@ func (s *server) adminHandler() http.Handler {
 			err = s.setPolicy(p)
 		}
 		reply(w, map[string]bool{"ok": true}, err)
+	})
+	mux.HandleFunc("/v1/net/rename", func(w http.ResponseWriter, r *http.Request) {
+		q, err := decode(r)
+		if err == nil {
+			err = s.renameNet(q.Net, q.Name)
+		}
+		reply(w, map[string]bool{"ok": true}, err)
+	})
+	mux.HandleFunc("/v1/net/delete", func(w http.ResponseWriter, r *http.Request) {
+		q, err := decode(r)
+		if err == nil {
+			err = s.deleteNet(q.Net)
+		}
+		reply(w, map[string]bool{"ok": true}, err)
+	})
+	mux.HandleFunc("/v1/events", func(w http.ResponseWriter, r *http.Request) {
+		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		seq, evs := s.eventsAfter(after, limit)
+		reply(w, map[string]any{"seq": seq, "events": evs}, nil)
+	})
+	mux.HandleFunc("/v1/check", func(w http.ResponseWriter, r *http.Request) {
+		q, err := decode(r)
+		var res checkResult
+		if err == nil {
+			res, err = s.check(q.Net, q.From, q.To, q.Port)
+		}
+		reply(w, res, err)
 	})
 	mux.HandleFunc("/v1/forget", func(w http.ResponseWriter, r *http.Request) {
 		q, err := decode(r)
@@ -2021,18 +2327,24 @@ func (p policy) allowed(from, to string, port int) bool {
 	if !p.Enabled {
 		return true
 	}
+	return p.match(from, to, port) >= 0
+}
+
+// match — индекс первого правила, которое разрешает from → to на port, или
+// -1. Не смотрит на Enabled: «выключено» решает allowed.
+func (p policy) match(from, to string, port int) int {
 	if from == serversGroup {
-		return false
+		return -1
 	}
-	for _, r := range p.Rules {
+	for i, r := range p.Rules {
 		if !p.member(from, r.From) || !p.member(to, r.To) {
 			continue
 		}
 		if r.Ports == "" || (port > 0 && portAllowed(r.Ports, port)) {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 // visible — видят ли устройства друг друга в списке: да, если хоть в одну
@@ -2222,6 +2534,7 @@ func main() {
 
 	s := newServer(*state)
 	go s.saveLoop()
+	go s.pruneLoop()
 	if *stun != "" {
 		if err := s.serveSTUN(*stun); err != nil {
 			log.Printf("проверка NAT не запустилась (%v) — сеть работает без неё", err)

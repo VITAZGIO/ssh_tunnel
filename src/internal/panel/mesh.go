@@ -87,6 +87,10 @@ type meshAdmin interface {
 	SetSelf(ctx context.Context, name string, enabled bool, ports string) error
 	ForgetServer(ctx context.Context, id string) error
 	SetPolicy(ctx context.Context, p meshsvc.Policy) error
+	RenameNetwork(ctx context.Context, netID, name string) error
+	DeleteNetwork(ctx context.Context, netID string) error
+	Events(ctx context.Context, after int64, limit int) (meshsvc.Events, error)
+	Check(ctx context.Context, netID, from, to string, port int) (meshsvc.CheckResult, error)
 }
 
 const meshdUnit = "meshd.service"
@@ -615,8 +619,11 @@ type MeshDevice struct {
 
 // MeshNetwork — сеть с устройствами.
 type MeshNetwork struct {
-	ID      string       `json:"id"`
-	Devices []MeshDevice `json:"devices"`
+	ID         string       `json:"id"`
+	Name       string       `json:"name"`
+	Created    int64        `json:"created"`
+	EmptySince int64        `json:"emptySince"`
+	Devices    []MeshDevice `json:"devices"`
 }
 
 // MeshServer — сервер на схеме сети.
@@ -759,7 +766,8 @@ func (m *MeshManager) fillMain(ctx context.Context, st *MeshState, s MeshSetting
 
 	matcher := m.serverMatcher(ctx, st.Servers)
 	for _, n := range ms.Networks {
-		mn := MeshNetwork{ID: n.ID, Devices: make([]MeshDevice, 0, len(n.Devices))}
+		mn := MeshNetwork{ID: n.ID, Name: n.Name, Created: n.Created, EmptySince: n.EmptySince,
+			Devices: make([]MeshDevice, 0, len(n.Devices))}
 		for _, d := range n.Devices {
 			mn.Devices = append(mn.Devices, MeshDevice{Device: d, Server: matcher(d.Via)})
 		}
@@ -854,4 +862,24 @@ func (m *MeshManager) Rename(ctx context.Context, netID, device, alias string) e
 // Forget убирает устройство из сети.
 func (m *MeshManager) Forget(ctx context.Context, netID, device string) error {
 	return m.admin.Forget(ctx, netID, device)
+}
+
+// RenameNetwork задаёт сети имя (пустое — убрать).
+func (m *MeshManager) RenameNetwork(ctx context.Context, netID, name string) error {
+	return m.admin.RenameNetwork(ctx, netID, name)
+}
+
+// DeleteNetwork удаляет сеть и отключает её устройства.
+func (m *MeshManager) DeleteNetwork(ctx context.Context, netID string) error {
+	return m.admin.DeleteNetwork(ctx, netID)
+}
+
+// Events — журнал событий сети устройств.
+func (m *MeshManager) Events(ctx context.Context, after int64, limit int) (meshsvc.Events, error) {
+	return m.admin.Events(ctx, after, limit)
+}
+
+// Check — пустят ли устройство from к устройству to на порт.
+func (m *MeshManager) Check(ctx context.Context, netID, from, to string, port int) (meshsvc.CheckResult, error) {
+	return m.admin.Check(ctx, netID, from, to, port)
 }

@@ -384,6 +384,16 @@ func (fakeDownAdmin) ForgetServer(context.Context, string) error { return meshsv
 func (fakeDownAdmin) SetPolicy(context.Context, meshsvc.Policy) error {
 	return meshsvc.ErrNotRunning
 }
+func (fakeDownAdmin) RenameNetwork(context.Context, string, string) error {
+	return meshsvc.ErrNotRunning
+}
+func (fakeDownAdmin) DeleteNetwork(context.Context, string) error { return meshsvc.ErrNotRunning }
+func (fakeDownAdmin) Events(context.Context, int64, int) (meshsvc.Events, error) {
+	return meshsvc.Events{}, meshsvc.ErrNotRunning
+}
+func (fakeDownAdmin) Check(context.Context, string, string, string, int) (meshsvc.CheckResult, error) {
+	return meshsvc.CheckResult{}, meshsvc.ErrNotRunning
+}
 
 func TestКодПодключенияПроверяется(t *testing.T) {
 	for _, code := range []string{"", "что-то", invitePrefix + "!!!", invitePrefix + "e30"} {
