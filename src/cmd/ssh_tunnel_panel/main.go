@@ -30,6 +30,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -68,7 +69,16 @@ func main() {
 	publicURL := flag.String("public-url", "", "адрес самой панели, каким его увидит клиент "+
 		"(например https://panel.example.com/) — по умолчанию собирается из -domain; "+
 		"попадает в конфиг клиента, чтобы его программа могла показать, чем сервер выдан")
+	demo := flag.Bool("demo", false, "режим показа: настоящая страница панели с выдуманными данными "+
+		"в памяти, только на 127.0.0.1, без входа; ничего не меняет на машине")
 	flag.Parse()
+
+	// Режим показа — раньше всего остального: ни хранилищ на диске, ни sshd,
+	// ни nftables, ни meshd он трогать не должен.
+	if *demo {
+		runDemo(*listen, *domain)
+		return
+	}
 
 	store, err := panel.OpenStore(filepath.Join(*dataDir, "users.json"))
 	if err != nil {
@@ -268,5 +278,29 @@ func serveSelfService(srv *panel.Server, addr string) {
 	log.Printf("создание пользователей из программы: http://%s/", addr)
 	if err := s.ListenAndServe(); err != nil {
 		log.Printf("создание пользователей недоступно: %v", err)
+	}
+}
+
+// runDemo — режим показа (internal/panel/demo.go). Слушает только петлевой
+// адрес: с -listen берётся лишь порт, адрес всегда 127.0.0.1 — выдуманную
+// панель без входа нельзя случайно выставить в интернет. С -domain не
+// запускается вовсе: это явный признак боевой установки.
+func runDemo(listen, domain string) {
+	if domain != "" {
+		fatal("-demo и -domain вместе не запускаются: режим показа — только для своей машины")
+	}
+	_, port, err := net.SplitHostPort(listen)
+	if err != nil || port == "" {
+		fatal("в -listen нужен порт: %v", err)
+	}
+	addr := net.JoinHostPort("127.0.0.1", port)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           panel.NewDemoHandler(updater.Version),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	log.Printf("РЕЖИМ ПОКАЗА: выдуманные данные, вход не нужен — http://%s/", addr)
+	if err := srv.ListenAndServe(); err != nil {
+		fatal("%v", err)
 	}
 }
