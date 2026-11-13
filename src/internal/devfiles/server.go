@@ -70,10 +70,27 @@ type server struct {
 	ln  *meshListener
 	srv *http.Server
 	log func(string)
+	// src — открытые папки (на устройстве — Shares, у плагинов сервера —
+	// своя папка каждой сети).
+	src func() []Share
 }
 
-func newServer(log func(string)) *server {
-	s := &server{ln: &meshListener{ch: make(chan net.Conn), done: make(chan struct{})}, log: log}
+// NewHandler — протокол службы файлов отдельно от программы (плагины на
+// сервере, ssh_tunnel_node): папки даёт src, кто пришёл — WithCaller в
+// контексте запроса. Поведение то же, что у службы на устройстве.
+func NewHandler(src func() []Share, log func(string)) http.Handler {
+	if log == nil {
+		log = func(string) {}
+	}
+	return (&server{log: log, src: src}).mux()
+}
+
+// WithCaller кладёт в контекст, какое устройство сети пришло.
+func WithCaller(ctx context.Context, c mesh.Caller) context.Context {
+	return context.WithValue(ctx, callerKey{}, c)
+}
+
+func (s *server) mux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/shares", s.shares)
 	mux.HandleFunc("/list", s.list)
@@ -81,6 +98,12 @@ func newServer(log func(string)) *server {
 	mux.HandleFunc("/part", s.part)
 	mux.HandleFunc("/put", s.put)
 	mux.HandleFunc("/op", s.op)
+	return mux
+}
+
+func newServer(log func(string)) *server {
+	s := &server{ln: &meshListener{ch: make(chan net.Conn), done: make(chan struct{})}, log: log, src: Shares}
+	mux := s.mux()
 	s.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 20 * time.Second,
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 			if cc, ok := c.(callerConn); ok {
@@ -120,10 +143,20 @@ func errOut(w http.ResponseWriter, code int, text string) {
 	jsonOut(w, code, map[string]string{"error": text})
 }
 
+// findShare — открытая папка по id.
+func (s *server) findShare(id string) (Share, bool) {
+	for _, sh := range s.src() {
+		if sh.ID == id {
+			return sh, true
+		}
+	}
+	return Share{}, false
+}
+
 // target — папка и настоящий путь из ?s=&p=.
-func target(w http.ResponseWriter, r *http.Request) (Share, string, bool) {
+func (s *server) target(w http.ResponseWriter, r *http.Request) (Share, string, bool) {
 	q := r.URL.Query()
-	sh, ok := findShare(q.Get("s"))
+	sh, ok := s.findShare(q.Get("s"))
 	if !ok {
 		errOut(w, http.StatusNotFound, "папка больше не открыта")
 		return sh, "", false
@@ -143,14 +176,14 @@ func (s *server) shares(w http.ResponseWriter, r *http.Request) {
 		Write bool   `json:"write"`
 	}
 	out := []pub{}
-	for _, sh := range Shares() {
+	for _, sh := range s.src() {
 		out = append(out, pub{sh.ID, sh.Name, sh.Write})
 	}
 	jsonOut(w, 200, map[string]any{"shares": out})
 }
 
 func (s *server) list(w http.ResponseWriter, r *http.Request) {
-	sh, full, ok := target(w, r)
+	sh, full, ok := s.target(w, r)
 	if !ok {
 		return
 	}
@@ -190,7 +223,7 @@ func (s *server) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) get(w http.ResponseWriter, r *http.Request) {
-	_, full, ok := target(w, r)
+	_, full, ok := s.target(w, r)
 	if !ok {
 		return
 	}
@@ -233,7 +266,7 @@ func needWrite(w http.ResponseWriter, sh Share) bool {
 }
 
 func (s *server) part(w http.ResponseWriter, r *http.Request) {
-	sh, full, ok := target(w, r)
+	sh, full, ok := s.target(w, r)
 	if !ok || !needWrite(w, sh) {
 		return
 	}
@@ -249,7 +282,7 @@ func (s *server) put(w http.ResponseWriter, r *http.Request) {
 		errOut(w, http.StatusMethodNotAllowed, "нужен PUT")
 		return
 	}
-	sh, full, ok := target(w, r)
+	sh, full, ok := s.target(w, r)
 	if !ok || !needWrite(w, sh) {
 		return
 	}
@@ -329,7 +362,7 @@ func (s *server) op(w http.ResponseWriter, r *http.Request) {
 		errOut(w, http.StatusBadRequest, "нужен JSON")
 		return
 	}
-	sh, ok := findShare(req.S)
+	sh, ok := s.findShare(req.S)
 	if !ok {
 		errOut(w, http.StatusNotFound, "папка больше не открыта")
 		return

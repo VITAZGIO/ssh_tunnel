@@ -41,6 +41,7 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 
 	"sshtunnel/internal/meshsvc"
+	"sshtunnel/internal/nodeapi"
 	"sshtunnel/internal/panel"
 	"sshtunnel/internal/updater"
 )
@@ -145,11 +146,14 @@ func main() {
 		*dataDir, updater.Version).WithSSH(effectiveSSHHost, *sshPort)
 	mesh.Start()
 
+	node := panel.NewNodeManager(panel.NewSystemMesh(), nodeapi.NewClient(nodeapi.ControlSocket), updater.Version)
+
 	srv := panel.NewServer(store, clients).
 		WithClientDefaults(effectiveSSHHost, *sshPort, effectivePublicURL).
 		WithHistory(history).
 		WithSettings(settings).
 		WithMesh(mesh).
+		WithNode(node).
 		WithDataDir(*dataDir)
 	handler := srv.Handler()
 	go srv.SyncAccess()

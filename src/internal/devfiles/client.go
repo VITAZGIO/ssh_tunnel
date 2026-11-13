@@ -146,12 +146,49 @@ func handleDevices(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []dev{}
 	for _, p := range st.Peers {
-		if p.Platform == "server" {
+		// Сервер — только если на нём есть служба файлов (плагины сервера,
+		// ssh_tunnel_node): иначе он в списке был бы пустышкой.
+		if p.Platform == "server" && !(p.Online && p.IP.IsValid() && serverHasFiles(p.IP.String())) {
 			continue
 		}
 		out = append(out, dev{p.Name, p.Host, p.IP.String(), p.Platform, p.Online, p.Self})
 	}
 	writeJSON(w, map[string]any{"state": st.State, "error": st.Error, "devices": out})
+}
+
+// serverHasFiles — отвечает ли служба файлов на сервере ip. Ответ
+// помнится минуту: список устройств страница спрашивает часто, а лишний
+// вызов сервера без плагина — это ошибка в его журнале.
+var (
+	srvFilesMu sync.Mutex
+	srvFiles   = map[string]srvFilesSeen{}
+)
+
+type srvFilesSeen struct {
+	ok bool
+	at time.Time
+}
+
+func serverHasFiles(ip string) bool {
+	srvFilesMu.Lock()
+	s, seen := srvFiles[ip]
+	srvFilesMu.Unlock()
+	if seen && time.Since(s.at) < time.Minute {
+		return s.ok
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+net.JoinHostPort(ip, strconv.Itoa(Port))+"/shares", nil)
+	ok := false
+	if resp, err := peerClient.Do(req); err == nil {
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		resp.Body.Close()
+		ok = resp.StatusCode == http.StatusOK
+	}
+	srvFilesMu.Lock()
+	srvFiles[ip] = srvFilesSeen{ok: ok, at: time.Now()}
+	srvFilesMu.Unlock()
+	return ok
 }
 
 var remoteOps = map[string]string{

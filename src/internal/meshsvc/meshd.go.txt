@@ -28,6 +28,9 @@
 //	            и дальше сырые байты
 //	сервер:     → {"op":"server","device":ID,"name":..,"host":..,"addrs":[..]}
 //	            ← {"op":"welcome"}, дальше ping / pong, как у устройств
+//	кто звонит: → {"op":"who","port":N,"src":M}  (служба на самом сервере)
+//	            ← {"op":"whois","ok":true,"net":ID СЕТИ,"device":..,"ip":..,
+//	               "host":..,"name":..,"user":..} — или {"op":"error"}
 //
 // Несколько серверов. На «побочном» сервере meshd не запущен: его
 // 127.0.0.1:47831 — это SSH-проброс (ssh -L) к meshd «главного», поэтому
@@ -63,6 +66,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -75,7 +79,7 @@ import (
 const (
 	protoVersion = 2
 	// version — версия самого meshd, её видно в панели.
-	version = "2"
+	version = "3"
 
 	maxLine          = 4096
 	maxNetworks      = 1000
@@ -159,6 +163,11 @@ type msg struct {
 
 	// T — метка времени (наносекунды) в ping/pong для замера задержки.
 	T int64 `json:"t,omitempty"`
+
+	// Src — порт, с которого meshd подключился к службе на 127.0.0.1 (op
+	// who); User — SSH-пользователь устройства в ответе whois.
+	Src  int    `json:"src,omitempty"`
+	User string `json:"user,omitempty"`
 }
 
 type peer struct {
@@ -318,6 +327,12 @@ type server struct {
 	policy policy
 	// connUser узнаёт SSH-пользователя соединения; в тестах подменяется.
 	connUser func(net.Conn) string
+	// local — соединения устройств со службами самого сервера (127.0.0.1)
+	// по порту, с которого их открыл meshd: по нему служба спрашивает «кто
+	// это» (op who). sameOwner — тот ли пользователь системы спрашивает, что
+	// слушает порт службы; в тестах подменяется.
+	local     map[int]*localCall
+	sameOwner func(conn net.Conn, port int) bool
 	path     string
 	saveMu   sync.Mutex
 	dirty    chan struct{}
@@ -341,6 +356,8 @@ func newServer(path string) *server {
 
 		relayRecs: map[string]*relayRecord{},
 		connUser:  procConnUser,
+		local:     map[int]*localCall{},
+		sameOwner: procSameOwner,
 		dirty:     make(chan struct{}, 1),
 		started:   time.Now(),
 		now:       time.Now,
@@ -660,6 +677,10 @@ func (s *server) handle(conn net.Conn) {
 		s.relayLink(conn, m)
 		return
 	}
+	if m.Op == "who" {
+		s.who(conn, m)
+		return
+	}
 	if m.Net == "" || m.Device == "" || len(m.Device) > 128 {
 		writeMsg(conn, msg{Op: "error", Error: "нет ключа сети или id устройства"})
 		conn.Close()
@@ -970,7 +991,7 @@ func (s *server) dial(conn net.Conn, m msg) {
 			fail(deniedText)
 			return
 		}
-		s.dialServer(conn, from, ip, m.Port, fail) // отпускает s.mu
+		s.dialServer(conn, id, from, ip, m.Port, fail) // отпускает s.mu
 		return
 	}
 	var target *device
@@ -1889,7 +1910,7 @@ func (s *server) forgetRelay(id string) {
 
 // dialServer — соединение устройства с самим сервером. Вызывается под s.mu
 // и отпускает его.
-func (s *server) dialServer(conn net.Conn, from *device, ip string, port int, fail func(string)) {
+func (s *server) dialServer(conn net.Conn, nid string, from *device, ip string, port int, fail func(string)) {
 	if ip == selfIP {
 		allowed := portAllowed(s.self.Ports, port)
 		s.mu.Unlock()
@@ -1902,7 +1923,22 @@ func (s *server) dialServer(conn net.Conn, from *device, ip string, port int, fa
 			fail("на сервере на порту " + itoa(port) + " ничего не слушает")
 			return
 		}
+		src := 0
+		lc := &localCall{port: port, net: nid, dev: from}
+		if la, ok := local.LocalAddr().(*net.TCPAddr); ok {
+			src = la.Port
+			s.mu.Lock()
+			s.local[src] = lc
+			s.mu.Unlock()
+		}
 		s.serveCall(conn, local, from)
+		if src != 0 {
+			s.mu.Lock()
+			if s.local[src] == lc {
+				delete(s.local, src)
+			}
+			s.mu.Unlock()
+		}
 		return
 	}
 	var r *relay
@@ -2460,6 +2496,100 @@ func (s *server) setPolicy(p policy) error {
 	s.broadcastAllLocked()
 	s.mu.Unlock()
 	return nil
+}
+
+// ---------- кто звонит службе на сервере ----------
+//
+// Служба на самом сервере (плагины: ssh_tunnel_node) получает соединение
+// устройства от meshd с 127.0.0.1:M на свой 127.0.0.1:N. Кто это, она
+// спрашивает здесь же: {"op":"who","port":N,"src":M}. Подделать ответ
+// нельзя:
+//   - meshd отвечает только про соединения, которые открыл сам и которые
+//     ещё живы (пара портов занята, пока соединение открыто);
+//   - спрашивать может только тот пользователь системы, чей сокет слушает
+//     127.0.0.1:N (uid из /proc/net/tcp), — чужой локальный пользователь не
+//     узнает даже, кто ходит к чужой службе.
+// Старый meshd на who отвечает «неизвестная операция» — служба тогда никого
+// не пускает.
+
+// localCall — соединение устройства со службой сервера.
+type localCall struct {
+	port int
+	net  string
+	dev  *device
+}
+
+// whoWait — сколько ждать, пока meshd запишет соединение: служба может
+// спросить раньше, чем meshd дойдёт до записи после connect.
+const whoWait = 2 * time.Second
+
+func (s *server) who(conn net.Conn, m msg) {
+	defer conn.Close()
+	fail := func(text string) { writeMsg(conn, msg{Op: "error", Error: text}) }
+	if m.Port <= 0 || m.Port > 65535 || m.Src <= 0 || m.Src > 65535 {
+		fail("неверный порт")
+		return
+	}
+	if !s.sameOwner(conn, m.Port) {
+		fail("спрашивать может только служба, которая слушает этот порт")
+		return
+	}
+	deadline := time.Now().Add(whoWait)
+	for {
+		s.mu.Lock()
+		lc := s.local[m.Src]
+		if lc != nil && lc.port == m.Port {
+			d := lc.dev
+			out := msg{Op: "whois", OK: true, Net: lc.net, Device: d.ID, IP: d.IP, Host: d.Host,
+				Name: d.displayName(), User: d.User, Platform: d.Platform}
+			s.mu.Unlock()
+			writeMsg(conn, out)
+			return
+		}
+		s.mu.Unlock()
+		if time.Now().After(deadline) {
+			fail("это соединение пришло не из сети устройств")
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// procSameOwner — спрашивающий (сокет conn с той стороны) и служба,
+// слушающая 127.0.0.1:port, — один пользователь системы. Только Linux:
+// meshd в бою работает только там; на других системах (тесты на ПК) — да.
+func procSameOwner(conn net.Conn, port int) bool {
+	if runtime.GOOS != "linux" {
+		return true
+	}
+	ra, ok := conn.RemoteAddr().(*net.TCPAddr)
+	la, ok2 := conn.LocalAddr().(*net.TCPAddr)
+	if !ok || !ok2 {
+		return false
+	}
+	data, err := os.ReadFile("/proc/net/tcp")
+	if err != nil {
+		return false
+	}
+	asker, ok := socketUID(string(data), ra, la)
+	if !ok {
+		return false
+	}
+	owner, ok := listenUID(string(data), port)
+	return ok && owner == asker
+}
+
+// listenUID — uid сокета, который слушает порт port на 127.0.0.1 или на
+// всех адресах (состояние 0A в /proc/net/tcp).
+func listenUID(table string, port int) (string, bool) {
+	ph := strings.ToUpper(hex.EncodeToString([]byte{byte(port >> 8), byte(port)}))
+	for _, line := range strings.Split(table, "\n") {
+		f := strings.Fields(line)
+		if len(f) > 7 && f[3] == "0A" && (f[1] == "0100007F:"+ph || f[1] == "00000000:"+ph) {
+			return f[7], true
+		}
+	}
+	return "", false
 }
 
 // procConnUser — SSH-пользователь, чей процесс sshd открыл это соединение.

@@ -45,10 +45,12 @@ type Server struct {
 	// клиентов, которые есть всегда.
 	history *TrafficHistory
 
-	// settings — настройки панели (ёмкость сервера); mesh — сеть устройств.
-	// Оба могут быть nil (тесты): тогда их ручки отвечают, что недоступны.
+	// settings — настройки панели (ёмкость сервера); mesh — сеть устройств;
+	// node — хост плагинов сервера (ТЗ 9). Все могут быть nil (тесты): тогда
+	// их ручки отвечают, что недоступны.
 	settings *SettingsStore
 	mesh     *MeshManager
+	node     *NodeManager
 
 	// dataDir — папка данных панели: сюда скачивается обновление и
 	// сохраняются сессии на время перезапуска (selfupdate.go). Пусто —
@@ -118,6 +120,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/update/install", s.requireAuth(s.handleUpdateInstall))
 	mux.HandleFunc("/api/update/progress", s.requireAuth(s.handleUpdateProgress))
 	s.meshRoutes(mux)
+	s.nodeRoutes(mux)
 	s.diagRoutes(mux)
 	return mux
 }

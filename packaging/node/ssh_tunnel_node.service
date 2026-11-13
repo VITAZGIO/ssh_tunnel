@@ -1,0 +1,29 @@
+# Хост плагинов сервера ssh_tunnel_node (зеркальные папки, файлы
+# устройства, общий буфер). Обычно его ставит панель: «Плагины» →
+# «Поставить хост плагинов» (тот же текст — meshsvc.NodeUnit()).
+# Руками — положить бинарь в /usr/local/bin/ssh_tunnel_node, этот файл —
+# в /etc/systemd/system/, затем:
+#   systemctl daemon-reload && systemctl enable --now ssh_tunnel_node
+#
+# Без root: DynamicUser даёт свой пользователь системы (ssh_tunnel_node),
+# данные — только /var/lib/ssh_tunnel_node, сокет панели —
+# /run/ssh_tunnel_node/control.sock.
+
+[Unit]
+Description=ssh_tunnel - плагины сервера (зеркальные папки, файлы, общий буфер)
+After=network.target meshd.service
+Wants=meshd.service
+
+[Service]
+ExecStart=/usr/local/bin/ssh_tunnel_node
+Restart=always
+RestartSec=2
+DynamicUser=yes
+StateDirectory=ssh_tunnel_node
+RuntimeDirectory=ssh_tunnel_node
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

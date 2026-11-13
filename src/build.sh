@@ -79,6 +79,10 @@ for arch in amd64 arm64; do
   GOOS=linux GOARCH="$arch" go build \
     -ldflags="-s -w" \
     -o "$OUT/linux/meshd$suffix" ./cmd/meshd
+  echo "Linux: хост плагинов сервера ssh_tunnel_node ($arch)..."
+  GOOS=linux GOARCH="$arch" go build \
+    -ldflags="-s -w $LDVERSION" \
+    -o "$OUT/linux/ssh_tunnel_node$suffix" ./cmd/ssh_tunnel_node
 done
 
 # Архив для Windows. Браузеры почти не придираются к .zip, тогда как

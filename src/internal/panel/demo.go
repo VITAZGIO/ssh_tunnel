@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"sshtunnel/internal/meshsvc"
+	"sshtunnel/internal/nodeapi"
 )
 
 // demoTick — как часто в журнале появляется новое событие.
@@ -62,6 +63,13 @@ type demoBackend struct {
 
 	// returning — удалённые сети, которые вернутся: id → когда и с чем.
 	returning map[string]demoReturn
+
+	// nodeInstalled/nodeConfig/nodeFolders — хост плагинов (ТЗ 9) в режиме
+	// показа: только память, ничего реального.
+	nodeInstalled bool
+	nodeConfig    nodeapi.Config
+	nodeFolders   map[string][]nodeapi.Folder
+	nodeClipboard map[string]int
 }
 
 type demoReturn struct {
@@ -72,11 +80,14 @@ type demoReturn struct {
 // NewDemoHandler — обработчик режима показа.
 func NewDemoHandler(version string) http.Handler {
 	d := &demoBackend{
-		version:   version,
-		started:   time.Now(),
-		rnd:       rand.New(rand.NewSource(time.Now().UnixNano())),
-		capacity:  DefaultMaxDevices,
-		returning: map[string]demoReturn{},
+		version:       version,
+		started:       time.Now(),
+		rnd:           rand.New(rand.NewSource(time.Now().UnixNano())),
+		capacity:      DefaultMaxDevices,
+		returning:     map[string]demoReturn{},
+		nodeConfig:    nodeapi.Config{QuotaMB: nodeapi.DefaultQuotaMB},
+		nodeFolders:   map[string][]nodeapi.Folder{},
+		nodeClipboard: map[string]int{},
 	}
 	d.seed()
 	return d.routes()
@@ -431,6 +442,26 @@ func (p demoPolicy) visible(a, b string) bool {
 		}
 	}
 	return false
+}
+
+// nodeStatus — состояние хоста плагинов для /api/node/state.
+func (d *demoBackend) nodeStatus() NodeStatus {
+	if !d.nodeInstalled {
+		return NodeStatus{Unit: UnitState{Installed: false}}
+	}
+	st := nodeapi.State{Version: d.version, Config: d.nodeConfig, Meshd: "ok"}
+	for _, n := range d.nets {
+		net := nodeapi.Network{ID: n.ID, Folders: []nodeapi.Folder{}}
+		for _, f := range d.nodeFolders[n.ID] {
+			f.UsedBytes = int64(len(f.Name)) << 20 // выдуманное, но не ноль
+			net.Folders = append(net.Folders, f)
+		}
+		if items := d.nodeClipboard[n.ID]; items > 0 {
+			net.Clipboard = nodeapi.Clipboard{Items: items, Bytes: int64(items) << 10, Devices: len(n.Devices)}
+		}
+		st.Networks = append(st.Networks, net)
+	}
+	return NodeStatus{Unit: UnitState{Installed: true, Active: true, Enabled: true, Detail: "active"}, State: &st}
 }
 
 // ---------- ручки ----------
@@ -864,6 +895,103 @@ func (d *demoBackend) routes() http.Handler {
 		}
 		res, err := d.check(req.Net, req.From, req.To, req.Port)
 		replyErr(w, err, res)
+	})
+
+	// --- плагины сервера (ТЗ 9) ---
+	h("/api/node/state", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, d.nodeStatus())
+	})
+	h("/api/node/install", func(w http.ResponseWriter, r *http.Request) {
+		d.nodeInstalled = true
+		writeJSON(w, http.StatusOK, ok)
+	})
+	h("/api/node/remove", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			DeleteData bool `json:"deleteData"`
+		}
+		decodePost(w, r, &req)
+		d.nodeInstalled = false
+		if req.DeleteData {
+			d.nodeFolders, d.nodeClipboard = map[string][]nodeapi.Folder{}, map[string]int{}
+		}
+		writeJSON(w, http.StatusOK, ok)
+	})
+	h("/api/node/config", func(w http.ResponseWriter, r *http.Request) {
+		var p nodeapi.ConfigPatch
+		if !decodePost(w, r, &p) {
+			return
+		}
+		if p.Mirror != nil {
+			d.nodeConfig.Mirror = *p.Mirror
+		}
+		if p.Files != nil {
+			d.nodeConfig.Files = *p.Files
+		}
+		if p.FilesWrite != nil {
+			d.nodeConfig.FilesWrite = *p.FilesWrite
+		}
+		if p.Clipboard != nil {
+			d.nodeConfig.Clipboard = *p.Clipboard
+		}
+		if p.QuotaMB != nil && *p.QuotaMB > 0 {
+			d.nodeConfig.QuotaMB = *p.QuotaMB
+		}
+		writeJSON(w, http.StatusOK, d.nodeStatus().State)
+	})
+	h("/api/node/folder/add", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.FolderReq
+		if !decodePost(w, r, &req) {
+			return
+		}
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			replyErr(w, errors.New("имя папки — от 1 до 64 символов"), nil)
+			return
+		}
+		if req.QuotaMB <= 0 {
+			req.QuotaMB = nodeapi.DefaultFolderQuotaMB
+		}
+		f := nodeapi.Folder{ID: fmt.Sprintf("demo%d", len(d.nodeFolders[req.Net])+1), Name: name, QuotaMB: req.QuotaMB}
+		d.nodeFolders[req.Net] = append(d.nodeFolders[req.Net], f)
+		writeJSON(w, http.StatusOK, f)
+	})
+	h("/api/node/folder/remove", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.FolderReq
+		if !decodePost(w, r, &req) {
+			return
+		}
+		list := d.nodeFolders[req.Net]
+		out := list[:0]
+		for _, f := range list {
+			if f.ID != req.ID {
+				out = append(out, f)
+			}
+		}
+		d.nodeFolders[req.Net] = out
+		writeJSON(w, http.StatusOK, ok)
+	})
+	h("/api/node/folder/quota", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.FolderReq
+		if !decodePost(w, r, &req) {
+			return
+		}
+		list := d.nodeFolders[req.Net]
+		for i := range list {
+			if list[i].ID == req.ID {
+				list[i].QuotaMB = req.QuotaMB
+			}
+		}
+		writeJSON(w, http.StatusOK, ok)
+	})
+	h("/api/node/clipboard/clear", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Net string `json:"net"`
+		}
+		if !decodePost(w, r, &req) {
+			return
+		}
+		delete(d.nodeClipboard, req.Net)
+		writeJSON(w, http.StatusOK, ok)
 	})
 
 	// --- только для проверки показа ---

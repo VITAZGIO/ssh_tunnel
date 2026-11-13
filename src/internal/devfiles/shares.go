@@ -129,15 +129,6 @@ func SetWrite(id string, on bool) error {
 	return errors.New("папка не найдена")
 }
 
-func findShare(id string) (Share, bool) {
-	for _, s := range Shares() {
-		if s.ID == id {
-			return s, true
-		}
-	}
-	return Share{}, false
-}
-
 var errOutside = errors.New("путь вне открытой папки")
 
 // resolve — настоящий путь для p внутри папки s. p — путь с «/» от корня
