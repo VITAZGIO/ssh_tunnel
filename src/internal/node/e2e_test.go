@@ -262,8 +262,11 @@ func TestСквозьНастоящийMeshd(t *testing.T) {
 		t.Fatalf("файл зеркала не дошёл до телефона: %v %q", err, b)
 	}
 	// Кто правил — по опознанию meshd, а не по словам устройства.
-	if rep, _ := (&mirror.Remote{Base: base(nodeapi.PortMirror), HC: phone.hc}).Index(ctx, f.ID, 0, 0); rep.Files["заметка.md"].By != callers[pcID].Host {
-		t.Fatalf("автор правки: %q, ждали %q", rep.Files["заметка.md"].By, callers[pcID].Host)
+	cmu.Lock()
+	pcHost := callers[pcID].Host
+	cmu.Unlock()
+	if rep, _ := (&mirror.Remote{Base: base(nodeapi.PortMirror), HC: phone.hc}).Index(ctx, f.ID, 0, 0); rep.Files["заметка.md"].By != pcHost {
+		t.Fatalf("автор правки: %q, ждали %q", rep.Files["заметка.md"].By, pcHost)
 	}
 
 	// Пропущенное в буфере.

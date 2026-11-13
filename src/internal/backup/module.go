@@ -252,8 +252,11 @@ func (m *module) tick(now time.Time) {
 	}
 	m.mu.Unlock()
 	for _, j := range list {
-		if j.Schedule == Change {
-			sig := signature(j.Path)
+		m.mu.Lock()
+		job := j.Job // настройки могут поменять со страницы — читаем копию
+		m.mu.Unlock()
+		if job.Schedule == Change {
+			sig := signature(job.Path)
 			m.mu.Lock()
 			if j.st.LastOK != 0 && sig != j.st.Sig {
 				// Правка: ждём тишины DelayMin — каждая новая правка отодвигает.

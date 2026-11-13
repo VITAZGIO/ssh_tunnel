@@ -139,6 +139,20 @@ type Store struct {
 
 	mu     sync.Mutex
 	scopes map[string]*sync.Mutex
+	last   time.Time // последняя метка версии: метки строго растут
+}
+
+// stamp — время новой версии, строго больше прежней (грубые часы Windows
+// дают одно и то же время двум быстрым копиям подряд).
+func (s *Store) stamp() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t := s.now()
+	if !t.After(s.last) {
+		t = s.last.Add(time.Microsecond)
+	}
+	s.last = t
+	return t
 }
 
 // OpenStore — хранилище в dir (создаётся по нужде).
@@ -453,8 +467,11 @@ func (s *Store) Commit(c Caller, req CommitReq) (Version, error) {
 	if len(missing) > 0 {
 		return Version{}, fmt.Errorf("на сервере нет содержимого %d файлов (например, %s) — загрузи их", len(missing), missing[0])
 	}
-	now := s.now()
-	m := Manifest{ID: now.UTC().Format("20060102T150405") + "-" + short(fmt.Sprint(now.UnixNano(), c.Device))[:6],
+	now := s.stamp()
+	// id растёт со временем (до наносекунд): по нему версии и упорядочены,
+	// даже если несколько копий пришлись на одну секунду.
+	m := Manifest{ID: now.UTC().Format("20060102T150405") + fmt.Sprintf("%09d", now.Nanosecond()) + "-" +
+		short(fmt.Sprint(now.UnixNano(), c.Device))[:6],
 		Time: now.Unix(), Device: c.Device, DeviceName: c.Name, Set: req.Set, Name: req.Name,
 		Files: req.Files, Dirs: req.Dirs, Skipped: req.Skipped}
 	dir := s.setDir(scope, c.Device, req.Set)
@@ -492,9 +509,7 @@ func (s *Store) versionsLocked(scope, device, set string) []Version {
 		}
 		out = append(out, Version{ID: m.ID, Time: m.Time, Files: len(m.Files), Bytes: m.Bytes(), Skipped: len(m.Skipped)})
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].Time > out[j].Time || out[i].Time == out[j].Time && out[i].ID > out[j].ID
-	})
+	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
 	return out
 }
 
