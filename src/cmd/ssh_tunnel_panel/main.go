@@ -27,6 +27,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -145,11 +146,26 @@ func main() {
 		*dataDir, updater.Version).WithSSH(effectiveSSHHost, *sshPort)
 	mesh.Start()
 
+	egress := panel.NewEgressManager(panel.NewSystemEgress(*dataDir), filepath.Join(*dataDir, "egress"),
+		updater.Version, func() []string {
+			// Связь со своим главным сервером сети устройств (если этот
+			// сервер — побочный) всегда напрямую, не через B — иначе при
+			// потере связи с B сеть устройств тоже пропала бы.
+			if h := settings.Get().Mesh.MainHost; h != "" {
+				return []string{h}
+			}
+			return nil
+		})
+	ctx, cancelEgress := context.WithCancel(context.Background())
+	defer cancelEgress()
+	egress.Start(ctx)
+
 	srv := panel.NewServer(store, clients).
 		WithClientDefaults(effectiveSSHHost, *sshPort, effectivePublicURL).
 		WithHistory(history).
 		WithSettings(settings).
 		WithMesh(mesh).
+		WithEgress(egress).
 		WithDataDir(*dataDir)
 	handler := srv.Handler()
 	go srv.SyncAccess()

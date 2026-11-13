@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"sshtunnel/internal/meshsvc"
+	"sshtunnel/internal/share"
 )
 
 // demoTick — как часто в журнале появляется новое событие.
@@ -62,6 +63,25 @@ type demoBackend struct {
 
 	// returning — удалённые сети, которые вернутся: id → когда и с чем.
 	returning map[string]demoReturn
+
+	// egress — выход этого сервера через другой сервер (ТЗ 10): свой
+	// маленький стейт-машин для показа, не настоящий EgressManager (ему
+	// нужна система).
+	egress demoEgress
+}
+
+// demoEgressWindowSec — окно подтверждения в показе: короче настоящих 60 с
+// (egressWindowSec), чтобы откат было видно без долгого ожидания.
+const demoEgressWindowSec = 20
+
+type demoEgress struct {
+	phase        string
+	mode         string
+	target       *EgressTarget
+	appliedAt    time.Time
+	token        string
+	exitIP       string
+	rolledBackAt int64
 }
 
 type demoReturn struct {
@@ -87,6 +107,8 @@ func NewDemoHandler(version string) http.Handler {
 func demoUser(n int) string { return fmt.Sprintf("tun_%016x", 0xa1b2c3d400000000+uint64(n)) }
 
 func (d *demoBackend) seed() {
+	d.egress.phase, d.egress.mode = EgressOff, EgressModeBlock
+
 	now := time.Now()
 	unix := now.Unix()
 	day := int64(86400)
@@ -295,6 +317,26 @@ func (d *demoBackend) tick() {
 	if now.Sub(d.lastTick) >= demoTick {
 		d.lastTick = now
 	}
+	if d.egress.phase == EgressApplying && now.Sub(d.egress.appliedAt) >= demoEgressWindowSec*time.Second {
+		d.egress = demoEgress{phase: EgressOff, mode: d.egress.mode, rolledBackAt: now.Unix()}
+	}
+}
+
+// egressStatus — EgressStatus показа (без реальной системы): своя маленькая
+// стейт-машина в demoEgress, не настоящий EgressManager.
+func (d *demoBackend) egressStatus() EgressStatus {
+	st := EgressStatus{Phase: d.egress.phase, Mode: d.egress.mode, Target: d.egress.target, RolledBackAt: d.egress.rolledBackAt}
+	switch d.egress.phase {
+	case EgressApplying:
+		remain := demoEgressWindowSec - int(time.Since(d.egress.appliedAt).Seconds())
+		if remain < 0 {
+			remain = 0
+		}
+		st.Remaining, st.Token = remain, d.egress.token
+	case EgressOn:
+		st.ExitIP = d.egress.exitIP
+	}
+	return st
 }
 
 func (d *demoBackend) simulate() {
@@ -715,6 +757,88 @@ func (d *demoBackend) routes() http.Handler {
 		writeJSON(w, http.StatusOK, ok)
 	})
 	h("/api/udprelay/install", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, ok) })
+	h("/api/egress", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, d.egressStatus()) })
+	h("/api/egress/apply", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Link string `json:"link"`
+			Mode string `json:"mode"`
+		}
+		if !decodePost(w, r, &req) {
+			return
+		}
+		if d.egress.phase != EgressOff {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "выход через другой сервер уже включён — сначала выключи его"})
+			return
+		}
+		if req.Mode == "" {
+			req.Mode = d.egress.mode
+		}
+		if req.Mode != EgressModeBlock && req.Mode != EgressModeDirect {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неизвестное поведение без сервера"})
+			return
+		}
+		target := d.egress.target
+		if link := strings.TrimSpace(req.Link); link != "" {
+			doc, err := share.Parse([]byte(link))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if !doc.KeyIncluded {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "в ссылке нет ключа — нужна ссылка нового клиента из панели того сервера"})
+				return
+			}
+			name := doc.Name
+			if name == "" {
+				name = doc.Host
+			}
+			target = &EgressTarget{Name: name, Host: doc.Host, IP: "203.0.113." + strconv.Itoa(10+d.rnd.Intn(240)),
+				Port: doc.SSHPort, User: doc.User}
+		} else if target == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "вставь ссылку клиента из панели сервера, через который выходить"})
+			return
+		}
+		d.egress = demoEgress{phase: EgressApplying, mode: req.Mode, target: target,
+			appliedAt: time.Now(), token: randomHex(12)}
+		writeJSON(w, http.StatusOK, ok)
+	})
+	h("/api/egress/confirm", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Token string `json:"token"`
+		}
+		if !decodePost(w, r, &req) {
+			return
+		}
+		if d.egress.phase != EgressApplying || req.Token == "" || req.Token != d.egress.token {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "подтверждать нечего — окно уже закрылось"})
+			return
+		}
+		d.egress.phase, d.egress.token = EgressOn, ""
+		d.egress.exitIP = d.egress.target.IP
+		writeJSON(w, http.StatusOK, ok)
+	})
+	h("/api/egress/off", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{}
+		if !decodePost(w, r, &req) {
+			return
+		}
+		d.egress = demoEgress{phase: EgressOff, mode: d.egress.mode}
+		writeJSON(w, http.StatusOK, ok)
+	})
+	h("/api/egress/mode", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Mode string `json:"mode"`
+		}
+		if !decodePost(w, r, &req) {
+			return
+		}
+		if req.Mode != EgressModeBlock && req.Mode != EgressModeDirect {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неизвестное поведение без сервера"})
+			return
+		}
+		d.egress.mode = req.Mode
+		writeJSON(w, http.StatusOK, ok)
+	})
 	h("/api/mesh/links/create", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "code": "sshtunnel-link1:демо-код-не-настоящий",
 			"link": MeshLink{ID: "demo", Name: "Демо", Added: time.Now()}})
