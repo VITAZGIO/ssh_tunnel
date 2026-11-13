@@ -64,6 +64,13 @@ NetworkNamespacePath=/run/netns/a
 InaccessiblePaths=-/run/systemd/resolve
 CONF
 done
+# Проверка, что дополнения подхватываются: на время — пустышки служб.
+for u in $UNITS; do
+  printf '[Service]
+Type=oneshot
+ExecStart=/bin/true
+' > "/etc/systemd/system/$u"
+done
 systemctl daemon-reload
 for u in $UNITS; do
   got=$(systemctl show -p NetworkNamespacePath --value "$u")
@@ -72,6 +79,8 @@ for u in $UNITS; do
     exit 1
   fi
 done
+for u in $UNITS; do rm -f "/etc/systemd/system/$u"; done
+systemctl daemon-reload
 
 echo "== сценарии выхода сервера (Go, внутри a)"
 set +e
