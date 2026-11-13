@@ -1,5 +1,5 @@
 # Хост плагинов сервера ssh_tunnel_node (зеркальные папки, файлы
-# устройства, общий буфер). Обычно его ставит панель: «Плагины» →
+# устройства, общий буфер, резервные копии). Обычно его ставит панель: «Плагины» →
 # «Поставить хост плагинов» (тот же текст — meshsvc.NodeUnit()).
 # Руками — положить бинарь в /usr/local/bin/ssh_tunnel_node, этот файл —
 # в /etc/systemd/system/, затем:
@@ -10,7 +10,7 @@
 # /run/ssh_tunnel_node/control.sock.
 
 [Unit]
-Description=ssh_tunnel - плагины сервера (зеркальные папки, файлы, общий буфер)
+Description=ssh_tunnel - плагины сервера (зеркальные папки, файлы, общий буфер, резервные копии)
 After=network.target meshd.service
 Wants=meshd.service
 
@@ -24,6 +24,18 @@ RuntimeDirectory=ssh_tunnel_node
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
+# ТЗ 13: защита строже — НЕ ПРОВЕРЕНО на настоящем systemd (в сборке его
+# нет). Если служба не стартует, убери строки ниже до «[Install]» и
+# сообщи: systemctl status ssh_tunnel_node, journalctl -u ssh_tunnel_node.
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+IPAddressDeny=any
+IPAddressAllow=localhost
+PrivateTmp=yes
+PrivateDevices=yes
 
 [Install]
 WantedBy=multi-user.target
