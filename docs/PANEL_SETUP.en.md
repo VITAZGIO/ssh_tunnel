@@ -193,6 +193,35 @@ deny login without removing the key from the panel's storage), disconnect
 (kill current sessions without touching the key), and delete (erase the
 user and key for good).
 
+## Server plugins
+
+The "Plugins" tab: the server itself joins the device network — mirrored
+folders, a shared folder ("Device files") and the shared clipboard run right
+on the server, through the same code that serves them on devices.
+
+Plugins live in their own process, `ssh_tunnel_node`, without root: its own
+system user (`DynamicUser` in systemd, like `meshd`), its own data folder
+`/var/lib/ssh_tunnel_node`. The panel only installs, starts, stops and
+configures it over a control socket
+(`/run/ssh_tunnel_node/control.sock`) — root reaches it regardless of file
+permissions, nobody else does.
+
+Who called a plugin is told by `meshd` itself (as for any other port of the
+server) — it cannot be faked from another machine or another system user.
+Until the device network is installed, or its version is too old to answer
+"who is calling", plugins let nobody in — the host card says so.
+
+- "Install plugin host" downloads `ssh_tunnel_node` from this release's page
+  and starts the service; once installed, the per-plugin switches, the total
+  disk quota and the list of networks appear.
+- For each network: its mirrored folders (name, quota, used space,
+  conflicts), the shared folder's used space, and shared-clipboard items.
+  The quota is shared by all plugins of all networks together — once full,
+  new data is refused with a clear error on the device, and nothing already
+  stored is damaged.
+- "Remove" stops and removes the service; data (folders, clipboard) stays
+  unless "Also delete plugin data" is checked — that cannot be undone.
+
 ## Server egress through another server
 
 **Settings → "Server egress → through server B"**: this server's own

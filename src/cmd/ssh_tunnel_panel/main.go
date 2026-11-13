@@ -42,6 +42,7 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 
 	"sshtunnel/internal/meshsvc"
+	"sshtunnel/internal/nodeapi"
 	"sshtunnel/internal/panel"
 	"sshtunnel/internal/updater"
 )
@@ -146,6 +147,7 @@ func main() {
 		*dataDir, updater.Version).WithSSH(effectiveSSHHost, *sshPort)
 	mesh.Start()
 
+	node := panel.NewNodeManager(panel.NewSystemMesh(), nodeapi.NewClient(nodeapi.ControlSocket), updater.Version)
 	egress := panel.NewEgressManager(panel.NewSystemEgress(*dataDir), filepath.Join(*dataDir, "egress"),
 		updater.Version, func() []string {
 			// Связь со своим главным сервером сети устройств (если этот
@@ -165,6 +167,7 @@ func main() {
 		WithHistory(history).
 		WithSettings(settings).
 		WithMesh(mesh).
+		WithNode(node).
 		WithEgress(egress).
 		WithDataDir(*dataDir)
 	handler := srv.Handler()

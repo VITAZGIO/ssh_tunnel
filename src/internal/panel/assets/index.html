@@ -438,6 +438,7 @@
         border-radius:9px;padding:10px 12px;max-height:230px;overflow:auto;white-space:pre-wrap;
         word-break:break-word}
   .console .l{animation:fade .25s ease both}
+  .console .l.err{color:var(--err)}
 
   .sum .box{position:relative;overflow:hidden}
   .sum .box .s{font-size:11.5px;color:var(--dim);margin-top:2px}
@@ -656,6 +657,11 @@
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/>
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       <span data-i18n="nav_settings">Настройки</span>
+    </button>
+    <button data-tab="Plugins" data-i18n-title="nav_plugins">
+      <svg viewBox="0 0 24 24"><path d="M9 3v3.5M15 3v3.5"/><rect x="5" y="6.5" width="14" height="8" rx="1.8"/>
+        <path d="M9 14.5v2.5a2 2 0 1 0 4 0v-.5"/><path d="M11 21v-3.5"/></svg>
+      <span data-i18n="nav_plugins">Плагины</span>
     </button>
   </nav>
 
@@ -1257,6 +1263,67 @@
         </div>
       </div>
     </section>
+
+    <!-- ======== ПЛАГИНЫ ======== -->
+    <section id="tabPlugins" hidden>
+      <div class="sec-head">
+        <h1 class="page-title"><span data-i18n="nav_plugins">Плагины</span><button class="hint" data-hint="hint_plugins_what">?</button></h1>
+        <p class="page-sub" data-i18n="plugins_sub">Сервер сам становится участником сети устройств: зеркальные папки, общая папка и общий буфер.</p>
+      </div>
+
+      <div class="cards">
+        <div class="card span2" id="nodeHostCard">
+          <h1><span data-i18n="node_host_title">Хост плагинов</span><button class="hint" data-hint="hint_node_host">?</button></h1>
+          <div class="kv"><span class="k" data-i18n="status_label">Статус</span><span class="v" id="nodeSvcState">—</span></div>
+          <div class="kv" id="nodeMeshdRow" hidden><span class="k" data-i18n="node_meshd">Опознание устройств</span><span class="v" id="nodeMeshdState">—</span></div>
+          <div class="msg err" id="nodeErr" hidden></div>
+          <div class="row-inline" style="margin-top:12px">
+            <button class="btn" id="nodeInstallBtn" data-i18n="node_install">Поставить хост плагинов</button>
+            <button class="btn ghost" id="nodeReinstallBtn" hidden data-i18n="node_reinstall">Обновить</button>
+            <button class="btn danger" id="nodeRemoveBtn" hidden data-i18n="node_remove">Снять</button>
+          </div>
+          <label class="chk" id="nodeDeleteDataRow" hidden style="margin-top:8px"><input type="checkbox" id="nodeDeleteData">
+            <span data-i18n="node_delete_data">Удалить и данные плагинов (папки, буфер)</span></label>
+        </div>
+
+        <div class="card span2" id="nodeJobCard" hidden>
+          <h1 id="nodeJobTitle"></h1>
+          <div class="console" id="nodeJobLog"></div>
+        </div>
+
+        <div class="card span2" id="nodeConfigCard" hidden>
+          <h1 data-i18n="node_plugins_title">Включённые плагины</h1>
+          <label class="chk"><input type="checkbox" id="pluginMirror">
+            <span data-i18n="plugin_mirror">Зеркальные папки</span></label>
+          <label class="chk"><input type="checkbox" id="pluginFiles">
+            <span data-i18n="plugin_files">Файлы устройства</span></label>
+          <label class="chk" style="margin-left:26px"><input type="checkbox" id="pluginFilesWrite">
+            <span data-i18n="plugin_files_write">Можно менять</span></label>
+          <label class="chk"><input type="checkbox" id="pluginClipboard">
+            <span data-i18n="plugin_clipboard">Общий буфер</span></label>
+          <div class="field" style="margin-top:10px">
+            <label for="nodeQuota"><span data-i18n="node_quota_label">Место на сервере всем плагинам, всего (МБ)</span><button class="hint" data-hint="hint_node_quota">?</button></label>
+            <input type="number" id="nodeQuota" min="1" max="16777216">
+          </div>
+          <div class="kv"><span class="k" data-i18n="node_used">Занято</span><span class="v" id="nodeUsed">—</span></div>
+          <button class="btn" id="nodeConfigSaveBtn" style="margin-top:10px" data-i18n="cap_save">Применить</button>
+          <div id="nodeConfigMsg"></div>
+        </div>
+      </div>
+
+      <div class="card" id="nodeEventsCard" hidden>
+        <h1 data-i18n="node_events_title">Журнал плагинов</h1>
+        <div class="console" id="nodeEvents"></div>
+      </div>
+
+      <div class="sec-head" id="nodeNetsHead" hidden style="margin-top:18px">
+        <h1 class="page-title" data-i18n="node_nets_title">Сети на сервере</h1>
+      </div>
+      <div class="card" id="nodeNetsNone" hidden>
+        <p class="note" data-i18n="node_no_nets" style="margin:0">Ни одна сеть ещё не пользуется плагинами сервера.</p>
+      </div>
+      <div class="cards" id="nodeNets"></div>
+    </section>
   </main>
 </div>
 
@@ -1613,6 +1680,42 @@ const I18N = {
       '<p>Касается только тех, кто ещё не вошёл: уже подключённым она не мешает.</p>',
     hint_traffic:'Трафик считается правилами nftables на самом сервере — отдельно для каждого клиента.',
     hint_autostart:'То же, что «systemctl enable ssh_tunnel_panel» в консоли — просто кнопкой.',
+
+    nav_plugins:'Плагины',
+    plugins_sub:'Сервер сам становится участником сети устройств: зеркальные папки, общая папка и общий буфер.',
+    hint_plugins_what:'Те же модули, что в программе на устройстве, только работают прямо на сервере — '+
+      'своим отдельным процессом без прав root.',
+    node_host_title:'Хост плагинов', node_meshd:'Опознание устройств',
+    node_install:'Поставить хост плагинов', node_reinstall:'Обновить', node_remove:'Снять',
+    node_delete_data:'Удалить и данные плагинов (папки, буфер)',
+    confirm_node_remove:'Снять хост плагинов? Устройства сети перестанут видеть зеркальные папки, '+
+      'общую папку и буфер через сервер.',
+    confirm_node_remove_data:'Снять хост плагинов и удалить все его данные (папки, буфер)? Отменить это будет нельзя.',
+    hint_node_host:'Отдельный процесс без прав root, со своим пользователем системы и своей папкой данных '+
+      '(как у <b>meshd</b>). Опознание устройств — через сеть устройств: meshd говорит хосту, какое '+
+      'устройство какой сети к нему пришло, подделать это с другой машины нельзя.',
+    node_meshd_ok:'работает', node_meshd_old:'meshd старой версии — обнови сеть устройств выше',
+    node_meshd_down:'meshd не отвечает', node_meshd_unknown:'пока нет обращений',
+    node_plugins_title:'Включённые плагины',
+    plugin_mirror:'Зеркальные папки', plugin_files:'Файлы устройства', plugin_files_write:'Можно менять',
+    plugin_clipboard:'Общий буфер',
+    node_quota_label:'Место на сервере всем плагинам, всего (МБ)',
+    hint_node_quota:'Общий предел на зеркальные папки, общую папку и буфер вместе. Переполнилось — '+
+      'новые данные отклоняются понятной ошибкой на устройстве, уже записанное не портится.',
+    node_used:'Занято', node_events_title:'Журнал плагинов', node_no_events:'пока пусто',
+    node_nets_title:'Сети на сервере', node_no_nets:'Ни одна сеть ещё не пользуется плагинами сервера.',
+    node_folders_title:'Зеркальные папки', node_add_folder:'+ Добавить папку',
+    folder_name_label:'Имя папки', folder_name_ph:'Общая',
+    folder_quota_label:'Квота (МБ)', folder_files:'файлов', folder_conflicts:'конфликтов',
+    folder_remove:'Убрать', folder_remove_data:'и данные',
+    confirm_folder_remove:'Убрать папку «{n}» с сервера? Устройства перестанут синхронизироваться через неё.',
+    confirm_folder_remove_data:'Убрать папку «{n}» с сервера и стереть её данные? Отменить это будет нельзя.',
+    node_clipboard_title:'Общий буфер', clip_items:'записей', clip_devices:'устройств знают',
+    clip_clear:'Очистить буфер',
+    confirm_clip_clear:'Стереть историю общего буфера этой сети на сервере? Отменить это будет нельзя.',
+    node_files_title:'Файлы устройства (общая папка сети)',
+    node_not_installed:'Хост плагинов не поставлен.',
+    node_job_install:'Устанавливаю хост плагинов',
   },
   en: {
     nav_home:'Overview', nav_devices:'Devices', nav_access:'Access', nav_settings:'Settings',
@@ -1909,6 +2012,42 @@ const I18N = {
       'that have not logged in yet; connected ones are not touched.</p>',
     hint_traffic:'Traffic is counted by nftables rules on the server itself, separately for each client.',
     hint_autostart:'Same as "systemctl enable ssh_tunnel_panel" in a console — just a button.',
+
+    nav_plugins:'Plugins',
+    plugins_sub:'The server itself joins the device network: mirrored folders, a shared folder and shared clipboard.',
+    hint_plugins_what:'The same modules the desktop app runs, just on the server itself — their own process, '+
+      'no root.',
+    node_host_title:'Plugin host', node_meshd:'Device identification',
+    node_install:'Install plugin host', node_reinstall:'Update', node_remove:'Remove',
+    node_delete_data:'Also delete plugin data (folders, clipboard)',
+    confirm_node_remove:'Remove the plugin host? Devices will stop seeing mirrored folders, the shared folder '+
+      'and clipboard through this server.',
+    confirm_node_remove_data:'Remove the plugin host and delete all its data (folders, clipboard)? This cannot be undone.',
+    hint_node_host:'A separate process without root, its own system user and its own data folder (like '+
+      '<b>meshd</b>). Device identification goes through the device network: meshd tells the host which '+
+      'device of which network just connected — another machine cannot fake that.',
+    node_meshd_ok:'working', node_meshd_old:'meshd is too old — update the device network above',
+    node_meshd_down:'meshd not responding', node_meshd_unknown:'no requests yet',
+    node_plugins_title:'Enabled plugins',
+    plugin_mirror:'Mirrored folders', plugin_files:'Device files', plugin_files_write:'Can be changed',
+    plugin_clipboard:'Shared clipboard',
+    node_quota_label:'Server space for all plugins, total (MB)',
+    hint_node_quota:'One shared limit for mirrored folders, the shared folder and the clipboard. When full, '+
+      'new data is refused with a clear error on the device — nothing already stored is damaged.',
+    node_used:'Used', node_events_title:'Plugin log', node_no_events:'nothing yet',
+    node_nets_title:'Networks on this server', node_no_nets:'No network uses the server plugins yet.',
+    node_folders_title:'Mirrored folders', node_add_folder:'+ Add folder',
+    folder_name_label:'Folder name', folder_name_ph:'Shared',
+    folder_quota_label:'Quota (MB)', folder_files:'files', folder_conflicts:'conflicts',
+    folder_remove:'Remove', folder_remove_data:'and data',
+    confirm_folder_remove:'Remove the folder "{n}" from the server? Devices will stop syncing through it.',
+    confirm_folder_remove_data:'Remove the folder "{n}" from the server and delete its data? This cannot be undone.',
+    node_clipboard_title:'Shared clipboard', clip_items:'items', clip_devices:'devices known',
+    clip_clear:'Clear clipboard',
+    confirm_clip_clear:'Erase this network\'s clipboard history on the server? This cannot be undone.',
+    node_files_title:'Device files (network shared folder)',
+    node_not_installed:'The plugin host is not installed.',
+    node_job_install:'Installing the plugin host',
   },
 };
 function t(key){ return (I18N[LANG] && I18N[LANG][key]) || key; }
@@ -1953,7 +2092,7 @@ function showView(name){
   ['Login','MustChange','Main'].forEach(v => { $('view'+v).hidden = (v !== name); });
 }
 
-const TABS = ['Home','Devices','Access','Mesh','Settings'];
+const TABS = ['Home','Devices','Access','Mesh','Settings','Plugins'];
 let TAB = localStorage.getItem('panelTab') || 'Home';
 if (!TABS.includes(TAB)) TAB = 'Home';
 function showTab(name){
@@ -1968,6 +2107,7 @@ function showTab(name){
   hidePop();
   if (changed) scrollTo(0, 0);
   if (name === 'Settings'){ loadAutostart(); loadCapacity(); loadEgress(); }
+  if (name === 'Plugins') loadNode();
   // Группы нужны и редактору правил, и форме прав клиента в «Устройствах».
   if (name === 'Devices' || name === 'Access') loadAccess();
   placeMap();
@@ -4301,6 +4441,216 @@ $('meshReinstallBtn').addEventListener('click', async () => {
   const {ok, data} = await api('/api/mesh/reinstall', {});
   if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
   loadMesh();
+});
+
+/* ---------- плагины сервера (хост ssh_tunnel_node) ---------- */
+let NODE = null, NODE_TIMER = null;
+
+function netName(id){
+  const n = MESH && MESH.networks && MESH.networks.find(x => x.id === id);
+  return (n && n.name) || id.slice(0, 8);
+}
+
+async function loadNode(){
+  clearTimeout(NODE_TIMER);
+  const {ok, status, data} = await api('/api/node/state');
+  if (ok) { NODE = data; renderNode(); }
+  else if (status === 404) { NODE = null; $('nodeHostCard').hidden = true; }
+  NODE_TIMER = setTimeout(loadNode, 4000);
+}
+
+function renderNodeJob(job){
+  const recent = job && (job.running || job.error ||
+    (job.finished && Date.now() - new Date(job.finished) < 60000));
+  $('nodeJobCard').hidden = !recent;
+  if (!recent) return;
+  const title = $('nodeJobTitle');
+  title.innerHTML = '';
+  if (job.running){
+    title.appendChild(el('span', 'spin'));
+    title.appendChild(document.createTextNode(t('node_job_install')));
+  } else {
+    title.textContent = job.error ? t('job_failed') + ': ' + job.error : t('job_done');
+  }
+  const log = $('nodeJobLog');
+  log.innerHTML = '';
+  (job.lines || []).forEach(l => log.appendChild(el('div', 'l', l)));
+  log.scrollTop = log.scrollHeight;
+}
+
+function renderNode(){
+  if (!NODE) return;
+  $('nodeHostCard').hidden = false;
+  const installed = NODE.unit && NODE.unit.installed;
+  const working = !!(NODE.job && NODE.job.running);
+  $('nodeSvcState').textContent = !installed ? t('svc_missing') :
+    (NODE.unit.active ? t('svc_active') : t('svc_stopped'));
+  $('nodeInstallBtn').hidden = installed;
+  $('nodeReinstallBtn').hidden = !installed;
+  $('nodeRemoveBtn').hidden = !installed;
+  $('nodeDeleteDataRow').hidden = !installed;
+  $('nodeInstallBtn').disabled = $('nodeReinstallBtn').disabled = working;
+  renderNodeJob(NODE.job);
+
+  const meshdRow = $('nodeMeshdRow');
+  const err = $('nodeErr');
+  const cfgCard = $('nodeConfigCard');
+  const evCard = $('nodeEventsCard');
+  const netsHead = $('nodeNetsHead');
+
+  if (!installed || !NODE.state){
+    meshdRow.hidden = true;
+    cfgCard.hidden = true;
+    evCard.hidden = true;
+    netsHead.hidden = true;
+    $('nodeNetsNone').hidden = true;
+    $('nodeNets').innerHTML = '';
+    err.hidden = !(installed && NODE.error);
+    if (!err.hidden) err.textContent = NODE.error;
+    return;
+  }
+  err.hidden = true;
+  const st = NODE.state;
+  meshdRow.hidden = false;
+  $('nodeMeshdState').textContent = t('node_meshd_' + (st.meshd || 'unknown'));
+  cfgCard.hidden = false;
+  if (document.activeElement !== $('nodeQuota')){
+    $('pluginMirror').checked = !!st.config.mirror;
+    $('pluginFiles').checked = !!st.config.files;
+    $('pluginFilesWrite').checked = !!st.config.filesWrite;
+    $('pluginClipboard').checked = !!st.config.clipboard;
+    $('nodeQuota').value = st.config.quotaMB || '';
+  }
+  $('nodeUsed').textContent = fmtBytes(st.usedBytes) + ' / ' + fmtBytes((st.config.quotaMB || 0) * 1048576);
+
+  evCard.hidden = !(st.events && st.events.length);
+  if (!evCard.hidden){
+    const box = $('nodeEvents');
+    box.innerHTML = '';
+    st.events.slice().reverse().forEach(e => {
+      const line = el('div', 'l' + (e.error ? ' err' : ''),
+        new Date(e.time * 1000).toLocaleString(LANG === 'ru' ? 'ru-RU' : 'en-US') + '  ' + e.text);
+      box.appendChild(line);
+    });
+  }
+
+  const nets = st.networks || [];
+  netsHead.hidden = nets.length === 0;
+  $('nodeNetsNone').hidden = nets.length !== 0;
+  const box = $('nodeNets');
+  box.innerHTML = '';
+  nets.forEach(n => box.appendChild(renderNodeNet(n)));
+}
+
+function renderNodeNet(n){
+  const card = el('div', 'card');
+  card.appendChild(el('h1', '', netName(n.id)));
+
+  const foldersTitle = el('div', 'kv');
+  foldersTitle.appendChild(el('span', 'k', t('node_folders_title')));
+  card.appendChild(foldersTitle);
+  (n.folders || []).forEach(f => {
+    const row = el('div', 'kv');
+    row.appendChild(el('span', 'k', f.name + ' (' + f.quotaMB + ' ' + 'MB'.toLowerCase() + ')'));
+    const v = el('span', 'v', fmtBytes(f.usedBytes) + ' · ' + f.files + ' ' + t('folder_files') +
+      (f.conflicts ? ' · ' + f.conflicts + ' ' + t('folder_conflicts') : ''));
+    row.appendChild(v);
+    const rm = el('button', 'btn ghost small', t('folder_remove'));
+    rm.addEventListener('click', async () => {
+      const yes = await appConfirm(t('confirm_folder_remove').replace('{n}', f.name), t('folder_remove'));
+      if (!yes) return;
+      const {ok, data} = await api('/api/node/folder/remove', {net: n.id, id: f.id});
+      if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+      loadNode();
+    });
+    row.appendChild(rm);
+    card.appendChild(row);
+  });
+  const form = el('div', 'row-inline');
+  form.style.marginTop = '8px';
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.placeholder = t('folder_name_label');
+  nameInput.style.flex = '1';
+  const quotaInput = document.createElement('input');
+  quotaInput.type = 'number';
+  quotaInput.min = '1';
+  quotaInput.value = '2048';
+  quotaInput.title = t('folder_quota_label');
+  quotaInput.style.width = '90px';
+  const addBtn = el('button', 'btn ghost', t('node_add_folder'));
+  addBtn.addEventListener('click', async () => {
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); return; }
+    const {ok, data} = await api('/api/node/folder/add',
+      {net: n.id, name, quotaMB: Number(quotaInput.value) || 2048});
+    if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+    loadNode();
+  });
+  form.appendChild(nameInput);
+  form.appendChild(quotaInput);
+  form.appendChild(addBtn);
+  card.appendChild(form);
+
+  if (n.filesBytes){
+    const row = el('div', 'kv');
+    row.style.marginTop = '10px';
+    row.appendChild(el('span', 'k', t('node_files_title')));
+    row.appendChild(el('span', 'v', fmtBytes(n.filesBytes)));
+    card.appendChild(row);
+  }
+
+  if (n.clipboard && (n.clipboard.items || n.clipboard.devices)){
+    const row = el('div', 'kv');
+    row.style.marginTop = '10px';
+    row.appendChild(el('span', 'k', t('node_clipboard_title')));
+    row.appendChild(el('span', 'v', n.clipboard.items + ' ' + t('clip_items') + ' · ' +
+      fmtBytes(n.clipboard.bytes) + ' · ' + n.clipboard.devices + ' ' + t('clip_devices')));
+    card.appendChild(row);
+    const clear = el('button', 'btn ghost small', t('clip_clear'));
+    clear.style.marginTop = '6px';
+    clear.addEventListener('click', async () => {
+      const yes = await appConfirm(t('confirm_clip_clear'), t('clip_clear'));
+      if (!yes) return;
+      const {ok, data} = await api('/api/node/clipboard/clear', {net: n.id});
+      if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+      loadNode();
+    });
+    card.appendChild(clear);
+  }
+  return card;
+}
+
+$('nodeInstallBtn').addEventListener('click', async () => {
+  const {ok, data} = await api('/api/node/install', {});
+  if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+  loadNode();
+});
+$('nodeReinstallBtn').addEventListener('click', async () => {
+  const {ok, data} = await api('/api/node/install', {});
+  if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+  loadNode();
+});
+$('nodeRemoveBtn').addEventListener('click', async () => {
+  const deleteData = $('nodeDeleteData').checked;
+  const yes = await appConfirm(t(deleteData ? 'confirm_node_remove_data' : 'confirm_node_remove'), t('node_remove'));
+  if (!yes) return;
+  const {ok, data} = await api('/api/node/remove', {deleteData});
+  if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+  loadNode();
+});
+$('nodeConfigSaveBtn').addEventListener('click', async () => {
+  const body = {
+    mirror: $('pluginMirror').checked,
+    files: $('pluginFiles').checked,
+    filesWrite: $('pluginFilesWrite').checked,
+    clipboard: $('pluginClipboard').checked,
+    quotaMB: Number($('nodeQuota').value) || undefined,
+  };
+  const {ok, data} = await api('/api/node/config', body);
+  $('nodeConfigMsg').innerHTML = '';
+  if (!ok){ $('nodeConfigMsg').appendChild(el('div', 'msg err', data.error || t('err_internal'))); return; }
+  loadNode();
 });
 async function meshOff(){
   const yes = await appConfirm(t('confirm_mesh_off'), t('confirm_off_yes'));

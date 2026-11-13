@@ -15,6 +15,11 @@ Best an always-on one (a home server, a computer that stays on).
 
 Nested folders cannot be shared: one file — one server.
 
+The "server" can also be your rented VPS (the same one the tunnel runs
+through): in its panel, «Plugins» tab → «Mirrored folders» → «Add folder».
+That way the folder stays in sync even when no two devices are ever online
+together — the VPS is always reachable.
+
 ## Connect a folder on another device
 
 1. Add the app. The **«Folders»** tab shows «Server found».

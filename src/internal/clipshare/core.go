@@ -2,6 +2,7 @@ package clipshare
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +32,14 @@ type node struct {
 	h   *history
 	srv *http.Server
 	ln  *chanListener
+
+	// servers — серверы сети, у которых есть общий буфер (ответили на
+	// /missed): им тоже отправляем свои записи. Остальным серверам не шлём —
+	// иначе каждая запись давала бы в журнале сервера отказ или ошибку.
+	srvMu   sync.Mutex
+	servers map[string]bool
+	stop    chan struct{}
+	pulled  chan struct{} // тесты: прошёл круг забора с серверов
 }
 
 var (
@@ -80,7 +89,8 @@ type callerConn struct {
 }
 
 func startNode(dir string) *node {
-	n := &node{h: openHistory(dir), ln: &chanListener{ch: make(chan net.Conn), done: make(chan struct{})}}
+	n := &node{h: openHistory(dir), ln: &chanListener{ch: make(chan net.Conn), done: make(chan struct{})},
+		servers: map[string]bool{}, stop: make(chan struct{}), pulled: make(chan struct{}, 1)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/clip", n.receive)
 	n.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 20 * time.Second,
@@ -98,11 +108,13 @@ func startNode(dir string) *node {
 			c.Close()
 		}
 	})
+	go n.pullLoop()
 	return n
 }
 
 func (n *node) close() {
 	mesh.Serve(Port, nil)
+	close(n.stop)
 	n.srv.Close()
 	n.ln.Close()
 }
@@ -148,10 +160,23 @@ func (n *node) receive(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too large", http.StatusRequestEntityTooLarge)
 		return
 	}
-	it, err = n.h.add(it, data)
-	if err != nil {
+	if err := n.accept(it, data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// accept — чужая запись: в историю и (через наблюдателя или sink) в буфер.
+// Повтор (тот же id) — молча пропускается.
+func (n *node) accept(it Item, data []byte) error {
+	if it.ID != "" && n.h.has(it.ID) {
+		return nil
+	}
+	it.Out, it.Sent, it.Seq, it.Gone = false, 0, 0, false
+	it, err := n.h.add(it, data)
+	if err != nil {
+		return err
 	}
 	sinkMu.Lock()
 	f := sink
@@ -159,7 +184,124 @@ func (n *node) receive(w http.ResponseWriter, r *http.Request) {
 	if f != nil {
 		go f(it, n.h.path(it.ID))
 	}
-	w.WriteHeader(http.StatusOK)
+	return nil
+}
+
+// ---- пропущенное, пока устройства не было в сети (буфер на сервере) ----
+
+// pullEvery — как часто спрашивать серверы о пропущенном; сразу — когда
+// сервер (снова) появился на связи.
+const (
+	pullEvery = time.Minute
+	pullCheck = 5 * time.Second
+)
+
+// pullLoop — забирает с серверов сети записи, пропущенные без связи. Сервер
+// сам устройствам не звонит, поэтому спрашивает устройство.
+func (n *node) pullLoop() {
+	online := map[string]bool{}
+	var last time.Time
+	t := time.NewTicker(pullCheck)
+	defer t.Stop()
+	for {
+		now := map[string]bool{}
+		fresh := false
+		for _, p := range devnet.Status().Peers {
+			if p.Self || !p.Online || p.Platform != "server" || !p.IP.IsValid() {
+				continue
+			}
+			ip := p.IP.String()
+			now[ip] = true
+			if !online[ip] {
+				fresh = true
+			}
+		}
+		online = now
+		if len(now) > 0 && (fresh || time.Since(last) >= pullEvery) {
+			last = time.Now()
+			for ip := range now {
+				n.pullFrom(ip)
+			}
+			select {
+			case n.pulled <- struct{}{}:
+			default:
+			}
+		}
+		select {
+		case <-n.stop:
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// pullFrom — пропущенное с одного сервера, старые первыми (последняя
+// окажется в буфере), потом отметка «получено».
+func (n *node) pullFrom(ip string) {
+	base := "http://" + net.JoinHostPort(ip, strconv.Itoa(Port))
+	resp, err := pullClient.Get(base + "/missed")
+	if err != nil {
+		n.setServer(ip, false)
+		return
+	}
+	var out struct {
+		Items []Item `json:"items"`
+		Seq   int64  `json:"seq"`
+	}
+	err = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || err != nil {
+		n.setServer(ip, false)
+		return
+	}
+	n.setServer(ip, true)
+	for _, it := range out.Items {
+		if it.ID == "" || n.h.has(it.ID) {
+			continue
+		}
+		r, err := pullClient.Get(base + "/data?id=" + url.QueryEscape(it.ID))
+		if err != nil {
+			return // связь пропала — отметку не двигаем, заберём потом
+		}
+		data, err := io.ReadAll(io.LimitReader(r.Body, MaxBytes+1))
+		r.Body.Close()
+		if err != nil || r.StatusCode != http.StatusOK || len(data) > MaxBytes {
+			continue
+		}
+		if n.accept(it, data) != nil {
+			return
+		}
+	}
+	if r, err := pullClient.Post(base+"/ack?seq="+strconv.FormatInt(out.Seq, 10), "text/plain", nil); err == nil {
+		r.Body.Close()
+	}
+}
+
+func (n *node) setServer(ip string, on bool) {
+	n.srvMu.Lock()
+	if on {
+		n.servers[ip] = true
+	} else {
+		delete(n.servers, ip)
+	}
+	n.srvMu.Unlock()
+}
+
+func (n *node) hasServer(ip string) bool {
+	n.srvMu.Lock()
+	defer n.srvMu.Unlock()
+	return n.servers[ip]
+}
+
+var pullClient = &http.Client{
+	Timeout: 2 * time.Minute,
+	Transport: &http.Transport{
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			return devnet.DialPeer(addr)
+		},
+		MaxIdleConnsPerHost: 1,
+		IdleConnTimeout:     30 * time.Second,
+	},
 }
 
 var peerClient = &http.Client{
@@ -201,13 +343,19 @@ func (n *node) push(it Item, data []byte) (Item, error) {
 	var mu sync.Mutex
 	sent := 0
 	for _, p := range st.Peers {
-		if p.Self || !p.Online || p.Platform == "server" {
+		if p.Self || !p.Online {
+			continue
+		}
+		// Сервер — только тот, у которого есть общий буфер; в «скольким
+		// ушло» он не считается: это устройство, а не человек.
+		srv := p.Platform == "server"
+		if srv && !n.hasServer(p.IP.String()) {
 			continue
 		}
 		wg.Add(1)
 		go func(ip string) {
 			defer wg.Done()
-			if sendTo(ip, it, data) == nil {
+			if sendTo(ip, it, data) == nil && !srv {
 				mu.Lock()
 				sent++
 				mu.Unlock()
