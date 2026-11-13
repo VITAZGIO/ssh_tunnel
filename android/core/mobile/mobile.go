@@ -9,12 +9,15 @@ package mobile
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -40,6 +43,15 @@ type Callbacks interface {
 	// зациклилось: система заворачивает внутрь весь трафик, включая наш.
 	// Реализация на Kotlin — VpnService.protect(fd).
 	Protect(fd int) bool
+
+	// BindLAN — сокет прямых соединений сети устройств (и её маяков): мимо
+	// туннеля, как Protect, и вдобавок к Wi-Fi, если телефон в Wi-Fi.
+	//
+	// Без привязки к Wi-Fi дома без интернета соседи не видны: Android,
+	// заметив, что в Wi-Fi нет интернета, уводит основную сеть на мобильную,
+	// и маяки с прямыми соединениями уходят в мобильную сеть, а не в
+	// домашнюю. Реализация на Kotlin — protect(fd) и Network.bindSocket.
+	BindLAN(fd int) bool
 
 	// OnState сообщает о смене состояния, чтобы экран показал её человеку.
 	//
@@ -101,6 +113,18 @@ type Tunnel struct {
 	// startCancel прерывает идущее подключение (StartCore ещё не вернулся):
 	// «Выключить» во время него срабатывает сразу, а не после всех повторов.
 	startCancel context.CancelFunc
+
+	// meshHost — клиент сети устройств, отдельный от пула SSH (как на ПК,
+	// см. tunnel.MeshHost): живёт, пока включена кнопка «Сеть устройств», и
+	// не зависит от того, ответил ли сервер.
+	meshHost *tunnel.MeshHost
+
+	// localOnly — туннель поднят без сервера ради сети устройств (сервер не
+	// ответил на первом подключении и ищется в фоне); serverErr — почему не
+	// ответил. Обход блокировок при этом выключен с этой ошибкой — как
+	// core.ServerDownError на ПК.
+	localOnly bool
+	serverErr error
 }
 
 // NewTunnel создаёт выключенный туннель.
@@ -109,6 +133,11 @@ type Tunnel struct {
 // переименовала бы функцию во что-то нечитаемое.
 func NewTunnel() *Tunnel {
 	t := &Tunnel{}
+	t.meshHost = tunnel.NewMeshHost(func(_, text string) {
+		if cb := t.callbacks(); cb != nil {
+			cb.OnLog(text)
+		}
+	})
 	// Календарь ходит к Nextcloud через это ядро (calendar.go).
 	calendar.SetDial(t.dialSelf)
 	// Туннель в процессе один (служба VPN): он и даёт сеть устройств
@@ -235,7 +264,126 @@ func (t *Tunnel) ConfigureMesh(enabled bool, key, name, deviceID string, incomin
 	if t.cfg.KnownHostsPath != "" {
 		t.cfg.Mesh.StateDir = filepath.Join(filepath.Dir(t.cfg.KnownHostsPath), "mesh")
 	}
+	// Сокет прямых соединений и маяков — к Wi-Fi (см. Callbacks.BindLAN).
+	// Проверка NAT ходит через него же; соединения с сервером — нет, они
+	// по-прежнему идут основной сетью (Protect).
+	t.cfg.Mesh.ProbeListen = t.meshListen
 	return nil
+}
+
+// meshListen — UDP-сокет сети устройств, привязанный к Wi-Fi (BindLAN).
+func (t *Tunnel) meshListen(network string) (net.PacketConn, error) {
+	lc := net.ListenConfig{Control: t.bindLAN}
+	return lc.ListenPacket(context.Background(), network, ":0")
+}
+
+func (t *Tunnel) bindLAN(network, address string, c syscall.RawConn) error {
+	cb := t.callbacks()
+	if cb == nil {
+		return nil
+	}
+	var ok bool
+	if err := c.Control(func(fd uintptr) { ok = cb.BindLAN(int(fd)) }); err != nil {
+		return err
+	}
+	if !ok {
+		cb.OnLog("сеть устройств: не удалось пометить сокет прямых соединений")
+	}
+	return nil
+}
+
+// meshWantedLocked — нужен ли сейчас клиент сети устройств: настроена и
+// кнопка включена. Зовётся под t.mu.
+func (t *Tunnel) meshWantedLocked() *mesh.Config {
+	if t.meshOff {
+		return nil
+	}
+	return t.cfg.MeshConfig()
+}
+
+// LANChanged — Wi-Fi сменился, появился или пропал (зовёт Kotlin из
+// ConnectivityManager). Сокет прямых соединений привязан к прежнему Wi-Fi
+// (или ни к какому), поэтому клиент сети устройств пересоздаётся: тот же
+// ключ, то же устройство, кэш с диска — второго клиента не бывает, прежний
+// сначала останавливается. Прямые соединения при смене сети всё равно уже
+// мертвы (у телефона другой адрес), а связь с meshd идёт по SSH, который
+// NetworkChanged пересобирает в тот же момент. Ждёт остановки клиента (до
+// пяти секунд) — звать не из главного потока.
+func (t *Tunnel) LANChanged() {
+	t.mu.Lock()
+	mc := t.meshWantedLocked()
+	t.mu.Unlock()
+	if mc == nil || !t.meshHost.Running() {
+		return
+	}
+	t.meshHost.Stop()
+	t.meshHost.Start(*mc)
+}
+
+// MeshSummary — сеть устройств одной строкой JSON для уведомления и
+// MulticastLock: {"state":"online|local|error|connecting|off","direct":N,
+// "beacons":bool}. beacons — маяки сейчас нужны: сервера сети нет, а
+// какого-то из знакомых устройств прямой связью не видно (тогда клиент
+// шлёт маяки и ждёт чужих — см. mesh/beacon.go).
+func (t *Tunnel) MeshSummary() string {
+	out := struct {
+		State   string `json:"state"`
+		Direct  int    `json:"direct"`
+		Beacons bool   `json:"beacons"`
+	}{State: "off"}
+	t.mu.Lock()
+	paused := t.meshOff
+	t.mu.Unlock()
+	if c := t.meshHost.Client(); c != nil && !paused {
+		st := c.Status()
+		out.State = st.State
+		missing := false
+		for _, p := range st.Peers {
+			if p.Self || serverNode.Contains(p.IP.Unmap()) {
+				continue
+			}
+			if p.Direct {
+				out.Direct++
+			} else {
+				missing = true
+			}
+		}
+		out.Beacons = st.State != "online" && missing
+	}
+	b, _ := json.Marshal(out)
+	return string(b)
+}
+
+// serverNode — адреса серверов в сети устройств: к ним прямых соединений не
+// бывает, маяки их не ищут (как serverNodes в internal/mesh).
+var serverNode = netip.MustParsePrefix("198.19.255.0/24")
+
+// ServerDownText — почему сервер не ответил, если туннель поднят без него
+// (ради сети устройств); пусто — сервер был на связи или туннель поднят
+// обычным путём. Экран показывает это на большой кнопке, как на ПК.
+func (t *Tunnel) ServerDownText() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.localOnly || t.serverErr == nil {
+		return ""
+	}
+	return t.serverErr.Error()
+}
+
+// ServerDownKind — код причины к ServerDownText (tunnel.ConnErrorKind: auth,
+// no_response, refused, dropped, other) или пусто, если не распознана.
+func (t *Tunnel) ServerDownKind() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return errorKind(t.serverErr)
+}
+
+func errorKind(err error) string {
+	var ce *tunnel.ConnError
+	if errors.As(err, &ce) {
+		return string(ce.Kind)
+	}
+	return ""
 }
 
 // NewMeshKey — ключ новой сети устройств.
@@ -248,16 +396,15 @@ func NewDeviceID() string { return mesh.NewDeviceID() }
 // {"state":"online","self":{...},"peers":[...]} или {"state":"off"}.
 func (t *Tunnel) MeshStatusJSON() string {
 	t.mu.Lock()
-	tun, cfg := t.core, t.cfg
+	cfg, paused := t.cfg, t.meshOff
 	t.mu.Unlock()
 	st := mesh.Status{State: "off"}
 	if cfg.Mesh != nil {
 		st.State = "stopped"
 	}
-	if tun != nil {
-		if m := tun.Mesh(); m != nil {
-			st = m.Status()
-		}
+	// Клиент живёт отдельно от пула: виден и пока сервер ещё ищется.
+	if m := t.meshHost.Client(); m != nil && !paused {
+		st = m.Status()
 	}
 	b, err := json.Marshal(st)
 	if err != nil {
@@ -305,16 +452,32 @@ func (t *Tunnel) StartCore() error {
 	}
 	cfg, cb, gen := t.cfg, t.cb, t.gen
 	cfg.OwnerOf = ownerOf // учёт трафика по приложениям (tools5.go)
+	// Клиентом сети устройств владеет не пул, а t.meshHost (как App на ПК):
+	// пул только даёт ему путь к серверу.
+	cfg.MeshHost = t.meshHost
+	mc := t.meshWantedLocked()
+	t.localOnly, t.serverErr = false, nil
 	t.mu.Unlock()
 
 	if cfg.Host == "" {
 		return fmt.Errorf("сначала нужно задать настройки")
 	}
 
+	// Сеть устройств нужна — её клиент поднимается сразу, ещё до сервера:
+	// кэш на диске, прямые соединения и маяки работают и без него.
+	if mc != nil {
+		t.meshHost.Start(*mc)
+	}
+
 	bus := events.NewBus()
 	stop := make(chan struct{})
 	ch, unsub := bus.Subscribe()
-	go t.forwardEvents(ch, unsub, stop, cb)
+	// Пока идёт первое подключение с запасным путём «без сервера», его
+	// «ошибка» экрану не нужна: если сервер не ответит, туннель всё равно
+	// поднимется (без него), и состояние скажем в конце.
+	var quiet atomic.Bool
+	quiet.Store(mc != nil)
+	go t.forwardEvents(ch, unsub, stop, cb, &quiet)
 
 	tun := tunnel.New(cfg, bus)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -325,17 +488,36 @@ func (t *Tunnel) StartCore() error {
 		t.mu.Unlock()
 		cancel()
 		close(stop)
+		t.stopMeshIf(mc)
 		return fmt.Errorf("остановлено")
 	}
 	t.startCancel = cancel
 	t.mu.Unlock()
 	err := tun.StartContext(ctx)
+	var serverErr error
+	if err != nil && mc != nil && ctx.Err() == nil {
+		// Сервер не ответил, а сеть устройств нужна: туннель поднимается без
+		// него (стек, решения ядра, сеть устройств), сервер ищется в фоне
+		// тем же пулом, что и после обрыва. Обход блокировок без сервера
+		// невозможен — гаснет с этой ошибкой, как на ПК (core.ServerDownError).
+		opt := cfg
+		opt.ServerOptional = true
+		alt := tunnel.New(opt, bus)
+		alt.SetBypass(false)
+		alt.SetMeshPaused(false)
+		if lerr := alt.StartContext(ctx); lerr == nil {
+			tun, serverErr, err = alt, err, nil
+			bus.Warnf("Сервер недоступен (%v) — сеть устройств работает без него, сервер ищу в фоне", serverErr)
+		}
+	}
+	quiet.Store(false)
 	t.mu.Lock()
 	t.startCancel = nil
 	t.mu.Unlock()
 	if err != nil {
 		cancel()
 		close(stop)
+		t.stopMeshIf(mc)
 		return err
 	}
 
@@ -346,15 +528,32 @@ func (t *Tunnel) StartCore() error {
 		t.mu.Unlock()
 		close(stop)
 		go tun.Stop()
+		t.stopMeshIf(mc)
 		return fmt.Errorf("остановлено")
 	}
 	t.core, t.bus, t.stop = tun, bus, stop
+	if serverErr != nil {
+		t.localOnly, t.serverErr, t.bypassOff = true, serverErr, true
+	}
 	t.mu.Unlock()
 
 	if cb != nil {
-		cb.OnState(tun.State(), fmt.Sprintf("%s:%d", cfg.Host, cfg.SSHPort), "")
+		if serverErr != nil {
+			cb.OnState(tun.State(), serverErr.Error(), errorKind(serverErr))
+		} else {
+			cb.OnState(tun.State(), fmt.Sprintf("%s:%d", cfg.Host, cfg.SSHPort), "")
+		}
 	}
 	return nil
+}
+
+// stopMeshIf гасит клиента сети устройств, поднятого этим StartCore (mc —
+// его настройки), если подключение не удалось совсем: снимать его потом
+// будет некому. Следующий StartCore поднимет его снова.
+func (t *Tunnel) stopMeshIf(mc *mesh.Config) {
+	if mc != nil {
+		t.meshHost.Stop()
+	}
 }
 
 // ServerHasIPv6 спрашивает у сервера, может ли он открыть соединение по IPv6.
@@ -365,9 +564,12 @@ func (t *Tunnel) StartCore() error {
 // пойдут по ней.
 func (t *Tunnel) ServerHasIPv6() bool {
 	t.mu.Lock()
-	tun := t.core
+	tun, local := t.core, t.localOnly
 	t.mu.Unlock()
-	if tun == nil {
+	// Поднят без сервера — спрашивать некого; ждать пятнадцать секунд значило
+	// бы на столько же отложить интерфейс. Шестая версия появится со
+	// следующим включением, когда сервер будет на связи.
+	if tun == nil || local {
 		return false
 	}
 	if !tun.WaitReady(1, 15*time.Second) {
@@ -469,7 +671,9 @@ func (t *Tunnel) StartStack(tunFD int, mtu int) error {
 }
 
 // forwardEvents перекладывает события ядра на экран приложения.
-func (t *Tunnel) forwardEvents(ch <-chan events.Event, unsub func(), stop <-chan struct{}, cb Callbacks) {
+// quiet — пока true, состояния не передаются (см. StartCore), строки
+// журнала — передаются.
+func (t *Tunnel) forwardEvents(ch <-chan events.Event, unsub func(), stop <-chan struct{}, cb Callbacks, quiet *atomic.Bool) {
 	defer unsub()
 	if cb == nil {
 		return
@@ -485,6 +689,9 @@ func (t *Tunnel) forwardEvents(ch <-chan events.Event, unsub func(), stop <-chan
 			}
 			switch ev.Kind {
 			case events.KindState:
+				if quiet != nil && quiet.Load() {
+					continue
+				}
 				cb.OnState(ev.State, ev.Detail, ev.ErrorKind)
 			case events.KindLog:
 				cb.OnLog(ev.Text)
@@ -534,6 +741,9 @@ func (t *Tunnel) Drain(seconds int) {
 		tun.SetDrainTimeout(t.cfg.DrainTimeout)
 	}
 	t.mu.Unlock()
+	// Слив — это «выключить всё»: сеть устройств гаснет сразу, как и
+	// раньше, когда её клиент жил в пуле.
+	t.meshHost.Stop()
 	if tun == nil {
 		return
 	}
@@ -598,14 +808,41 @@ func (t *Tunnel) SetTunnelHosts(text string) {
 // Переключение — как на компьютере (core.Transition): подставные адреса
 // старого режима забываются, соединения, открытые по его правилам,
 // закрываются — состояние такое же, как после чистого запуска в новом.
-func (t *Tunnel) SetModes(bypass, mesh bool) {
+//
+// Туннель поднят без сервера (StartCore не дозвался), а сервер с тех пор так
+// и не ответил — обход не включается: режим применяется без него, а ошибка
+// возвращается (экран показывает её на большой кнопке, как на ПК). Пул при
+// этом подталкивается — вдруг сервер уже вернулся.
+func (t *Tunnel) SetModes(bypass, mesh bool) error {
 	t.mu.Lock()
+	tun := t.core
+	var refused error
+	if bypass && tun != nil && t.localOnly && !tun.ServerUp() {
+		bypass, refused = false, t.serverErr
+		if refused == nil {
+			refused = tunnel.ErrNoServer
+		}
+	}
+	if bypass && tun != nil && tun.ServerUp() {
+		// Сервер на связи — прежняя ошибка «без сервера» больше не про сейчас.
+		t.localOnly, t.serverErr = false, nil
+	}
 	prev := core2.Modes{Bypass: !t.bypassOff, Mesh: !t.meshOff}
 	t.bypassOff, t.meshOff = !bypass, !mesh
-	tun, pool := t.core, t.pool
+	pool := t.pool
+	mc := t.meshWantedLocked()
 	t.mu.Unlock()
 	if tun == nil {
-		return
+		return nil
+	}
+	if refused != nil {
+		tun.Kick()
+	}
+	// Клиентом сети устройств владеет meshHost: кнопка его и включает.
+	if mc != nil {
+		t.meshHost.Start(*mc)
+	} else {
+		t.meshHost.Stop()
 	}
 	tun.SetBypass(bypass)
 	tun.SetMeshPaused(!mesh)
@@ -614,6 +851,7 @@ func (t *Tunnel) SetModes(bypass, mesh bool) {
 		pool.Reset()
 	}
 	tun.ApplyHygiene(h)
+	return refused
 }
 
 // Resume возвращает к жизни туннель, который был в сливе. Интерфейс VPN при
@@ -629,6 +867,12 @@ func (t *Tunnel) Resume() error {
 	if err := tun.Resume(); err != nil {
 		return err
 	}
+	t.mu.Lock()
+	mc := t.meshWantedLocked()
+	t.mu.Unlock()
+	if mc != nil {
+		t.meshHost.Start(*mc)
+	}
 	if cb != nil {
 		cb.OnState(tun.State(), fmt.Sprintf("%s:%d", cfg.Host, cfg.SSHPort), "")
 	}
@@ -640,6 +884,7 @@ func (t *Tunnel) Stop() {
 	t.mu.Lock()
 	tun, eng, stop := t.core, t.engine, t.stop
 	t.core, t.engine, t.bus, t.stop, t.stack = nil, nil, nil, nil, nil
+	t.localOnly, t.serverErr = false, nil
 	t.gen++
 	if t.startCancel != nil {
 		// Подключение ещё идёт — обрываем его.
@@ -657,6 +902,7 @@ func (t *Tunnel) Stop() {
 	if tun != nil {
 		tun.Stop()
 	}
+	t.meshHost.Stop()
 }
 
 // NetworkChanged сообщает, что телефон сменил сеть (Wi-Fi ↔ мобильная).

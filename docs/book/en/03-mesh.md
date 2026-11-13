@@ -48,3 +48,34 @@ turn the round button on again (or autostart will).
 
 A device removed in the panel while you were without the server stops being
 let in as soon as this device talks to the server again.
+
+### On the phone
+
+The phone behaves the same way: at home without internet it turns on (after
+a reboot too), the device network works, and the notification says "No
+server, direct: 1" or "No connection, no neighbours in sight". The phone
+looks for the server by itself: every few seconds at first, then about once
+every half a minute, and right away when the network changes or you turn the
+screen on. When the internet is back the notification says "online, through
+the server" — nothing to touch.
+
+You don't have to turn mobile data off: the phone looks for neighbours in
+Wi-Fi even when Android says "Wi-Fi has no internet access" and goes online
+over mobile data.
+
+**Screen off.** While neighbours are connected directly, the clipboard and
+files keep working with the screen off. If the link to the PC was lost (the
+PC rebooted, the phone left home), the phone keeps looking for it with the
+screen off too, but in deep sleep (after half an hour to an hour of lying
+still) Android wakes apps only now and then — the neighbour is found at one
+of those wake-ups or as soon as you turn the screen on. So that Android does
+not put the app to sleep entirely, allow it:
+
+- **Battery → Unrestricted** (Settings → Apps → ssh_tunnel → Battery).
+  Otherwise the system may stop it after a while.
+- **Autostart** — on Tecno/Infinix (HiOS), Xiaomi (MIUI/HyperOS) and similar
+  phones this is a separate switch in the "Phone Master" or the app
+  settings. Without it the app does not come up by itself after a reboot.
+- **Always-on VPN** (Settings → Network → VPN → ssh_tunnel → "Always-on
+  VPN") — then the app turns on by itself after a reboot, even if the server
+  is unreachable.

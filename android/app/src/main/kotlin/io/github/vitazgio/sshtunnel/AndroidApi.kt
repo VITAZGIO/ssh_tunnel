@@ -186,7 +186,20 @@ object AndroidApi : mobile.API {
         val tunnel = JSONObject().put("want", bypass).put("phase", phase(bypass))
         val err = localError.ifEmpty { if (st == "error") TunnelService.detail else "" }
         if (err.isNotEmpty() && !bypass && !mesh) tunnel.put("phase", "error").put("error", err)
-        val m = JSONObject().put("want", mesh).put("phase", phase(mesh))
+        // Туннель поднят без сервера ради сети устройств (ТЗ 11): большая
+        // кнопка гаснет с ошибкой сервера, как на ПК (core.ServerDownError) —
+        // текст как есть и код причины, перевод — на экране.
+        val down = TunnelService.serverDown
+        if (run && !bypass && down.isNotEmpty() && localError.isEmpty()) {
+            tunnel.put("phase", "error").put("error", down)
+            if (TunnelService.serverDownKind.isNotEmpty()) tunnel.put("errorKind", TunnelService.serverDownKind)
+        }
+        // Сеть устройств без сервера работает — кнопка «включена», как на ПК:
+        // ядро считает связь поднятой, а как она живёт — в meshLink.
+        val ms = try { JSONObject(TunnelService.meshSummary) } catch (_: Exception) { JSONObject() }
+        val meshLink = if (mesh && run) ms.optString("state").takeIf { it != "off" && it.isNotEmpty() } else null
+        val meshLive = meshLink == "online" || meshLink == "local" || (meshLink != null && down.isNotEmpty())
+        val m = JSONObject().put("want", mesh).put("phase", if (mesh && meshLive && !starting) "on" else phase(mesh))
         val mode = when {
             bypass && mesh -> "bypass+mesh"
             bypass -> "bypass"
@@ -194,10 +207,16 @@ object AndroidApi : mobile.API {
             else -> "off"
         }
         val link = if (starting) "connecting" else st
-        return JSONObject().put("tunnel", tunnel).put("mesh", m).put("meshAvailable", meshOk)
+        val out = JSONObject().put("tunnel", tunnel).put("mesh", m).put("meshAvailable", meshOk)
             .put("mode", mode).put("link", link)
             .put("detail", if (linkUp) s.active().host else "")
             .put("seq", seq)
+        if (meshLink != null && m.optString("phase") == "on") {
+            out.put("meshLink", meshLink)
+            val direct = ms.optInt("direct")
+            if (direct > 0) out.put("meshDirect", direct)
+        }
+        return out
     }
 
     private fun wantResult(s: Settings, tunnel: Boolean?, mesh: Boolean?): String {
