@@ -94,6 +94,8 @@ NFT
 lab_b() {
   host b br0 203.0.113.20/24 203.0.113.1
   id tunlab >/dev/null 2>&1 || useradd -m -s /bin/sh tunlab
+  # Без пароля, но не заблокирован: с UsePAM no sshd не пускает «!» в shadow.
+  usermod -p '*' tunlab
   rm -f "$LAB/key" "$LAB/key.pub" "$LAB/b_host" "$LAB/b_host.pub"
   ssh-keygen -q -t ed25519 -N '' -f "$LAB/key"
   ssh-keygen -q -t ed25519 -N '' -f "$LAB/b_host"
@@ -112,6 +114,7 @@ StrictModes no
 AllowTcpForwarding yes
 PermitTunnel no
 X11Forwarding no
+LogLevel VERBOSE
 CFG
   mkdir -p /run/sshd
   start_b
