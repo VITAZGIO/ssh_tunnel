@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Резервные копии</title>
+<link rel="stylesheet" href="../theme.css">
+<link rel="stylesheet" href="../pages.css">
+<style>
+  body{background:transparent}
+  .box{padding:0 14px 16px;display:flex;flex-direction:column;gap:10px}
+  .tabs{display:flex;gap:6px;padding-top:10px;flex-wrap:wrap}
+  .tabs button{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:7px 12px;cursor:pointer;color:var(--text)}
+  .tabs button.on{border-color:var(--accent);background:var(--card2)}
+  .tabs .ico{margin-left:auto;border:0;background:transparent;padding:7px}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .bar .sp{flex:1}
+  .btn{display:inline-flex;align-items:center;gap:6px}
+  .btn .mi{width:18px;height:18px}
+  select,input{font:inherit;color:var(--text);background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+  .pathRow{display:flex;gap:6px;flex:1;min-width:200px}
+  .pathRow input{flex:1;min-width:0}
+  .p{font-family:var(--mono);font-size:12px;color:var(--dim);word-break:break-all;margin:4px 0}
+  .st{font-size:13px}
+  .st.ok{color:var(--ok)} .st.warn{color:var(--warn)} .st.err{color:var(--err)}
+  .msg{font-size:13px}
+  .msg.err{color:var(--err)} .msg.ok{color:var(--ok)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+  .grid label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim)}
+  .chk{display:flex;gap:8px;align-items:center;font-size:13px}
+  .bar2{height:6px;border-radius:3px;background:var(--card2);overflow:hidden;margin-top:6px}
+  .bar2 i{display:block;height:100%;background:var(--accent);width:0}
+  .row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border-bottom:1px solid var(--line);padding:7px 2px;font-size:13px}
+  .row .d{color:var(--dim);font-size:12px}
+  .files{max-height:360px;overflow:auto}
+  .skip{font-size:12px;color:var(--warn);margin-top:4px}
+  h3{margin:0 0 4px;font-size:15px}
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="tabs">
+    <button id="tabJobs" class="on"></button><button id="tabRestore"></button>
+    <button class="ico" id="reload"></button>
+  </div>
+  <div class="msg" id="msg"></div>
+
+  <!-- Свои копии: что, когда, сколько версий. -->
+  <div id="vJobs" class="box" style="padding:0">
+    <div class="hint" id="jobsHint"></div>
+    <div id="jobs"><div class="empty" id="loading"></div></div>
+    <div class="card">
+      <h3 id="addTitle"></h3>
+      <div class="bar" style="margin-bottom:8px">
+        <span class="pathRow"><input id="addPath"><button class="btn" type="button" data-pick="addPath"></button></span>
+        <input id="addName" style="width:160px">
+      </div>
+      <div class="grid">
+        <label><span id="lSched"></span><select id="addSched"></select></label>
+        <label><span id="lDelay"></span><input id="addDelay" type="number" min="1" max="1440" value="10"></label>
+        <label><span id="lKeep"></span><input id="addKeep" type="number" min="1" max="365" value="10"></label>
+        <label><span id="lServer"></span><select id="addServer"></select></label>
+      </div>
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="addMetered"><span id="lMetered"></span></label>
+      <div class="bar" style="margin-top:10px"><span class="sp"></span><button class="btn primary" id="addBtn"></button></div>
+    </div>
+  </div>
+
+  <!-- Восстановление: копия → версия → что и куда. -->
+  <div id="vRestore" class="box" style="padding:0" hidden>
+    <div class="hint" id="restoreHint"></div>
+    <div id="sets"></div>
+    <div class="card" id="pick" hidden>
+      <h3 id="pickTitle"></h3>
+      <div class="bar"><select id="ver"></select><span class="sp"></span></div>
+      <div class="files" id="files"></div>
+      <div class="bar" style="margin-top:10px">
+        <span class="pathRow"><input id="target"><button class="btn" type="button" data-pick="target"></button></span>
+        <select id="mode"></select>
+      </div>
+      <div class="hint" id="whatHint" style="margin-top:6px"></div>
+      <div class="bar" style="margin-top:10px"><span class="sp"></span><button class="btn primary" id="restoreBtn"></button></div>
+    </div>
+  </div>
+</div>
+
+<script src="../pages.js"></script>
+<script>
+/* Резервные копии. Всё делает ядро (/api/backup…): страница показывает и
+   шлёт просьбы. Копии лежат только на сервере сети. */
+const set = (id, t) => $(id).textContent = t;
+let S = null, TAB = 'jobs', CUR = null, MAN = null, SEL = '';
+
+const SCHED = {daily: L('раз в день', 'daily'), weekly: L('раз в неделю', 'weekly'), change: L('после изменений', 'on change')};
+set('tabJobs', L('Мои копии', 'My backups'));
+set('tabRestore', L('Восстановить', 'Restore'));
+set('loading', L('Загружаю…', 'Loading…'));
+$('reload').innerHTML = icon('refresh');
+$('reload').title = L('Обновить', 'Refresh');
+set('jobsHint', L('Папка уходит на сервер сети по расписанию, с версиями. Одинаковое содержимое не отправляется дважды; оборванная копия продолжается с места обрыва. Читать копии может только это устройство и устройства того же пользователя.',
+  'The folder goes to the network server on a schedule, with versions. The same content is never sent twice; an interrupted backup resumes where it stopped. Only this device and devices of the same user can read the backups.'));
+set('addTitle', L('Новая копия', 'New backup'));
+$('addPath').placeholder = L('полный путь к папке', 'full path to the folder');
+$('addName').placeholder = L('название', 'name');
+set('lSched', L('Когда', 'When'));
+set('lDelay', L('Ждать тишины, мин', 'Quiet time, min'));
+set('lKeep', L('Сколько версий держать', 'Versions to keep'));
+set('lServer', L('Сервер', 'Server'));
+set('lMetered', L('Можно по мобильной (лимитной) сети', 'Allowed on a mobile (metered) connection'));
+$('addBtn').innerHTML = icon('add') + esc(L('Добавить', 'Add'));
+set('restoreHint', L('Копии этого устройства и других устройств того же пользователя. Восстановление ничего не перезаписывает молча: другой файл на месте остаётся, восстановленное ложится рядом с пометкой «из копии».',
+  'Backups of this device and other devices of the same user. Restoring never overwrites silently: a different file in place stays, the restored one lands next to it marked «from backup».'));
+$('target').placeholder = L('куда восстановить (полный путь)', 'where to restore (full path)');
+$('restoreBtn').innerHTML = icon('download') + esc(L('Восстановить', 'Restore'));
+for(const [k, v] of Object.entries(SCHED)) $('addSched').add(new Option(v, k));
+for(const [k, v] of [['rename', L('другой файл на месте — положить рядом', 'different file in place — put next to it')],
+                     ['skip', L('другой файл на месте — пропустить', 'different file in place — skip')],
+                     ['overwrite', L('заменить (осторожно)', 'replace (careful)')]]) $('mode').add(new Option(v, k));
+$('addSched').onchange = () => { $('addDelay').disabled = $('addSched').value !== 'change'; };
+$('addSched').onchange();
+
+let msgT = 0;
+function msg(t, cls){
+  const m = $('msg'); m.textContent = t || ''; m.className = 'msg ' + (cls || '');
+  clearTimeout(msgT);
+  if(t) msgT = setTimeout(() => { m.textContent = ''; }, 10000);
+}
+function when(t){ return t ? new Date(t * 1000).toLocaleString(LANG === 'en' ? 'en-GB' : 'ru-RU') : '—'; }
+function size(n){
+  n = Number(n) || 0;
+  const u = L('Б КБ МБ ГБ ТБ', 'B KB MB GB TB').split(' ');
+  let i = 0;
+  while(n >= 1024 && i < u.length - 1){ n /= 1024; i++; }
+  return (i ? n.toFixed(1) : n) + ' ' + u[i];
+}
+
+// Выбор папки — как в «Зеркальных папках».
+let pickSeq = 0;
+const pickWait = {};
+window.sshtunnelPicked = (id, path) => { const f = pickWait[id]; delete pickWait[id]; if(f) f(path || null); };
+async function pickFolder(){
+  if(ANDROID){
+    if(!window.SSHTunnelAndroid.pickFolder) return null;
+    const id = String(++pickSeq);
+    return new Promise(res => { pickWait[id] = res; SSHTunnelAndroid.pickFolder(id); });
+  }
+  const r = await api('/api/pickfolder', {}).catch(() => null);
+  if(r && r.error){ msg(r.error, 'err'); return null; }
+  return r && r.path ? r.path : null;
+}
+document.querySelectorAll('[data-pick]').forEach(b => {
+  b.innerHTML = icon('folder') + esc(L('Обзор', 'Browse'));
+  b.onclick = async () => { const p = await pickFolder(); if(p) $(b.dataset.pick).value = p; };
+});
+
+function tab(t){
+  TAB = t;
+  $('tabJobs').classList.toggle('on', t === 'jobs');
+  $('tabRestore').classList.toggle('on', t === 'restore');
+  $('vJobs').hidden = t !== 'jobs';
+  $('vRestore').hidden = t !== 'restore';
+  if(t === 'restore') loadSets();
+}
+$('tabJobs').onclick = () => tab('jobs');
+$('tabRestore').onclick = () => tab('restore');
+$('reload').onclick = () => TAB === 'jobs' ? load() : loadSets();
+
+function statusOf(j){
+  const st = j.status || {};
+  if(st.running){
+    const ph = {scan: L('смотрю папку', 'scanning'), hash: L('читаю файлы', 'reading files'),
+                upload: L('отправляю', 'uploading'), commit: L('записываю версию', 'saving the version')}[st.phase] || '';
+    return [ph + (st.total ? ` — ${size(st.done)} / ${size(st.total)}` : ''), 'warn'];
+  }
+  if(st.waiting) return [st.waiting, 'warn'];
+  if(st.lastErr) return [L('ошибка: ', 'error: ') + st.lastErr, 'err'];
+  if(st.lastOK) return [L('последняя копия ', 'last backup ') + when(st.lastOK) + ` — ${st.files} ` + L('файлов', 'files') + `, ${size(st.bytes)}`, 'ok'];
+  return [L('ещё не было', 'not yet'), 'warn'];
+}
+
+function draw(r){
+  S = r;
+  const box = $('jobs');
+  box.innerHTML = '';
+  if(r.mesh === 'off'){
+    box.innerHTML = `<div class="card warn">${esc(L('Сеть устройств выключена — копии ждут её.', 'The device network is off — backups wait for it.'))}</div>`;
+  } else if(!r.servers.length){
+    box.innerHTML = `<div class="card warn">${esc(L('Ни одного сервера сети нет на связи — копии будут, когда он появится.', 'No network server is online — backups run when one appears.'))}</div>`;
+  }
+  if(!r.jobs.length){
+    box.insertAdjacentHTML('beforeend', `<div class="empty">${esc(L('Пока ни одной копии — добавь папку ниже.', 'No backups yet — add a folder below.'))}</div>`);
+  }
+  for(const j of r.jobs){
+    const [st, cls] = statusOf(j);
+    const c = document.createElement('div');
+    c.className = 'card';
+    const sched = SCHED[j.schedule] + (j.schedule === 'change' ? ` (${j.delayMin} ${L('мин', 'min')})` : '');
+    c.innerHTML = `<div class="bar"><h3 class="sp">${esc(j.name)}</h3>
+        <button class="btn" data-op="run">${esc(j.status.running ? L('Остановить', 'Stop') : L('Сделать сейчас', 'Back up now'))}</button>
+        <button class="btn" data-op="remove">${icon('delete')}</button></div>
+      <div class="p">${esc(j.path)}</div>
+      <div class="hint">${esc(sched)} · ${esc(L('версий', 'versions'))}: ${j.keep}${j.metered ? ' · ' + esc(L('и по мобильной сети', 'also on mobile data')) : ''}${j.status.server ? ' · ' + esc(j.status.server) : ''}</div>
+      <div class="st ${cls}">${esc(st)}</div>
+      ${j.status.running && j.status.total ? `<div class="bar2"><i style="width:${Math.min(100, 100 * j.status.done / j.status.total)}%"></i></div>` : ''}
+      ${(j.status.skipped || []).length ? `<div class="skip">${esc(L('Пропущено (попадёт в следующую копию): ', 'Skipped (goes into the next backup): '))}${j.status.skipped.slice(0, 5).map(s => esc(s.p + ' — ' + s.why)).join('; ')}</div>` : ''}`;
+    c.querySelector('[data-op=run]').onclick = () => post({op: j.status.running ? 'cancel' : 'run', id: j.id});
+    c.querySelector('[data-op=remove]').title = L('Убрать копию с этого устройства (на сервере она останется)', 'Remove from this device (stays on the server)');
+    c.querySelector('[data-op=remove]').onclick = () => {
+      if(confirm(L(`Перестать делать копию «${j.name}»? Уже сделанные версии останутся на сервере.`, `Stop backing up «${j.name}»? Versions already made stay on the server.`))) post({op: 'remove', id: j.id});
+    };
+    box.appendChild(c);
+  }
+  const sv = $('addServer'), was = sv.value;
+  sv.innerHTML = '';
+  sv.add(new Option(L('любой с копиями', 'any with backups'), ''));
+  for(const s of r.servers) sv.add(new Option(s.name || s.host, s.host));
+  sv.value = was;
+  clearTimeout(draw.t);
+  draw.t = setTimeout(load, r.jobs.some(j => j.status.running) ? 1500 : 10000);
+}
+
+async function load(){
+  const r = await api('/api/backup').catch(e => ({error: String(e)}));
+  if(r.error){ msg(r.error, 'err'); return; }
+  draw(r);
+}
+async function post(body){
+  const r = await api('/api/backup', body);
+  if(r.error){ msg(r.error, 'err'); return false; }
+  msg(''); draw(r); return true;
+}
+$('addBtn').onclick = async () => {
+  const ok = await post({op: 'add', job: {path: $('addPath').value.trim(), name: $('addName').value.trim(),
+    schedule: $('addSched').value, delayMin: Number($('addDelay').value) || 10, keep: Number($('addKeep').value) || 10,
+    metered: $('addMetered').checked, server: $('addServer').value}});
+  if(ok){ $('addPath').value = ''; $('addName').value = ''; msg(L('Добавлено — первая копия уже идёт.', 'Added — the first backup is running.'), 'ok'); }
+};
+
+// ---------- восстановление ----------
+async function loadSets(){
+  const box = $('sets');
+  box.innerHTML = `<div class="empty">${esc(L('Спрашиваю сервер…', 'Asking the server…'))}</div>`;
+  const r = await api('/api/backup/remote');
+  box.innerHTML = '';
+  if(r.error){ msg(r.error, 'err'); return; }
+  if(!r.sets.length){ box.innerHTML = `<div class="empty">${esc(L('На сервере пока нет копий.', 'No backups on the server yet.'))}</div>`; return; }
+  for(const s of r.sets){
+    const c = document.createElement('div');
+    c.className = 'card';
+    c.innerHTML = `<div class="bar"><h3 class="sp">${esc(s.name)}</h3><button class="btn">${esc(L('Выбрать', 'Choose'))}</button></div>
+      <div class="hint">${esc(s.own ? L('это устройство', 'this device') : (s.deviceName || s.device))} · ${s.versions} ${esc(L('версий', 'versions'))} · ${size(s.bytes)} · ${esc(when(s.last))}</div>`;
+    c.querySelector('button').onclick = () => choose(s);
+    box.appendChild(c);
+  }
+}
+
+async function choose(s){
+  CUR = s; SEL = '';
+  $('pick').hidden = false;
+  set('pickTitle', s.name + ' — ' + (s.own ? L('это устройство', 'this device') : (s.deviceName || s.device)));
+  const r = await api(`/api/backup/versions?device=${encodeURIComponent(s.device)}&set=${encodeURIComponent(s.set)}`);
+  if(r.error){ msg(r.error, 'err'); return; }
+  const v = $('ver');
+  v.innerHTML = '';
+  for(const x of r.versions) v.add(new Option(`${when(x.time)} — ${x.files} ${L('файлов', 'files')}, ${size(x.bytes)}`, x.id));
+  v.onchange = loadFiles;
+  loadFiles();
+  $('pick').scrollIntoView({behavior: 'smooth'});
+}
+
+async function loadFiles(){
+  const r = await api(`/api/backup/files?device=${encodeURIComponent(CUR.device)}&set=${encodeURIComponent(CUR.set)}&version=${encodeURIComponent($('ver').value)}`);
+  if(r.error){ msg(r.error, 'err'); return; }
+  MAN = r; SEL = '';
+  const box = $('files');
+  box.innerHTML = '';
+  const all = document.createElement('label');
+  all.className = 'row';
+  all.innerHTML = `<span><input type="radio" name="sel" value="" checked> <b>${esc(L('Вся папка', 'The whole folder'))}</b></span><span class="d">${r.files.length}</span>`;
+  box.appendChild(all);
+  const dirs = new Set();
+  for(const f of r.files){ const i = f.p.indexOf('/'); if(i > 0) dirs.add(f.p.slice(0, i)); }
+  for(const d of [...dirs].sort()){
+    const row = document.createElement('label');
+    row.className = 'row';
+    row.innerHTML = `<span><input type="radio" name="sel"> ${icon('folder')} ${esc(d)}</span><span class="d"></span>`;
+    row.querySelector('input').value = d;
+    box.appendChild(row);
+  }
+  for(const f of r.files.slice(0, 2000)){
+    const row = document.createElement('label');
+    row.className = 'row';
+    row.innerHTML = `<span><input type="radio" name="sel"> ${esc(f.p)}</span><span class="d">${size(f.size)}</span>`;
+    row.querySelector('input').value = f.p;
+    box.appendChild(row);
+  }
+  box.onchange = e => { SEL = e.target.value; hint(); };
+  hint();
+}
+function hint(){
+  set('whatHint', SEL ? L(`Восстановится «${SEL}» — в выбранную папку под своим именем.`, `«${SEL}» will be restored into the chosen folder under its own name.`)
+    : L('Восстановится вся копия — в выбранную папку.', 'The whole backup will be restored into the chosen folder.'));
+}
+
+$('restoreBtn').onclick = async () => {
+  const target = $('target').value.trim();
+  if(!target){ $('target').focus(); return; }
+  if($('mode').value === 'overwrite' && !confirm(L('Заменить файлы на месте версиями из копии? Текущие станут недоступны.', 'Replace files in place with versions from the backup? The current ones will be lost.'))) return;
+  $('restoreBtn').disabled = true;
+  msg(L('Восстанавливаю…', 'Restoring…'));
+  const r = await api('/api/backup/restore', {device: CUR.device, set: CUR.set, version: $('ver').value, path: SEL, target, mode: $('mode').value});
+  $('restoreBtn').disabled = false;
+  if(r.error){ msg(r.error, 'err'); return; }
+  msg(L(`Готово: записано ${r.written}, уже такие же ${r.same}, рядом с пометкой ${r.renamed}, пропущено ${r.skipped}`,
+        `Done: written ${r.written}, already the same ${r.same}, put next to ${r.renamed}, skipped ${r.skipped}`) +
+      ((r.failed || []).length ? L('; не вышло: ', '; failed: ') + r.failed.slice(0, 3).join('; ') : ''), (r.failed || []).length ? 'err' : 'ok');
+};
+
+load();
+</script>
+</body>
+</html>

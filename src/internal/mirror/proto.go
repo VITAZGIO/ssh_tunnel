@@ -22,7 +22,7 @@ import (
 //	GET  /blob?f=&b=                       старая версия (просмотр)
 //	GET  /part?f=&p=&hash=                 сколько уже загружено
 //	PUT  /put?f=&p=&hash=&off=N            кусок загрузки с места N
-//	POST /commit {f,p,hash,base}           сделать загруженное файлом
+//	POST /commit {f,p,hash,base[,size]}    сделать загруженное файлом
 //	POST /delete {f,p,base}                удалить
 //	POST /resolve {f,path,keep}            решить конфликт
 //	GET  /versions?f=[&p=]                 версии и корзина
@@ -103,9 +103,13 @@ func (h *Hub) Handler(who func(*http.Request) string) http.Handler {
 			return
 		}
 		off, _ := strconv.ParseInt(q(r, "off"), 10, 64)
+		if err := h.CheckRoom(q(r, "f"), r.ContentLength); err != nil {
+			errOut(w, quotaCode(err, http.StatusNotFound), err)
+			return
+		}
 		n, err := h.WritePart(q(r, "f"), who(r), q(r, "p"), q(r, "hash"), off, r.Body)
 		if err != nil {
-			code := 500
+			code := quotaCode(err, 500)
 			if errors.Is(err, errOffset) {
 				code = http.StatusConflict
 			}
@@ -122,6 +126,7 @@ func (h *Hub) Handler(who func(*http.Request) string) http.Handler {
 		Path string `json:"path"`
 		Keep string `json:"keep"`
 		Blob string `json:"blob"`
+		Size *int64 `json:"size"` // необязательно (ТЗ 13): размер для докачки
 	}
 	post := func(fn func(r *http.Request, b body) (any, error)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -136,14 +141,18 @@ func (h *Hub) Handler(who func(*http.Request) string) http.Handler {
 			}
 			v, err := fn(r, b)
 			if err != nil {
-				errOut(w, 500, err)
+				errOut(w, quotaCode(err, 500), err)
 				return
 			}
 			jsonOut(w, 200, v)
 		}
 	}
 	mux.HandleFunc("/commit", post(func(r *http.Request, b body) (any, error) {
-		return h.Commit(b.F, who(r), b.P, b.Hash, b.Base)
+		size := int64(-1)
+		if b.Size != nil {
+			size = *b.Size
+		}
+		return h.CommitSized(b.F, who(r), b.P, b.Hash, b.Base, size)
 	}))
 	mux.HandleFunc("/delete", post(func(r *http.Request, b body) (any, error) {
 		return h.Delete(b.F, who(r), b.P, b.Base)
@@ -164,6 +173,14 @@ func (h *Hub) Handler(who func(*http.Request) string) http.Handler {
 		jsonOut(w, 200, vs)
 	})
 	return mux
+}
+
+// quotaCode — 507 для «нет места на сервере», иначе def.
+func quotaCode(err error, def int) int {
+	if IsQuota(err) {
+		return http.StatusInsufficientStorage
+	}
+	return def
 }
 
 func jsonOut(w http.ResponseWriter, code int, v any) {

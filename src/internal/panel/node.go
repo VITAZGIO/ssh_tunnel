@@ -105,6 +105,8 @@ type NodeStatus struct {
 	State *nodeapi.State `json:"state,omitempty"`
 	Error string         `json:"error,omitempty"`
 	Job   *meshJob       `json:"job,omitempty"`
+	// Warnings — что мешает плагинам (порты сервера, права, роль сервера).
+	Warnings []NodeWarning `json:"warnings,omitempty"`
 }
 
 // Status — состояние хоста: установлен ли юнит, и если да — живое
@@ -141,4 +143,12 @@ func (m *NodeManager) SetFolderQuota(ctx context.Context, r nodeapi.FolderReq) e
 
 func (m *NodeManager) ClearClipboard(ctx context.Context, netID string) error {
 	return m.api.ClearClipboard(ctx, netID)
+}
+
+func (m *NodeManager) DeleteBackup(ctx context.Context, r nodeapi.BackupReq) error {
+	return m.api.DeleteBackup(ctx, r)
+}
+
+func (m *NodeManager) DeleteNet(ctx context.Context, netID string) error {
+	return m.api.DeleteNet(ctx, netID)
 }

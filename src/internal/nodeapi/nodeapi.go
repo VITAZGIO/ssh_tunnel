@@ -11,6 +11,8 @@
 //	POST /folder/remove     {net,id,deleteData}  → {"ok":true}
 //	POST /folder/quota      {net,id,quotaMB}     → {"ok":true}
 //	POST /clipboard/clear   {net}                → {"ok":true}
+//	POST /backup/delete     {net,scope,device,set} → {"ok":true}
+//	POST /net/delete        {net}                → {"ok":true}  данные сети целиком
 //
 // Ошибки — HTTP 400 {"error":"<текст>"}.
 package nodeapi
@@ -45,6 +47,8 @@ const (
 	PortFiles     = 47835
 	PortMirror    = 47836
 	PortClipboard = 47837
+	// PortBackup — «Резервные копии» (ТЗ 13): только на сервере.
+	PortBackup = 47838
 
 	// DefaultQuotaMB — сколько места всем плагинам вместе по умолчанию.
 	DefaultQuotaMB = 10 * 1024
@@ -53,13 +57,14 @@ const (
 )
 
 // Ports — порты всех плагинов.
-var Ports = []int{PortFiles, PortMirror, PortClipboard}
+var Ports = []int{PortFiles, PortMirror, PortClipboard, PortBackup}
 
 // Плагины.
 const (
 	PluginMirror    = "mirror"
 	PluginFiles     = "files"
 	PluginClipboard = "clipboard"
+	PluginBackup    = "backup"
 )
 
 // Caller — устройство сети, которое пришло к плагину (ответ meshd на who).
@@ -78,6 +83,7 @@ type Config struct {
 	Files      bool  `json:"files"`
 	FilesWrite bool  `json:"filesWrite"`
 	Clipboard  bool  `json:"clipboard"`
+	Backup     bool  `json:"backup"`
 	QuotaMB    int64 `json:"quotaMB"` // всем плагинам вместе
 }
 
@@ -87,6 +93,7 @@ type ConfigPatch struct {
 	Files      *bool  `json:"files,omitempty"`
 	FilesWrite *bool  `json:"filesWrite,omitempty"`
 	Clipboard  *bool  `json:"clipboard,omitempty"`
+	Backup     *bool  `json:"backup,omitempty"`
 	QuotaMB    *int64 `json:"quotaMB,omitempty"`
 }
 
@@ -114,8 +121,33 @@ type Network struct {
 	FilesBytes int64     `json:"filesBytes"`
 	Clipboard  Clipboard `json:"clipboard"`
 	UsedBytes  int64     `json:"usedBytes"`
+	// Backups — резервные копии устройств сети, BackupBytes — сколько они
+	// занимают на диске (одинаковое содержимое — один раз).
+	Backups     []BackupSet `json:"backups,omitempty"`
+	BackupBytes int64       `json:"backupBytes,omitempty"`
 	// LastActive — последнее обращение устройства по плагинам (unix).
 	LastActive map[string]int64 `json:"lastActive,omitempty"`
+}
+
+// BackupSet — резервная копия одной папки одного устройства.
+type BackupSet struct {
+	Scope      string `json:"scope"` // чьё: пользователь или устройство (для удаления)
+	Device     string `json:"device"`
+	DeviceName string `json:"deviceName,omitempty"`
+	Set        string `json:"set"`
+	Name       string `json:"name"`
+	Keep       int    `json:"keep"`
+	Versions   int    `json:"versions"`
+	Bytes      int64  `json:"bytes"` // последняя версия
+	Last       int64  `json:"last,omitempty"`
+}
+
+// BackupReq — убрать резервную копию.
+type BackupReq struct {
+	Net    string `json:"net"`
+	Scope  string `json:"scope"`
+	Device string `json:"device"`
+	Set    string `json:"set"`
 }
 
 // Event — заметное событие или ошибка плагина.
@@ -159,6 +191,8 @@ type API interface {
 	RemoveFolder(ctx context.Context, r FolderReq) error
 	SetFolderQuota(ctx context.Context, r FolderReq) error
 	ClearClipboard(ctx context.Context, net string) error
+	DeleteBackup(ctx context.Context, r BackupReq) error
+	DeleteNet(ctx context.Context, net string) error
 }
 
 // Client — API поверх unix-сокета.
@@ -243,6 +277,14 @@ func (c *Client) SetFolderQuota(ctx context.Context, r FolderReq) error {
 
 func (c *Client) ClearClipboard(ctx context.Context, n string) error {
 	return c.do(ctx, http.MethodPost, "/clipboard/clear", map[string]string{"net": n}, nil)
+}
+
+func (c *Client) DeleteBackup(ctx context.Context, r BackupReq) error {
+	return c.do(ctx, http.MethodPost, "/backup/delete", r, nil)
+}
+
+func (c *Client) DeleteNet(ctx context.Context, n string) error {
+	return c.do(ctx, http.MethodPost, "/net/delete", map[string]string{"net": n}, nil)
 }
 
 // ValidNet — id сети от meshd: шестнадцатеричная строка (хеш ключа). Из

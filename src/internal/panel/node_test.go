@@ -126,6 +126,15 @@ func (a *fakeNodeAPI) ClearClipboard(_ context.Context, netID string) error {
 	return nil
 }
 
+func (a *fakeNodeAPI) DeleteBackup(context.Context, nodeapi.BackupReq) error { return nil }
+
+func (a *fakeNodeAPI) DeleteNet(_ context.Context, netID string) error {
+	a.mu.Lock()
+	delete(a.folders, netID)
+	a.mu.Unlock()
+	return nil
+}
+
 func TestNodeНедоступенБезМенеджера(t *testing.T) {
 	s, _ := newTestServer(t)
 	id, _ := s.sessions.create("admin", false)
