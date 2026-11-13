@@ -327,6 +327,29 @@ Invoke-RestMethod "$($a.url)/api/calendar/events?from=2026-11-01&to=2026-11-08" 
 Между устройствами — свой протокол на порту 47836 сети устройств
 (`internal/mirror/proto.go`).
 
+## Резервные копии (ТЗ 13)
+
+Отвечают, только пока приложение добавлено и включено. Копии лежат только на
+сервере сети (хост плагинов, порт 47838) и ходят по сети устройств.
+
+- `GET /api/backup` — `{"jobs":[{id,name,path,schedule:"daily|weekly|change",delayMin,keep,metered,server,
+  status:{running,phase,done,total,lastRun,lastOK,lastErr,waiting,files,bytes,skipped:[{p,why}],server,next}}],
+  "servers":[{host,name,ip}],"metered","mesh"}`.
+- `POST /api/backup`: `{"op":"add","job":{name,path,schedule,delayMin,keep,metered,server}}`,
+  `{"op":"update","job":{id,…}}`, `{"op":"remove","id"}` (на сервере копия остаётся),
+  `{"op":"run","id"}`, `{"op":"cancel","id"}`.
+- `GET /api/backup/remote[?server=]` — копии на сервере: свои и других устройств того же
+  пользователя, `{"sets":[{device,deviceName,set,name,keep,versions,bytes,last,own}]}`.
+- `GET /api/backup/versions?device=&set=` — версии, новые сверху.
+- `GET /api/backup/files?device=&set=&version=` — список файлов версии.
+- `POST /api/backup/restore` `{"device","set","version","path":<файл или папка, пусто — всё>,
+  "target":<полный путь>,"mode":"rename|skip|overwrite"}` → `{written,same,renamed,skipped,failed}`.
+  Молча ничего не перезаписывает: по умолчанию другой файл на месте остаётся, восстановленное
+  ложится рядом «имя (из копии ДД.ММ.ГГГГ)».
+- `POST /api/backup/delete` `{"device","set"[,"version"]}` — убрать копию с сервера.
+
+Протокол с сервером — `internal/backup/proto.go`.
+
 ## Трафик, сканер, буфер (ТЗ 5)
 
 Отвечают, только пока приложение добавлено (и, если фоновое, включено).

@@ -138,6 +138,21 @@ var catalog = []Manifest{
 		Needs:       []string{"mesh"},
 		Permissions: []string{},
 	},
+	// ТЗ 13: резервные копии на сервер сети (internal/backup).
+	{
+		ID:   "backup",
+		Name: map[string]string{"ru": "Резервные копии", "en": "Backups"},
+		Icon: "upload",
+		Hint: map[string]string{
+			"ru": "Папка по расписанию уходит на сервер сети с версиями; восстановить можно файл или всю папку на любой версии. Только по сети устройств; читать копию может лишь это устройство и устройства того же пользователя.",
+			"en": "A folder goes to the network server on a schedule, with versions; restore a file or the whole folder at any version. Over the device network only; a backup can be read only by this device and devices of the same user.",
+		},
+		Book:        "app-backup",
+		Background:  true,
+		Page:        "addons/backup.html",
+		Needs:       []string{"mesh"},
+		Permissions: []string{},
+	},
 }
 
 // showDev — показывать ли образцы. В релизе версия проставлена сборкой.

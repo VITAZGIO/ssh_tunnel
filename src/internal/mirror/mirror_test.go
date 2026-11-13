@@ -122,6 +122,9 @@ func newEnv(t *testing.T) *env {
 	}
 	e.fid = f.ID
 	t.Cleanup(func() {
+		if quotaOn != nil && !t.Failed() {
+			quotaOn.check(t, e.hub, e.fid)
+		}
 		e.srv.Close()
 		e.hub.Close()
 	})
@@ -134,6 +137,9 @@ func (e *env) startHub() {
 		e.t.Fatal(err)
 	}
 	e.hub = h
+	if quotaOn != nil {
+		quotaOn.attach(h)
+	}
 	e.srv = httptest.NewServer(h.Handler(func(r *http.Request) string { return r.Header.Get("X-Dev") }))
 	for _, c := range e.clients {
 		c.R.Base = e.srv.URL

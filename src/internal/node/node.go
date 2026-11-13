@@ -22,7 +22,10 @@
 //   - сети разделены: данные сети ищутся только по id сети, который назвал
 //     meshd; права доступа панели (policy) meshd проверяет до соединения, как
 //     для любого порта сервера;
-//   - панель управляет хостом через unix-сокет (nodeapi.ControlSocket).
+//   - панель управляет хостом через unix-сокет (nodeapi.ControlSocket);
+//   - «Резервные копии» (ТЗ 13, internal/backup) — четвёртый плагин, только
+//     серверный: копии устройств по сетям, читать может лишь владелец
+//     (устройство или его SSH-пользователь).
 package node
 
 import (
@@ -43,6 +46,7 @@ import (
 	"sync"
 	"time"
 
+	"sshtunnel/internal/backup"
 	"sshtunnel/internal/clipshare"
 	"sshtunnel/internal/devfiles"
 	"sshtunnel/internal/mesh"
@@ -107,6 +111,7 @@ type netData struct {
 	mirrorH  http.Handler
 	board    *clipshare.ServerBoard
 	filesH   http.Handler
+	backup   *backup.Store
 	last     map[string]int64
 	used     int64 // всё место сети (кэш)
 	folderBy map[string]int64
@@ -214,6 +219,8 @@ func (h *Host) port(plugin string) int {
 		return nodeapi.PortFiles
 	case nodeapi.PluginMirror:
 		return nodeapi.PortMirror
+	case nodeapi.PluginBackup:
+		return nodeapi.PortBackup
 	default:
 		return nodeapi.PortClipboard
 	}
@@ -227,9 +234,10 @@ func (h *Host) applyLocked() error {
 		nodeapi.PluginMirror:    h.conf.Config.Mirror,
 		nodeapi.PluginFiles:     h.conf.Config.Files,
 		nodeapi.PluginClipboard: h.conf.Config.Clipboard,
+		nodeapi.PluginBackup:    h.conf.Config.Backup,
 	}
 	var errs []string
-	for _, p := range []string{nodeapi.PluginMirror, nodeapi.PluginFiles, nodeapi.PluginClipboard} {
+	for _, p := range []string{nodeapi.PluginMirror, nodeapi.PluginFiles, nodeapi.PluginClipboard, nodeapi.PluginBackup} {
 		l := h.lns[p]
 		switch {
 		case want[p] && l == nil && !h.stopped:
@@ -453,7 +461,7 @@ func (h *Host) folder(id, fid string) (folderConf, bool) {
 }
 
 // hubOf — сервер папок сети; открывается при первой папке.
-func (nd *netData) hubOf() (*mirror.Hub, http.Handler, error) {
+func (h *Host) hubOf(nd *netData) (*mirror.Hub, http.Handler, error) {
 	nd.mu.Lock()
 	defer nd.mu.Unlock()
 	if nd.hub == nil {
@@ -461,6 +469,10 @@ func (nd *netData) hubOf() (*mirror.Hub, http.Handler, error) {
 		if err != nil {
 			return nil, nil, err
 		}
+		// Квота — в самом сервере папок: проверка до записи и точный учёт
+		// сразу после неё (и при копии уже лежащего содержимого).
+		hub.Room = func(folder string, used int64) (int64, string) { return h.room(nd, folder, used) }
+		hub.OnUsage = func(folder string, d int64) { h.grow(nd, folder, d) }
 		nd.hub = hub
 		nd.mirrorH = hub.Handler(func(r *http.Request) string {
 			c := callerOf(r)
@@ -471,6 +483,22 @@ func (nd *netData) hubOf() (*mirror.Hub, http.Handler, error) {
 		})
 	}
 	return nd.hub, nd.mirrorH, nil
+}
+
+// backupOf — резервные копии сети; открываются при первом обращении.
+func (h *Host) backupOf(nd *netData) *backup.Store {
+	nd.mu.Lock()
+	defer nd.mu.Unlock()
+	if nd.backup == nil {
+		st := backup.OpenStore(filepath.Join(nd.dir, "backup"))
+		st.Room = func() (int64, string) { return h.room(nd, "", -1) }
+		st.OnUsage = func(d int64) { h.grow(nd, "", d) }
+		st.OnEvent = func(text string, isErr bool) {
+			h.event(nodeapi.Event{Plugin: nodeapi.PluginBackup, Net: nd.id, Error: isErr, Text: text})
+		}
+		nd.backup = st
+	}
+	return nd.backup
 }
 
 func (nd *netData) boardOf() *clipshare.ServerBoard {
@@ -519,7 +547,16 @@ func (h *Host) recount() {
 		}
 		used := du(nd.dir)
 		by := map[string]int64{}
+		nd.mu.Lock()
+		hub := nd.hub
+		nd.mu.Unlock()
 		for _, f := range h.folders(nd.id) {
+			if hub != nil {
+				if n, err := hub.Usage(f.ID); err == nil {
+					by[f.ID] = n
+					continue
+				}
+			}
 			by[f.ID] = du(f.Path) + du(filepath.Join(nd.dir, "mirror", "hub", f.ID))
 		}
 		nd.mu.Lock()
@@ -532,9 +569,9 @@ func (h *Host) recount() {
 	h.mu.Unlock()
 }
 
-// grow — дописано n байт (между пересчётами).
+// grow — место изменилось на n байт (между пересчётами; n < 0 — убрано).
 func (h *Host) grow(nd *netData, folder string, n int64) {
-	if n <= 0 {
+	if n == 0 {
 		return
 	}
 	h.mu.Lock()
@@ -548,8 +585,9 @@ func (h *Host) grow(nd *netData, folder string, n int64) {
 	nd.mu.Unlock()
 }
 
-// room — сколько ещё можно записать (folder — зеркальная папка или "").
-func (h *Host) room(nd *netData, folder string) (int64, string) {
+// room — сколько ещё можно записать (folder — зеркальная папка или "";
+// used — сколько папка занимает сейчас, -1 — взять из учёта).
+func (h *Host) room(nd *netData, folder string, used int64) (int64, string) {
 	h.mu.Lock()
 	total := h.conf.Config.QuotaMB<<20 - h.used
 	quota := h.conf.Config.QuotaMB
@@ -557,9 +595,12 @@ func (h *Host) room(nd *netData, folder string) (int64, string) {
 	left, why := total, fmt.Sprintf("на сервере кончилось место для плагинов (всего %d МБ) — освободи место или увеличь квоту в панели сервера", quota)
 	if folder != "" {
 		if f, ok := h.folder(nd.id, folder); ok && f.QuotaMB > 0 {
-			nd.mu.Lock()
-			fl := f.QuotaMB<<20 - nd.folderBy[folder]
-			nd.mu.Unlock()
+			if used < 0 {
+				nd.mu.Lock()
+				used = nd.folderBy[folder]
+				nd.mu.Unlock()
+			}
+			fl := f.QuotaMB<<20 - used
 			if fl < left {
 				left, why = fl, fmt.Sprintf("папка «%s» на сервере заполнена (квота %d МБ) — освободи место или увеличь квоту в панели сервера", f.Name, f.QuotaMB)
 			}
@@ -603,7 +644,7 @@ func (q *quotaReader) Read(p []byte) (int, error) {
 // длина неизвестна — тело обрезается на краю с понятной ошибкой. Ничего не
 // портится: недогруженное лежит отдельным куском и в папку не попадает.
 func (h *Host) limitPut(w http.ResponseWriter, r *http.Request, nd *netData, folder string) (*quotaReader, bool) {
-	left, why := h.room(nd, folder)
+	left, why := h.room(nd, folder, -1)
 	if left <= 0 || (r.ContentLength > 0 && r.ContentLength > left) {
 		h.event(nodeapi.Event{Net: nd.id, Error: true, Text: why})
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -640,6 +681,9 @@ func (h *Host) pluginHandler(plugin string) http.Handler {
 			}
 			r = r.WithContext(clipshare.WithServerCaller(r.Context(), clipshare.ServerCaller{Device: c.Device, Name: c.Name}))
 			nd.boardOf().Handler().ServeHTTP(w, r)
+		case nodeapi.PluginBackup:
+			r = r.WithContext(backup.WithCaller(r.Context(), backup.Caller{Device: c.Device, Name: c.Name, User: c.User}))
+			h.backupOf(nd).Handler().ServeHTTP(w, r)
 		}
 	})
 }
@@ -657,22 +701,13 @@ func (h *Host) serveMirror(w http.ResponseWriter, r *http.Request, nd *netData) 
 		http.Error(w, `{"error":"на сервере нет зеркальных папок этой сети"}`, http.StatusNotFound)
 		return
 	}
-	_, handler, err := nd.hubOf()
+	_, handler, err := h.hubOf(nd)
 	if err != nil {
 		h.event(nodeapi.Event{Plugin: nodeapi.PluginMirror, Net: nd.id, Error: true, Text: err.Error()})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	folder := r.URL.Query().Get("f")
-	if r.URL.Path == "/put" && r.Method == http.MethodPut {
-		q, ok := h.limitPut(w, r, nd, folder)
-		if !ok {
-			return
-		}
-		handler.ServeHTTP(w, r)
-		h.grow(nd, folder, q.n)
-		return
-	}
+	// Квоту проверяет и учитывает сам сервер папок (hub.Room/OnUsage).
 	handler.ServeHTTP(w, r)
 }
 
@@ -820,6 +855,14 @@ func (h *Host) State() nodeapi.State {
 			bs := nd.boardOf().Stats()
 			n.Clipboard = nodeapi.Clipboard{Items: bs.Items, Bytes: bs.Bytes, Devices: bs.Devices}
 		}
+		if _, err := os.Stat(filepath.Join(nd.dir, "backup")); err == nil {
+			st := h.backupOf(nd)
+			for _, b := range st.AllSets() {
+				n.Backups = append(n.Backups, nodeapi.BackupSet{Scope: b.Scope, Device: b.Device, DeviceName: b.DeviceName,
+					Set: b.Set, Name: b.Name, Keep: b.Keep, Versions: b.Versions, Bytes: b.Bytes, Last: b.Last})
+			}
+			n.BackupBytes = st.Stored()
+		}
 		st.Networks = append(st.Networks, n)
 	}
 	sort.Slice(st.Networks, func(i, j int) bool { return st.Networks[i].ID < st.Networks[j].ID })
@@ -844,6 +887,9 @@ func (h *Host) SetConfig(p nodeapi.ConfigPatch) (nodeapi.State, error) {
 	}
 	if p.Clipboard != nil {
 		c.Clipboard = *p.Clipboard
+	}
+	if p.Backup != nil {
+		c.Backup = *p.Backup
 	}
 	if p.QuotaMB != nil {
 		if *p.QuotaMB < 1 || *p.QuotaMB > 1<<24 {
@@ -892,7 +938,7 @@ func (h *Host) AddFolder(req nodeapi.FolderReq) (nodeapi.Folder, error) {
 	if len(h.folders(nd.id)) >= 32 {
 		return nodeapi.Folder{}, errors.New("в сети не больше 32 зеркальных папок")
 	}
-	hub, _, err := nd.hubOf()
+	hub, _, err := h.hubOf(nd)
 	if err != nil {
 		return nodeapi.Folder{}, err
 	}
@@ -925,7 +971,7 @@ func (h *Host) RemoveFolder(req nodeapi.FolderReq) error {
 	if !ok {
 		return errors.New("нет такой папки")
 	}
-	hub, _, err := nd.hubOf()
+	hub, _, err := h.hubOf(nd)
 	if err != nil {
 		return err
 	}
@@ -986,6 +1032,46 @@ func (h *Host) ClearClipboard(netID string) error {
 	nd.boardOf().Clear()
 	h.event(nodeapi.Event{Plugin: nodeapi.PluginClipboard, Net: nd.id, Text: "буфер очищен из панели"})
 	return nil
+}
+
+// DeleteBackup — убрать резервную копию устройства (панель).
+func (h *Host) DeleteBackup(req nodeapi.BackupReq) error {
+	nd, err := h.netFor(req.Net)
+	if err != nil {
+		return err
+	}
+	if err := h.backupOf(nd).DeleteAny(req.Scope, req.Device, req.Set); err != nil {
+		return err
+	}
+	h.event(nodeapi.Event{Plugin: nodeapi.PluginBackup, Net: nd.id, Text: "резервная копия убрана из панели"})
+	return nil
+}
+
+// DeleteNet — стереть все данные плагинов сети (её удалили в meshd). Сам
+// хост не знает, что сеть удалена, — решает и спрашивает человека панель.
+func (h *Host) DeleteNet(netID string) error {
+	if !nodeapi.ValidNet(netID) {
+		return errors.New("неверный id сети")
+	}
+	h.mu.Lock()
+	nd := h.nets[netID]
+	delete(h.nets, netID)
+	delete(h.conf.Folders, netID)
+	err := h.saveLocked()
+	h.mu.Unlock()
+	if nd != nil {
+		nd.mu.Lock()
+		if nd.hub != nil {
+			nd.hub.Close()
+		}
+		nd.mu.Unlock()
+	}
+	if e := os.RemoveAll(h.netDir(netID)); e != nil && err == nil {
+		err = e
+	}
+	h.event(nodeapi.Event{Net: netID, Text: "данные удалённой сети стёрты из панели"})
+	h.recount()
+	return err
 }
 
 func randName() string {
@@ -1053,6 +1139,22 @@ func (h *Host) ControlHandler() http.Handler {
 			return nil, err
 		}
 		return ok, h.SetFolderQuota(req)
+	})
+	post("/backup/delete", func(b []byte) (any, error) {
+		var req nodeapi.BackupReq
+		if err := json.Unmarshal(b, &req); err != nil {
+			return nil, err
+		}
+		return ok, h.DeleteBackup(req)
+	})
+	post("/net/delete", func(b []byte) (any, error) {
+		var req struct {
+			Net string `json:"net"`
+		}
+		if err := json.Unmarshal(b, &req); err != nil {
+			return nil, err
+		}
+		return ok, h.DeleteNet(req.Net)
 	})
 	post("/clipboard/clear", func(b []byte) (any, error) {
 		var req struct {

@@ -196,8 +196,8 @@ user and key for good).
 ## Server plugins
 
 The "Plugins" tab: the server itself joins the device network — mirrored
-folders, a shared folder ("Device files") and the shared clipboard run right
-on the server, through the same code that serves them on devices.
+folders, a shared folder ("Device files"), the shared clipboard and backups
+run right on the server, through the same code that serves them on devices.
 
 Plugins live in their own process, `ssh_tunnel_node`, without root: its own
 system user (`DynamicUser` in systemd, like `meshd`), its own data folder
@@ -221,6 +221,23 @@ Until the device network is installed, or its version is too old to answer
   stored is damaged.
 - "Remove" stops and removes the service; data (folders, clipboard) stays
   unless "Also delete plugin data" is checked — that cannot be undone.
+- **"What blocks the plugins"** — the panel checks "Server in the device
+  network" and the access rules against the ports of the enabled plugins
+  (47835 files, 47836 folders, 47837 clipboard, 47838 backups). Closed server
+  ports are opened with one button — only the plugin ports: each plugin
+  identifies every caller itself. The panel never changes access rules on its
+  own — it only names who has no rule to `@servers`. On a secondary server
+  identification does not work, and the panel says so.
+- Each network shows when devices last used each plugin; a mirrored
+  folder's quota can be changed right in its row. An unnamed network is shown
+  as "Network N".
+- Device **backups**: size, versions, "keep", time of the last backup;
+  "Delete" removes a backup with all its versions. The same content is stored
+  once (within one user). A backup can be read only by its device and devices
+  of the same SSH user.
+- A network deleted in "Networks" whose plugin data is still here is marked
+  "Network deleted, data left" with a "Delete data" button. It is never
+  erased on its own; a live network cannot be erased this way.
 
 ## Server egress through another server
 

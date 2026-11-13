@@ -31,6 +31,11 @@ type Hub struct {
 	host string // как сервер подписывает свои изменения
 	// OnEvent — заметное для человека на сервере (новый конфликт).
 	OnEvent func(kind, text string)
+	// Room — квота сервера (quota.go): сколько ещё можно записать в папку,
+	// used — сколько она занимает сейчас; nil — без предела.
+	Room func(folder string, used int64) (left int64, why string)
+	// OnUsage — занятое место папки изменилось на delta байт (сразу).
+	OnUsage func(folder string, delta int64)
 
 	mu      sync.Mutex
 	folders map[string]*hfolder
@@ -456,8 +461,26 @@ func (h *Hub) Scan(id string) error {
 	}
 	f.mu.Lock()
 	seq := f.ix.Seq
-	disk, err := scanDir(f.Path, f.ig)
-	if err == nil {
+	var disk map[string]stat
+	err = h.trackLocked(f, func() error {
+		var e error
+		disk, e = scanDir(f.Path, f.ig)
+		if e != nil {
+			return e
+		}
+		return h.scanLocked(f, disk)
+	})
+	grew := f.ix.Seq != seq
+	f.mu.Unlock()
+	if grew {
+		h.changed()
+	}
+	return err
+}
+
+func (h *Hub) scanLocked(f *hfolder, disk map[string]stat) error {
+	var err error
+	{
 		paths := map[string]bool{}
 		for p := range disk {
 			paths[p] = true
@@ -472,11 +495,6 @@ func (h *Hub) Scan(id string) error {
 				err = e
 			}
 		}
-	}
-	grew := f.ix.Seq != seq
-	f.mu.Unlock()
-	if grew {
-		h.changed()
 	}
 	return err
 }
@@ -543,7 +561,7 @@ func (h *Hub) Open(id, rel, hash string) (*os.File, error) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := h.refresh(f, rel); err != nil {
+	if err := h.trackLocked(f, func() error { return h.refresh(f, rel) }); err != nil {
 		return nil, err
 	}
 	cur := f.ix.Files[rel]
@@ -596,6 +614,12 @@ func (h *Hub) WritePart(id, dev, rel, hash string, off int64, r io.Reader) (int6
 	if _, ok := cleanRel(rel); !ok || len(hash) != 64 {
 		return 0, errors.New("плохой путь или хеш")
 	}
+	f.mu.Lock()
+	left, why := h.roomLocked(f)
+	f.mu.Unlock()
+	if left >= 0 {
+		r = &quotaReader{r: r, left: left, why: why}
+	}
 	p := f.partPath(dev, rel, hash)
 	pf, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -616,7 +640,21 @@ func (h *Hub) WritePart(id, dev, rel, hash string, off int64, r io.Reader) (int6
 	if serr := pf.Sync(); err == nil {
 		err = serr
 	}
+	if n > 0 && h.OnUsage != nil {
+		h.OnUsage(f.ID, n)
+	}
 	return off + n, err
+}
+
+// CheckRoom — влезет ли загрузка n байт в папку id (n <= 0 — неизвестно).
+func (h *Hub) CheckRoom(id string, n int64) error {
+	f, err := h.folder(id)
+	if err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return h.needLocked(f, n)
 }
 
 var errOffset = errors.New("не то место докачки")
@@ -633,6 +671,13 @@ type CommitReply struct {
 // хешем) содержимым rel. base — версия, от которой клиент правил (0 —
 // файла не было).
 func (h *Hub) Commit(id, dev, rel, hash string, base int64) (CommitReply, error) {
+	return h.CommitSized(id, dev, rel, hash, base, -1)
+}
+
+// CommitSized — Commit, когда устройство назвало размер содержимого (size
+// >= 0): недогруженный кусок (короче size) тогда не считается испорченным —
+// ответ Need, и устройство докачивает с места, где оборвалось.
+func (h *Hub) CommitSized(id, dev, rel, hash string, base, size int64) (CommitReply, error) {
 	f, err := h.folder(id)
 	if err != nil {
 		return CommitReply{}, err
@@ -643,6 +688,16 @@ func (h *Hub) Commit(id, dev, rel, hash string, base int64) (CommitReply, error)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	var reply CommitReply
+	err = h.trackLocked(f, func() error {
+		var e error
+		reply, e = h.commitLocked(f, dev, rel, hash, base, size)
+		return e
+	})
+	return reply, err
+}
+
+func (h *Hub) commitLocked(f *hfolder, dev, rel, hash string, base, size int64) (CommitReply, error) {
 	if f.ig.Match(rel, false) {
 		return CommitReply{}, errors.New("файл исключён из синхронизации")
 	}
@@ -686,7 +741,10 @@ func (h *Hub) Commit(id, dev, rel, hash string, base int64) (CommitReply, error)
 	// (переименование и копия не передаются заново).
 	part := f.partPath(dev, rel, hash)
 	src, fromPart := "", false
-	if _, err := os.Stat(part); err == nil {
+	var cost int64 // сколько прибавится места: копия, а не перенос загрузки
+	if st, err := os.Stat(part); err == nil && size >= 0 && st.Size() < size {
+		return CommitReply{Need: true}, nil // загрузка не дошла до конца — докачать
+	} else if err == nil {
 		got, _, err := hashFile(part)
 		if err != nil {
 			return CommitReply{}, err
@@ -699,20 +757,23 @@ func (h *Hub) Commit(id, dev, rel, hash string, base int64) (CommitReply, error)
 	} else {
 		for p, fi := range f.ix.Files {
 			if !fi.Deleted && fi.Hash == hash {
-				src = full(f.Path, p)
+				src, cost = full(f.Path, p), fi.Size
 				break
 			}
 		}
 		if src == "" {
 			for _, v := range f.ix.Versions {
 				if v.Hash == hash {
-					src = filepath.Join(f.dir, "versions", v.Blob)
+					src, cost = filepath.Join(f.dir, "versions", v.Blob), v.Size
 					break
 				}
 			}
 		}
 		if src == "" {
 			return CommitReply{Need: true}, nil
+		}
+		if err := h.needLocked(f, cost); err != nil {
+			return CommitReply{}, err
 		}
 	}
 
@@ -861,6 +922,16 @@ func (h *Hub) Delete(id, dev, rel string, base int64) (CommitReply, error) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	var reply CommitReply
+	err = h.trackLocked(f, func() error {
+		var e error
+		reply, e = h.deleteLocked(f, dev, rel, base)
+		return e
+	})
+	return reply, err
+}
+
+func (h *Hub) deleteLocked(f *hfolder, dev, rel string, base int64) (CommitReply, error) {
 	if err := h.refresh(f, rel); err != nil {
 		return CommitReply{}, err
 	}
@@ -927,6 +998,10 @@ func (h *Hub) Resolve(id, dev, cpath, keep string) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return h.trackLocked(f, func() error { return h.resolveLocked(f, dev, cpath, keep) })
+}
+
+func (h *Hub) resolveLocked(f *hfolder, dev, cpath, keep string) error {
 	c, ok := f.ix.Conflicts[cpath]
 	if !ok {
 		return errors.New("конфликт уже решён")
@@ -949,6 +1024,9 @@ func (h *Hub) Resolve(id, dev, cpath, keep string) error {
 	case "copy":
 		if cf == nil || cf.Deleted {
 			return errors.New("копии конфликта уже нет")
+		}
+		if err := h.needLocked(f, cf.Size); err != nil {
+			return err
 		}
 		tmp, err := h.stage(f, c.Orig, full(f.Path, cpath), false, cf.Hash)
 		if err != nil {
@@ -1017,6 +1095,16 @@ func (h *Hub) Restore(id, dev, blob string) (string, error) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	var rel string
+	err = h.trackLocked(f, func() error {
+		var e error
+		rel, e = h.restoreLocked(f, dev, blob)
+		return e
+	})
+	return rel, err
+}
+
+func (h *Hub) restoreLocked(f *hfolder, dev, blob string) (string, error) {
 	var v *Version
 	for i := range f.ix.Versions {
 		if f.ix.Versions[i].Blob == blob {
@@ -1029,6 +1117,9 @@ func (h *Hub) Restore(id, dev, blob string) (string, error) {
 	}
 	rel := v.Path
 	if err := h.refresh(f, rel); err != nil {
+		return "", err
+	}
+	if err := h.needLocked(f, v.Size); err != nil {
 		return "", err
 	}
 	tmp, err := h.stage(f, rel, filepath.Join(f.dir, "versions", v.Blob), false, v.Hash)
@@ -1071,6 +1162,14 @@ func (h *Hub) Prune() {
 	h.mu.Unlock()
 	for _, f := range fs {
 		f.mu.Lock()
+		h.trackLocked(f, func() error { h.pruneLocked(f, now); return nil })
+		f.mu.Unlock()
+	}
+	h.pruneRemoved(now)
+}
+
+func (h *Hub) pruneLocked(f *hfolder, now time.Time) {
+	{
 		var drop []Version
 		for _, v := range f.ix.Versions {
 			if now.Sub(time.Unix(v.Saved, 0)) > h.keep {
@@ -1097,8 +1196,10 @@ func (h *Hub) Prune() {
 				}
 			}
 		}
-		f.mu.Unlock()
 	}
+}
+
+func (h *Hub) pruneRemoved(now time.Time) {
 	if es, err := os.ReadDir(h.dir); err == nil {
 		for _, e := range es {
 			if strings.HasPrefix(e.Name(), "removed-") {

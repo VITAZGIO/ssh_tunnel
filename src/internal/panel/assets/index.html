@@ -128,6 +128,16 @@
   .msg{font-size:12.5px;border-radius:8px;padding:9px 10px;margin-bottom:12px}
   .msg.err{background:rgba(229,72,77,.12);color:var(--err)}
   .msg.ok{background:rgba(47,191,113,.12);color:var(--ok)}
+  .msg.warn{background:rgba(232,179,57,.12);color:var(--warn)}
+  /* Плагины сервера: строки папок и копий — в столбик на узком экране. */
+  .nrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .nrow:last-child{border-bottom:0}
+  .nrow .grow{flex:1;min-width:150px}
+  .nrow .sub{color:var(--dim);font-size:12px;font-family:var(--mono)}
+  .nrow input[type=number]{width:96px}
+  .nsec{margin-top:12px;font-size:12px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
+  .card.gone{border-color:var(--warn)}
+  .acts{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--dim);margin:2px 0 4px}
 
   .kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;
       border-bottom:1px solid var(--line);font-size:13px}
@@ -1268,7 +1278,7 @@
     <section id="tabPlugins" hidden>
       <div class="sec-head">
         <h1 class="page-title"><span data-i18n="nav_plugins">Плагины</span><button class="hint" data-hint="hint_plugins_what">?</button></h1>
-        <p class="page-sub" data-i18n="plugins_sub">Сервер сам становится участником сети устройств: зеркальные папки, общая папка и общий буфер.</p>
+        <p class="page-sub" data-i18n="plugins_sub">Сервер сам становится участником сети устройств: зеркальные папки, общая папка, общий буфер и резервные копии.</p>
       </div>
 
       <div class="cards">
@@ -1286,6 +1296,11 @@
             <span data-i18n="node_delete_data">Удалить и данные плагинов (папки, буфер)</span></label>
         </div>
 
+        <div class="card span2" id="nodeWarnCard" hidden>
+          <h1 data-i18n="node_warn_title">Что мешает плагинам</h1>
+          <div id="nodeWarns"></div>
+        </div>
+
         <div class="card span2" id="nodeJobCard" hidden>
           <h1 id="nodeJobTitle"></h1>
           <div class="console" id="nodeJobLog"></div>
@@ -1301,6 +1316,8 @@
             <span data-i18n="plugin_files_write">Можно менять</span></label>
           <label class="chk"><input type="checkbox" id="pluginClipboard">
             <span data-i18n="plugin_clipboard">Общий буфер</span></label>
+          <label class="chk"><input type="checkbox" id="pluginBackup">
+            <span data-i18n="plugin_backup">Резервные копии</span><button class="hint" data-hint="hint_plugin_backup">?</button></label>
           <div class="field" style="margin-top:10px">
             <label for="nodeQuota"><span data-i18n="node_quota_label">Место на сервере всем плагинам, всего (МБ)</span><button class="hint" data-hint="hint_node_quota">?</button></label>
             <input type="number" id="nodeQuota" min="1" max="16777216">
@@ -1682,7 +1699,7 @@ const I18N = {
     hint_autostart:'То же, что «systemctl enable ssh_tunnel_panel» в консоли — просто кнопкой.',
 
     nav_plugins:'Плагины',
-    plugins_sub:'Сервер сам становится участником сети устройств: зеркальные папки, общая папка и общий буфер.',
+    plugins_sub:'Сервер сам становится участником сети устройств: зеркальные папки, общая папка, общий буфер и резервные копии.',
     hint_plugins_what:'Те же модули, что в программе на устройстве, только работают прямо на сервере — '+
       'своим отдельным процессом без прав root.',
     node_host_title:'Хост плагинов', node_meshd:'Опознание устройств',
@@ -1716,6 +1733,34 @@ const I18N = {
     node_files_title:'Файлы устройства (общая папка сети)',
     node_not_installed:'Хост плагинов не поставлен.',
     node_job_install:'Устанавливаю хост плагинов',
+    plugin_backup:'Резервные копии',
+    hint_plugin_backup:'Устройства по расписанию кладут сюда папку с версиями и восстанавливают из неё. '+
+      'Одинаковое содержимое хранится один раз. Читать копию может только её устройство и устройства '+
+      'того же SSH-пользователя — другие устройства сети не могут, даже с открытыми правами доступа.',
+    node_warn_title:'Что мешает плагинам',
+    warn_server_access_off:'«Сервер в сети устройств» выключен — устройства не достают до плагинов.',
+    warn_ports_blocked:'В портах «Сервера в сети устройств» нет портов плагинов: {ports}.',
+    warn_access_rules:'Права доступа включены, а у этих устройств нет правила к «@servers» на порты {ports}: {users}. '+
+      'Это решение о правах — поправь в «Доступе».',
+    warn_secondary:'Это побочный сервер: здесь meshd только пересылает, и узнать, какое устройство пришло, '+
+      'нельзя — плагины никого не пустят. Ставь плагины на главный сервер.',
+    warn_no_mesh:'Сеть устройств на этом сервере не включена — плагинам некого обслуживать.',
+    warn_fix:'Открыть порты плагинов', warn_fixed:'Порты плагинов открыты',
+    warn_fix_hint:'Только порты плагинов — каждый, кто пришёл, опознаётся отдельно; остальные порты сервера не трогаются.',
+    warn_go_access:'Открыть «Доступ»',
+    node_net_unnamed:'Сеть {n}',
+    node_net_gone:'Сеть удалена, данные остались',
+    node_net_gone_hint:'Этой сети больше нет в сети устройств, а её данные плагинов ещё лежат на сервере. '+
+      'Само по себе ничего не стирается. Если устройство подключится со старым ключом, сеть вернётся вместе с данными.',
+    node_net_delete:'Удалить данные',
+    confirm_net_delete:'Стереть все данные плагинов сети «{n}» (папки, файлы, буфер, резервные копии)? Отменить это будет нельзя.',
+    node_last:'Последнее обращение', node_never:'не было',
+    folder_quota_save:'Сохранить', folder_quota_saved:'Квота сохранена',
+    node_backups_title:'Резервные копии',
+    backup_versions:'версий', backup_keep:'держать', backup_last:'последняя',
+    backup_stored:'на диске (одинаковое — один раз)',
+    backup_delete:'Удалить',
+    confirm_backup_delete:'Удалить с сервера все версии копии «{n}» устройства «{d}»? Отменить это будет нельзя.',
   },
   en: {
     nav_home:'Overview', nav_devices:'Devices', nav_access:'Access', nav_settings:'Settings',
@@ -2014,7 +2059,7 @@ const I18N = {
     hint_autostart:'Same as "systemctl enable ssh_tunnel_panel" in a console — just a button.',
 
     nav_plugins:'Plugins',
-    plugins_sub:'The server itself joins the device network: mirrored folders, a shared folder and shared clipboard.',
+    plugins_sub:'The server itself joins the device network: mirrored folders, a shared folder, shared clipboard and backups.',
     hint_plugins_what:'The same modules the desktop app runs, just on the server itself — their own process, '+
       'no root.',
     node_host_title:'Plugin host', node_meshd:'Device identification',
@@ -2048,6 +2093,34 @@ const I18N = {
     node_files_title:'Device files (network shared folder)',
     node_not_installed:'The plugin host is not installed.',
     node_job_install:'Installing the plugin host',
+    plugin_backup:'Backups',
+    hint_plugin_backup:'Devices put a folder here on a schedule, with versions, and restore from it. '+
+      'The same content is stored once. A backup can be read only by its device and devices of the same '+
+      'SSH user — other devices of the network cannot, even with access rules open.',
+    node_warn_title:'What blocks the plugins',
+    warn_server_access_off:'«Server in the device network» is off — devices cannot reach the plugins.',
+    warn_ports_blocked:'The ports of «Server in the device network» do not include the plugin ports: {ports}.',
+    warn_access_rules:'Access rules are on, and these devices have no rule to «@servers» on ports {ports}: {users}. '+
+      'That is a decision about rights — change it in «Access».',
+    warn_secondary:'This is a secondary server: its meshd only forwards and cannot tell which device came, '+
+      'so the plugins let nobody in. Install the plugins on the main server.',
+    warn_no_mesh:'The device network is not enabled on this server — the plugins have nobody to serve.',
+    warn_fix:'Open the plugin ports', warn_fixed:'Plugin ports opened',
+    warn_fix_hint:'Only the plugin ports — everyone who comes is identified separately; other server ports stay as they are.',
+    warn_go_access:'Open «Access»',
+    node_net_unnamed:'Network {n}',
+    node_net_gone:'Network deleted, data left',
+    node_net_gone_hint:'This network is no longer in the device network, but its plugin data is still on the server. '+
+      'Nothing is erased on its own. If a device connects with the old key, the network comes back with its data.',
+    node_net_delete:'Delete data',
+    confirm_net_delete:'Erase all plugin data of network «{n}» (folders, files, clipboard, backups)? This cannot be undone.',
+    node_last:'Last request', node_never:'never',
+    folder_quota_save:'Save', folder_quota_saved:'Quota saved',
+    node_backups_title:'Backups',
+    backup_versions:'versions', backup_keep:'keep', backup_last:'last',
+    backup_stored:'on disk (same content stored once)',
+    backup_delete:'Delete',
+    confirm_backup_delete:'Delete all versions of backup «{n}» of device «{d}» from the server? This cannot be undone.',
   },
 };
 function t(key){ return (I18N[LANG] && I18N[LANG][key]) || key; }
@@ -4446,18 +4519,40 @@ $('meshReinstallBtn').addEventListener('click', async () => {
 /* ---------- плагины сервера (хост ssh_tunnel_node) ---------- */
 let NODE = null, NODE_TIMER = null;
 
+// Сети из meshd по порядку: безымянная — «Сеть N». gone — данных сети на
+// сервере есть, а самой сети в meshd уже нет (только когда список сетей
+// известен: главный сервер ответил).
+function meshNets(){ return (MESH && MESH.effectiveRole === 'main' && !MESH.adminError && MESH.networks) || null; }
 function netName(id){
-  const n = MESH && MESH.networks && MESH.networks.find(x => x.id === id);
-  return (n && n.name) || id.slice(0, 8);
+  const nets = (MESH && MESH.networks) || [];
+  const i = nets.findIndex(x => x.id === id);
+  if (i < 0) return id.slice(0, 8);
+  return nets[i].name || t('node_net_unnamed').replace('{n}', i + 1);
+}
+function netGone(id){
+  const nets = meshNets();
+  return !!nets && !nets.some(x => x.id === id);
 }
 
 async function loadNode(){
   clearTimeout(NODE_TIMER);
+  if (TAB !== 'Plugins') return;
   const {ok, status, data} = await api('/api/node/state');
   if (ok) { NODE = data; renderNode(); }
   else if (status === 404) { NODE = null; $('nodeHostCard').hidden = true; }
-  NODE_TIMER = setTimeout(loadNode, 4000);
+  scheduleNode();
 }
+// Опрос — только пока вкладка «Плагины» открыта и окно видно.
+function scheduleNode(){
+  clearTimeout(NODE_TIMER);
+  if (TAB !== 'Plugins') return;
+  const fast = NODE && NODE.job && NODE.job.running;
+  NODE_TIMER = setTimeout(() => {
+    if (document.hidden){ scheduleNode(); return; }
+    loadNode();
+  }, fast ? 1500 : 4000);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && TAB === 'Plugins') loadNode(); });
 
 function renderNodeJob(job){
   const recent = job && (job.running || job.error ||
@@ -4476,6 +4571,40 @@ function renderNodeJob(job){
   log.innerHTML = '';
   (job.lines || []).forEach(l => log.appendChild(el('div', 'l', l)));
   log.scrollTop = log.scrollHeight;
+}
+
+function renderNodeWarnings(ws){
+  const card = $('nodeWarnCard'), box = $('nodeWarns');
+  card.hidden = !ws || !ws.length;
+  box.innerHTML = '';
+  (ws || []).forEach(w => {
+    const m = el('div', 'msg ' + (w.code === 'access_rules' || w.code === 'no_mesh' ? 'warn' : 'err'),
+      t('warn_' + w.code).replace('{ports}', w.ports || '').replace('{users}', (w.users || []).join(', ')));
+    box.appendChild(m);
+    if (w.fix){
+      const row = el('div', 'row-inline');
+      row.style.margin = '-4px 0 12px';
+      const b = el('button', 'btn small', t('warn_fix'));
+      b.title = t('warn_fix_hint');
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        const {ok, data} = await api('/api/node/fix', {code: w.code});
+        b.disabled = false;
+        if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+        toast(t('warn_fixed'), 'ok');
+        loadNode();
+        loadMesh();
+      });
+      row.appendChild(b);
+      row.appendChild(el('span', 'note', t('warn_fix_hint')));
+      box.appendChild(row);
+    } else if (w.code === 'access_rules'){
+      const b = el('button', 'btn ghost small', t('warn_go_access'));
+      b.style.margin = '-4px 0 12px';
+      b.addEventListener('click', () => showTab('Access'));
+      box.appendChild(b);
+    }
+  });
 }
 
 function renderNode(){
@@ -4503,6 +4632,7 @@ function renderNode(){
     cfgCard.hidden = true;
     evCard.hidden = true;
     netsHead.hidden = true;
+    $('nodeWarnCard').hidden = true;
     $('nodeNetsNone').hidden = true;
     $('nodeNets').innerHTML = '';
     err.hidden = !(installed && NODE.error);
@@ -4513,12 +4643,14 @@ function renderNode(){
   const st = NODE.state;
   meshdRow.hidden = false;
   $('nodeMeshdState').textContent = t('node_meshd_' + (st.meshd || 'unknown'));
+  renderNodeWarnings(NODE.warnings);
   cfgCard.hidden = false;
-  if (document.activeElement !== $('nodeQuota')){
+  if (!cfgCard.contains(document.activeElement)){
     $('pluginMirror').checked = !!st.config.mirror;
     $('pluginFiles').checked = !!st.config.files;
     $('pluginFilesWrite').checked = !!st.config.filesWrite;
     $('pluginClipboard').checked = !!st.config.clipboard;
+    $('pluginBackup').checked = !!st.config.backup;
     $('nodeQuota').value = st.config.quotaMB || '';
   }
   $('nodeUsed').textContent = fmtBytes(st.usedBytes) + ' / ' + fmtBytes((st.config.quotaMB || 0) * 1048576);
@@ -4529,7 +4661,8 @@ function renderNode(){
     box.innerHTML = '';
     st.events.slice().reverse().forEach(e => {
       const line = el('div', 'l' + (e.error ? ' err' : ''),
-        new Date(e.time * 1000).toLocaleString(LANG === 'ru' ? 'ru-RU' : 'en-US') + '  ' + e.text);
+        new Date(e.time * 1000).toLocaleString(LANG === 'ru' ? 'ru-RU' : 'en-US') + '  ' +
+        (e.net ? '[' + netName(e.net) + '] ' : '') + e.text);
       box.appendChild(line);
     });
   }
@@ -4537,24 +4670,65 @@ function renderNode(){
   const nets = st.networks || [];
   netsHead.hidden = nets.length === 0;
   $('nodeNetsNone').hidden = nets.length !== 0;
+  // Не перерисовывать, пока в карточке сети что-то вводят (квота, имя папки).
   const box = $('nodeNets');
+  if (box.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
   box.innerHTML = '';
   nets.forEach(n => box.appendChild(renderNodeNet(n)));
 }
 
+function nodeRow(main, sub){
+  const row = el('div', 'nrow');
+  const g = el('div', 'grow');
+  g.appendChild(el('div', '', main));
+  if (sub) g.appendChild(el('div', 'sub', sub));
+  row.appendChild(g);
+  return row;
+}
+
 function renderNodeNet(n){
-  const card = el('div', 'card');
+  const gone = netGone(n.id);
+  const card = el('div', 'card' + (gone ? ' gone' : ''));
   card.appendChild(el('h1', '', netName(n.id)));
 
-  const foldersTitle = el('div', 'kv');
-  foldersTitle.appendChild(el('span', 'k', t('node_folders_title')));
-  card.appendChild(foldersTitle);
+  if (gone){
+    card.appendChild(el('div', 'msg warn', t('node_net_gone')));
+    card.appendChild(el('p', 'note', t('node_net_gone_hint')));
+    const del = el('button', 'btn danger small', t('node_net_delete'));
+    del.addEventListener('click', async () => {
+      const yes = await appConfirm(t('confirm_net_delete').replace('{n}', netName(n.id)), t('node_net_delete'));
+      if (!yes) return;
+      const {ok, data} = await api('/api/node/net/delete', {net: n.id});
+      if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+      loadNode();
+    });
+    card.appendChild(del);
+  }
+
+  // Последнее обращение устройств — по плагинам.
+  const acts = el('div', 'acts');
+  const la = n.lastActive || {};
+  ['mirror', 'files', 'clipboard', 'backup'].forEach(p => {
+    acts.appendChild(el('span', '', t('plugin_' + p) + ': ' + (la[p] ? fmtAgo(la[p]) : t('node_never'))));
+  });
+  card.appendChild(el('div', 'nsec', t('node_last')));
+  card.appendChild(acts);
+
+  card.appendChild(el('div', 'nsec', t('node_folders_title')));
   (n.folders || []).forEach(f => {
-    const row = el('div', 'kv');
-    row.appendChild(el('span', 'k', f.name + ' (' + f.quotaMB + ' ' + 'MB'.toLowerCase() + ')'));
-    const v = el('span', 'v', fmtBytes(f.usedBytes) + ' · ' + f.files + ' ' + t('folder_files') +
-      (f.conflicts ? ' · ' + f.conflicts + ' ' + t('folder_conflicts') : ''));
-    row.appendChild(v);
+    const row = nodeRow(f.name, fmtBytes(f.usedBytes) + ' / ' + fmtBytes(f.quotaMB * 1048576) + ' · ' + f.files + ' ' +
+      t('folder_files') + (f.conflicts ? ' · ' + f.conflicts + ' ' + t('folder_conflicts') : ''));
+    const q = document.createElement('input');
+    q.type = 'number'; q.min = '1'; q.value = f.quotaMB; q.title = t('folder_quota_label');
+    q.setAttribute('aria-label', t('folder_quota_label') + ': ' + f.name);
+    const save = el('button', 'btn ghost small', t('folder_quota_save'));
+    save.addEventListener('click', async () => {
+      const {ok, data} = await api('/api/node/folder/quota', {net: n.id, id: f.id, quotaMB: Number(q.value) || 0});
+      if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+      toast(t('folder_quota_saved'), 'ok');
+      q.blur();
+      loadNode();
+    });
     const rm = el('button', 'btn ghost small', t('folder_remove'));
     rm.addEventListener('click', async () => {
       const yes = await appConfirm(t('confirm_folder_remove').replace('{n}', f.name), t('folder_remove'));
@@ -4563,52 +4737,52 @@ function renderNodeNet(n){
       if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
       loadNode();
     });
+    row.appendChild(q);
+    row.appendChild(save);
     row.appendChild(rm);
     card.appendChild(row);
   });
-  const form = el('div', 'row-inline');
-  form.style.marginTop = '8px';
-  const nameInput = document.createElement('input');
-  nameInput.type = 'text';
-  nameInput.placeholder = t('folder_name_label');
-  nameInput.style.flex = '1';
-  const quotaInput = document.createElement('input');
-  quotaInput.type = 'number';
-  quotaInput.min = '1';
-  quotaInput.value = '2048';
-  quotaInput.title = t('folder_quota_label');
-  quotaInput.style.width = '90px';
-  const addBtn = el('button', 'btn ghost', t('node_add_folder'));
-  addBtn.addEventListener('click', async () => {
-    const name = nameInput.value.trim();
-    if (!name) { nameInput.focus(); return; }
-    const {ok, data} = await api('/api/node/folder/add',
-      {net: n.id, name, quotaMB: Number(quotaInput.value) || 2048});
-    if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
-    loadNode();
-  });
-  form.appendChild(nameInput);
-  form.appendChild(quotaInput);
-  form.appendChild(addBtn);
-  card.appendChild(form);
+  if (!gone){
+    const form = el('div', 'row-inline');
+    form.style.marginTop = '8px';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.placeholder = t('folder_name_label');
+    nameInput.style.flex = '1';
+    nameInput.style.minWidth = '120px';
+    const quotaInput = document.createElement('input');
+    quotaInput.type = 'number';
+    quotaInput.min = '1';
+    quotaInput.value = '2048';
+    quotaInput.title = t('folder_quota_label');
+    quotaInput.style.width = '96px';
+    const addBtn = el('button', 'btn ghost', t('node_add_folder'));
+    addBtn.addEventListener('click', async () => {
+      const name = nameInput.value.trim();
+      if (!name) { nameInput.focus(); return; }
+      const {ok, data} = await api('/api/node/folder/add',
+        {net: n.id, name, quotaMB: Number(quotaInput.value) || 2048});
+      if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+      nameInput.value = '';
+      nameInput.blur();
+      loadNode();
+    });
+    form.appendChild(nameInput);
+    form.appendChild(quotaInput);
+    form.appendChild(addBtn);
+    card.appendChild(form);
+  }
 
   if (n.filesBytes){
-    const row = el('div', 'kv');
-    row.style.marginTop = '10px';
-    row.appendChild(el('span', 'k', t('node_files_title')));
-    row.appendChild(el('span', 'v', fmtBytes(n.filesBytes)));
-    card.appendChild(row);
+    card.appendChild(el('div', 'nsec', t('node_files_title')));
+    card.appendChild(nodeRow(fmtBytes(n.filesBytes)));
   }
 
   if (n.clipboard && (n.clipboard.items || n.clipboard.devices)){
-    const row = el('div', 'kv');
-    row.style.marginTop = '10px';
-    row.appendChild(el('span', 'k', t('node_clipboard_title')));
-    row.appendChild(el('span', 'v', n.clipboard.items + ' ' + t('clip_items') + ' · ' +
-      fmtBytes(n.clipboard.bytes) + ' · ' + n.clipboard.devices + ' ' + t('clip_devices')));
-    card.appendChild(row);
+    card.appendChild(el('div', 'nsec', t('node_clipboard_title')));
+    const row = nodeRow(n.clipboard.items + ' ' + t('clip_items') + ' · ' + fmtBytes(n.clipboard.bytes),
+      n.clipboard.devices + ' ' + t('clip_devices'));
     const clear = el('button', 'btn ghost small', t('clip_clear'));
-    clear.style.marginTop = '6px';
     clear.addEventListener('click', async () => {
       const yes = await appConfirm(t('confirm_clip_clear'), t('clip_clear'));
       if (!yes) return;
@@ -4616,7 +4790,27 @@ function renderNodeNet(n){
       if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
       loadNode();
     });
-    card.appendChild(clear);
+    row.appendChild(clear);
+    card.appendChild(row);
+  }
+
+  if (n.backups && n.backups.length){
+    card.appendChild(el('div', 'nsec', t('node_backups_title') + ' · ' + fmtBytes(n.backupBytes) + ' ' + t('backup_stored')));
+    n.backups.forEach(b => {
+      const dev = b.deviceName || b.device.slice(0, 8);
+      const row = nodeRow(dev + ' — ' + b.name, fmtBytes(b.bytes) + ' · ' + b.versions + ' ' + t('backup_versions') +
+        ' (' + t('backup_keep') + ' ' + b.keep + ') · ' + t('backup_last') + ' ' + fmtAgo(b.last));
+      const del = el('button', 'btn ghost small', t('backup_delete'));
+      del.addEventListener('click', async () => {
+        const yes = await appConfirm(t('confirm_backup_delete').replace('{n}', b.name).replace('{d}', dev), t('backup_delete'));
+        if (!yes) return;
+        const {ok, data} = await api('/api/node/backup/delete', {net: n.id, scope: b.scope, device: b.device, set: b.set});
+        if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+        loadNode();
+      });
+      row.appendChild(del);
+      card.appendChild(row);
+    });
   }
   return card;
 }
@@ -4645,6 +4839,7 @@ $('nodeConfigSaveBtn').addEventListener('click', async () => {
     files: $('pluginFiles').checked,
     filesWrite: $('pluginFilesWrite').checked,
     clipboard: $('pluginClipboard').checked,
+    backup: $('pluginBackup').checked,
     quotaMB: Number($('nodeQuota').value) || undefined,
   };
   const {ok, data} = await api('/api/node/config', body);

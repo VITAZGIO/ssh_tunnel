@@ -387,7 +387,7 @@ func (r *Replica) reconcile(ctx context.Context, p, lh string, lst stat) (bool, 
 // push отправляет файл: сначала «сделай файлом» (у сервера может уже быть
 // такое содержимое — переименование), иначе загрузка с докачкой.
 func (r *Replica) push(ctx context.Context, p, lh string, lst stat, s repFile) error {
-	req := map[string]any{"f": r.Folder, "p": p, "hash": lh, "base": s.Ver}
+	req := map[string]any{"f": r.Folder, "p": p, "hash": lh, "base": s.Ver, "size": lst.Size}
 	var rep CommitReply
 	if err := r.R.post(ctx, "/commit", req, &rep); err != nil {
 		return err

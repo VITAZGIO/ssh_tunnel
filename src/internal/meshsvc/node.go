@@ -19,10 +19,11 @@ const NodeUnitName = nodeapi.Unit
 // пользователь системы по имени юнита (ssh_tunnel_node) без входа и домашней
 // папки; данные — только в StateDirectory, управляющий сокет для панели —
 // в RuntimeDirectory. Запускается после meshd: без сети устройств плагины
-// никого не опознают.
+// никого не опознают. Сеть — только localhost (порты плагинов и meshd),
+// системные вызовы — набор обычной службы (ТЗ 13).
 func NodeUnit() string {
 	return `[Unit]
-Description=ssh_tunnel - плагины сервера (зеркальные папки, файлы, общий буфер)
+Description=ssh_tunnel - плагины сервера (зеркальные папки, файлы, общий буфер, резервные копии)
 After=network.target meshd.service
 Wants=meshd.service
 
@@ -36,6 +37,18 @@ RuntimeDirectory=` + nodeapi.User + `
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
+# ТЗ 13: защита строже — НЕ ПРОВЕРЕНО на настоящем systemd (в сборке его
+# нет). Если служба не стартует, убери строки ниже до «[Install]» и
+# сообщи: systemctl status ssh_tunnel_node, journalctl -u ssh_tunnel_node.
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+IPAddressDeny=any
+IPAddressAllow=localhost
+PrivateTmp=yes
+PrivateDevices=yes
 
 [Install]
 WantedBy=multi-user.target
