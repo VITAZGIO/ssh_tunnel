@@ -55,6 +55,21 @@ type Doc struct {
 	// импортировав файл, устройство попадает в ту же сеть. Необязательное,
 	// как и поля версии 2.
 	MeshKey string `json:"meshKey,omitempty"`
+
+	// ExitVia — «Выход через» (цепочка выхода): серверы цепочки ссылками —
+	// адрес, порт и пользователь, без ключей. Импорт ставит цепочку, только
+	// если у получателя уже есть все эти серверы; иначе сервер приходит без
+	// цепочки (и импорт об этом говорит). Ключи чужих серверов в файл не
+	// кладутся никогда. Необязательное: старые версии поле не читают.
+	ExitVia []ExitRef `json:"exitVia,omitempty"`
+}
+
+// ExitRef — ссылка на сервер цепочки выхода.
+type ExitRef struct {
+	Name    string `json:"name,omitempty"`
+	Host    string `json:"host"`
+	SSHPort int    `json:"sshPort,omitempty"`
+	User    string `json:"user,omitempty"`
 }
 
 // Build собирает файл обмена из заполненного Doc. Format всегда

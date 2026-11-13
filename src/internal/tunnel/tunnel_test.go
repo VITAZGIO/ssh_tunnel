@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -50,6 +51,16 @@ type testSSHServer struct {
 	// зависал насмерть. Ноль означает «сервер отвечает всегда».
 	silentFrom atomic.Int64
 	accepted   atomic.Int64
+
+	// targets — куда сервер открывал каналы (для проверок «через этот
+	// сервер не ходило»).
+	targets sync.Map
+}
+
+// saw — сервер открывал канал к target.
+func (s *testSSHServer) saw(target string) bool {
+	_, ok := s.targets.Load(target)
+	return ok
 }
 
 func newTestSSHServer(t *testing.T, clientPub ssh.PublicKey) *testSSHServer {
@@ -135,6 +146,7 @@ func (s *testSSHServer) handle(t *testing.T, c net.Conn, cfg *ssh.ServerConfig) 
 		}
 		s.channels.Add(1)
 		target := net.JoinHostPort(payload.Host, strconv.Itoa(int(payload.Port)))
+		s.targets.Store(target, true)
 		if s.rejectTo != "" && target == s.rejectTo {
 			nc.Reject(ssh.ConnectionFailed, "administratively prohibited")
 			continue

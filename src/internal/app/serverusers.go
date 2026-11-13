@@ -16,7 +16,7 @@ func (a *App) ServerUsers(op string, body any) (map[string]any, error) {
 	if tun == nil {
 		return nil, errors.New("сначала подключись к серверу, на котором заводить пользователя")
 	}
-	return serverusers.Call(tun.Dial, op, body)
+	return serverusers.Call(tun.DialEntry, op, body)
 }
 
 // DialServer — соединение с адресом на сервере через туннель (devnet).
@@ -27,5 +27,6 @@ func (a *App) DialServer(network, addr string) (net.Conn, error) {
 	if tun == nil {
 		return nil, errors.New("туннель не подключён")
 	}
-	return tun.Dial(network, addr)
+	// Службы на самом сервере — через входной сервер, мимо цепочки выхода.
+	return tun.DialEntry(network, addr)
 }

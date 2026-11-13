@@ -381,6 +381,7 @@ func connectionSettingsChanged(a, b config.Config) bool {
 		oldActive.MeshEnabled != newActive.MeshEnabled || oldActive.MeshKey != newActive.MeshKey ||
 		oldActive.MeshName != newActive.MeshName || oldActive.MeshIncoming != newActive.MeshIncoming ||
 		oldActive.MeshDirectOff != newActive.MeshDirectOff ||
+		exitChainKey(a, oldActive) != exitChainKey(b, newActive) ||
 		a.SysProxy != b.SysProxy || a.SetEnvVars != b.SetEnvVars
 }
 

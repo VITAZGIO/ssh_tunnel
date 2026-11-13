@@ -107,8 +107,32 @@ type State struct {
 	// сейчас на прямой связи.
 	MeshLink   string `json:"meshLink,omitempty"`
 	MeshDirect int    `json:"meshDirect,omitempty"`
+	// Exit — цепочка выхода (ТЗ 8), пока поднята связь; nil — цепочки нет.
+	Exit *ExitPath `json:"exit,omitempty"`
 	// Modules — статусы модулей для «Диагностики», по ID.
 	Modules []Module `json:"modules,omitempty"`
 	// Seq растёт с каждым изменением: экран отбрасывает устаревшее.
 	Seq uint64 `json:"seq"`
+}
+
+// Состояния цепочки выхода (ExitPath.State).
+const (
+	ExitUp         = "up"         // интернет выходит через последний сервер
+	ExitConnecting = "connecting" // поднимается: интернета ещё нет
+	ExitDown       = "down"       // сервер цепочки недоступен: интернет выключен цепочкой
+)
+
+// ExitPath — путь трафика в интернет через цепочку серверов: подключаемся к
+// первому, выходим через последний. Пока последний недоступен, интернета
+// нет — в обход трафик не пускается (сеть устройств при этом работает).
+type ExitPath struct {
+	// Path — имена серверов от входного до последнего.
+	Path []string `json:"path"`
+	// State — ExitUp, ExitConnecting или ExitDown.
+	State string `json:"state"`
+	// Hop — имя сервера, на котором цепочка оборвалась (при ExitDown).
+	Hop string `json:"hop,omitempty"`
+	// Error, ErrorKind — почему (код как у Button.ErrorKind).
+	Error     string `json:"error,omitempty"`
+	ErrorKind string `json:"errorKind,omitempty"`
 }

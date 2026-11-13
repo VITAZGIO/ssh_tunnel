@@ -105,6 +105,33 @@ type Profile struct {
 	Cipher            string `json:"cipher,omitempty"`
 	IPVersion         string `json:"ipVersion,omitempty"`
 	ShareLAN          bool   `json:"shareLan,omitempty"`
+
+	// ExitVia — «Выход через» (цепочка выхода, ТЗ 8): id других профилей
+	// по порядку, от 0 до MaxExitHops. Подключаемся к этому серверу, а в
+	// интернет выходим только через последний из списка; он недоступен —
+	// интернета нет, через этот сервер трафик не выпускается. Свои цепочки
+	// у серверов из списка не действуют — действует цепочка того профиля,
+	// к которому подключаемся.
+	ExitVia []string `json:"exitVia,omitempty"`
+}
+
+// MaxExitHops — сколько серверов можно поставить в «Выход через».
+const MaxExitHops = 2
+
+// ExitChain — серверы цепочки выхода профиля p по порядку. Профиль, которого
+// больше нет в списке (удалили), возвращается пустым, с одним id и
+// именем-пометкой: туннель с такой цепочкой не стартует — молча укоротить
+// цепочку значило бы выпустить интернет не там, где просили.
+func (c Config) ExitChain(p Profile) []Profile {
+	var out []Profile
+	for _, id := range p.ExitVia {
+		hop, ok := c.ProfileByID(id)
+		if !ok {
+			hop = Profile{ID: id, Name: "удалённый сервер"}
+		}
+		out = append(out, hop)
+	}
+	return out
 }
 
 // Границы тонкой настройки: за ними значения уже вредят, а не помогают.
@@ -634,6 +661,9 @@ func (c *Config) normalize() {
 	if _, ok := c.ProfileByID(c.ActiveProfile); !ok {
 		c.ActiveProfile = c.Profiles[0].ID
 	}
+	for i := range c.Profiles {
+		c.Profiles[i].ExitVia = cleanExitVia(c.Profiles[i])
+	}
 	if c.Language != "en" {
 		c.Language = "ru"
 	}
@@ -711,4 +741,23 @@ func (p *Profile) normalize(n int) {
 	default:
 		p.IPVersion = ""
 	}
+}
+
+// cleanExitVia убирает из «Выход через» пустые id, сам профиль и повторы и
+// обрезает до MaxExitHops. Id удалённых профилей остаются (см. ExitChain).
+func cleanExitVia(p Profile) []string {
+	var out []string
+	seen := map[string]bool{p.ID: true}
+	for _, id := range p.ExitVia {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+		if len(out) == MaxExitHops {
+			break
+		}
+	}
+	return out
 }

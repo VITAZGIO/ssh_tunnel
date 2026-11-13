@@ -90,6 +90,8 @@ func (r *runner) run(a []string) (int, error) {
 		return r.setButton(a[0], on)
 	case "rules":
 		return r.rules(a[1:])
+	case "exit":
+		return r.exitCmd(a[1:])
 	case "apps":
 		return r.apps(a[1:])
 	case "check":
@@ -140,6 +142,13 @@ type coreState struct {
 	// MeshDirect — сколько устройств на прямой связи.
 	MeshLink   string `json:"meshLink"`
 	MeshDirect int    `json:"meshDirect"`
+	// Exit — цепочка выхода (core.State.Exit), nil — её нет.
+	Exit *struct {
+		Path  []string `json:"path"`
+		State string   `json:"state"`
+		Hop   string   `json:"hop"`
+		Error string   `json:"error"`
+	} `json:"exit"`
 }
 
 // meshLinkText — MeshLink по-человечески; пусто — не печатать.
@@ -198,6 +207,17 @@ func (r *runner) printState(raw []byte) error {
 			l += " (" + st.Detail + ")"
 		}
 		fmt.Fprintf(r.out, "%-16s %s\n", "Связь:", l)
+	}
+	if e := st.Exit; e != nil {
+		t := strings.Join(e.Path, " → ")
+		switch e.State {
+		case "up":
+		case "down":
+			t += " — интернет выключен цепочкой: «" + e.Hop + "» недоступен"
+		default:
+			t += " — поднимается, интернета пока нет"
+		}
+		fmt.Fprintf(r.out, "%-16s %s\n", "Выход:", t)
 	}
 	return nil
 }
@@ -606,6 +626,9 @@ func help(name string, w io.Writer) int {
   %[1]s rules mode all|only|except какие программы через туннель
   %[1]s rules add realip .deepseek.com  всегда настоящий адрес в DNS режима VPN
   %[1]s rules fakeip on|off        подставные адреса (fake-IP) в DNS режима VPN
+  %[1]s exit                       цепочки выхода всех серверов (* — активный)
+  %[1]s exit Франкфурт Лондон      в интернет — только через «Лондон» (до двух серверов)
+  %[1]s exit Франкфурт off         без цепочки
   %[1]s apps                       плагины
   %[1]s apps add|remove|star|unstar|on|off <id>
   %[1]s apps install app.zip [--yes]   своё приложение из файла
