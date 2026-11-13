@@ -40,6 +40,25 @@ In settings you can send some sites or programs **directly** (bypassing the
 server) or, on the contrary, **always through the server**. The local network
 (router, printer, NAS) goes directly by default.
 
+## Exit through another server
+
+With more than one server, each one's settings have "Exit through": you can
+tell the app to connect to one server but go out to the internet only
+through another (up to two in a row). Everything else stays the same — sites
+and apps follow the same rules as without a chain.
+
+The key point — **no fallback**. The last server in the chain is unreachable
+— there is no internet at all until it comes back; traffic never takes a
+detour through the server you connected to instead. That is deliberate: if
+you picked a specific server to exit through, it is that one, not "whichever
+works".
+
+A line with the server path shows up under the main button. While everything
+is fine it just shows the path; if the last server drops, it turns red and
+says plainly that the internet is off because of the chain — so you are not
+left looking for the cause somewhere else: the connection to the first
+server and the device network keep working as usual.
+
 ## Site addresses (DNS)
 
 In VPN mode the **server** resolves site names: your provider does not see

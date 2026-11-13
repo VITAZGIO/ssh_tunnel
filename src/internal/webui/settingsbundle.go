@@ -50,6 +50,7 @@ func (s *Server) handleSettingsExport(w http.ResponseWriter, r *http.Request) {
 			LocalViaTunnel: p.LocalViaTunnel,
 			Panel:          p.Panel, ClientID: p.ClientID, DeviceName: p.DeviceName,
 			MeshKey: exportMeshKey(p),
+			ExitVia: exportExitRefs(cfg, p),
 		}
 		// Нечитаемый ключ не повод оборвать всю выгрузку: остальные серверы
 		// перенести всё равно полезно, а про этот интерфейс скажет отдельно.
@@ -150,6 +151,14 @@ func (s *Server) handleSettingsImport(w http.ResponseWriter, r *http.Request) {
 	if cfg.ActiveProfile == "" && len(cfg.Profiles) > 0 {
 		cfg.ActiveProfile = cfg.Profiles[0].ID
 	}
+	// Цепочки выхода — ссылками на серверы той же выгрузки: id у новых
+	// профилей свои, поэтому сопоставляем по адресу, когда список собран.
+	var exitMissing []string
+	for i, doc := range b.Servers {
+		ids, missing := resolveExitRefs(cfg.Profiles, cfg.Profiles[i].ID, doc.ExitVia)
+		cfg.Profiles[i].ExitVia = ids
+		exitMissing = append(exitMissing, missing...)
+	}
 
 	if _, err := s.app.SetConfig(cfg); err != nil {
 		writeJSON(w, map[string]string{"error": err.Error()})
@@ -158,5 +167,6 @@ func (s *Server) handleSettingsImport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"ok": true, "servers": len(cfg.Profiles), "keysMissing": keysMissing,
 		"mobileOnly": len(b.Mobile) > 0, "config": s.app.Config(),
+		"note": exitImportNote(exitMissing),
 	})
 }

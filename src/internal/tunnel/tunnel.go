@@ -152,6 +152,16 @@ type Config struct {
 	// cmd/udprelay без флагов.
 	UDPRelayAddr string
 
+	// Name — имя входного сервера (профиля) для строки пути цепочки.
+	Name string
+	// Exit — цепочка выхода (ТЗ 8, exit.go): серверы после этого, по
+	// порядку; в интернет выходим через последний. Пусто — выходим через
+	// этот сервер, как раньше.
+	Exit []Hop
+	// OnExitChange зовётся, когда цепочка поднялась или упала: экрану пора
+	// перерисовать путь. nil — никому не надо.
+	OnExitChange func()
+
 	// Mesh — сеть устройств на этом сервере (см. internal/mesh). nil —
 	// выключена.
 	Mesh *mesh.Config
@@ -299,6 +309,11 @@ type Tunnel struct {
 	// live — живые соединения и решения, по которым они открыты (см.
 	// ApplyHygiene).
 	live liveConns
+
+	// exit — пул вложенных сессий цепочки выхода (exit.go), exitRR — счётчик
+	// раздачи по ним.
+	exit   exitState
+	exitRR atomic.Uint64
 }
 
 type stats struct {
@@ -462,6 +477,11 @@ func (t *Tunnel) StartContext(parent context.Context) error {
 		t.cancel()
 		return err
 	}
+	if err := t.loadExitSigners(); err != nil {
+		t.setState(events.StateError, err.Error())
+		t.cancel()
+		return err
+	}
 
 	if err := t.startPool(); err != nil {
 		t.cancel()
@@ -586,6 +606,7 @@ func (t *Tunnel) launchPool(ctx context.Context, first *ssh.Client, wire *wireCo
 	go t.publishStats(ctx)
 	t.wg.Add(1)
 	go t.pingLoop(ctx)
+	t.launchExit(ctx, n)
 	t.startMesh()
 }
 
@@ -791,12 +812,14 @@ func (t *Tunnel) pingLoop(ctx context.Context) {
 		case <-time.After(4 * time.Second):
 		}
 
-		links := t.snapLinks()
-		if len(links) == 0 {
-			t.stats.pingMs.Store(0)
-			continue
+		// С цепочкой меряем весь путь до последнего сервера: именно эту
+		// задержку чувствуют приложения.
+		var client *ssh.Client
+		if t.Chained() {
+			client = t.exitClient()
+		} else if links := t.snapLinks(); len(links) > 0 {
+			client = links[0].get()
 		}
-		client := links[0].get()
 		if client == nil {
 			t.stats.pingMs.Store(0)
 			continue
@@ -960,6 +983,7 @@ func (t *Tunnel) Drain() {
 	t.mu.Lock()
 	t.links = nil
 	t.mu.Unlock()
+	t.clearExit()
 	t.closeUDPRelay()
 
 	t.mu.RLock()
@@ -1051,6 +1075,10 @@ func (t *Tunnel) Resume() error {
 
 	t.setState(events.StateConnecting, "")
 	if err := t.loadSigner(); err != nil {
+		t.Stop()
+		return err
+	}
+	if err := t.loadExitSigners(); err != nil {
 		t.Stop()
 		return err
 	}
@@ -1148,6 +1176,7 @@ func (t *Tunnel) Stop() {
 	t.mu.Lock()
 	t.links = nil
 	t.mu.Unlock()
+	t.clearExit()
 
 	t.closeUDPRelay()
 
@@ -1163,7 +1192,7 @@ func (t *Tunnel) UDPRelay() *udprelay.Client {
 	// Во время слива ретранслятора нет: он живёт на сервере, а связь с
 	// сервером уже разорвана. Подменить UDP прямым соединением нечем,
 	// поэтому ведём себя как при выключенной функции — отказом.
-	if !t.cfg.UDPRelayEnabled || !t.viaServer() {
+	if !t.udpRelayOn() || !t.viaServer() {
 		return nil
 	}
 
@@ -1532,11 +1561,23 @@ func (t *Tunnel) primaryUp() bool {
 // dialWait — сколько ждать живого соединения, если в этот момент весь пул
 // переподключается. Без ожидания короткий разрыв связи превращался бы в пачку
 // мгновенных ошибок в браузере, хотя через секунду всё уже работает.
-const dialWait = 8 * time.Second
+// Переменная — тесты цепочки выхода не ждут по восемь секунд.
+var dialWait = 8 * time.Second
 
-// Dial открывает соединение до target через SSH. Ходит по пулу: если слот
-// мёртв, пробует следующий, поэтому обрыв одного соединения не виден снаружи.
+// Dial открывает соединение до target через сервер — то, что ядро решило
+// вести «через сервер». С цепочкой выхода — только через её последний
+// сервер (exit.go), без запасного пути; без цепочки — через пул.
 func (t *Tunnel) Dial(network, target string) (net.Conn, error) {
+	if t.Chained() {
+		return t.dialExit(network, target)
+	}
+	return t.DialEntry(network, target)
+}
+
+// DialEntry — соединение через входной сервер, мимо цепочки: к службам на
+// самом сервере (пользователи, карта сети). Ходит по пулу: если слот мёртв,
+// пробует следующий, поэтому обрыв одного соединения не виден снаружи.
+func (t *Tunnel) DialEntry(network, target string) (net.Conn, error) {
 	deadline := time.Now().Add(dialWait)
 	for {
 		conn, err, hadLink := t.tryDial(network, target)
