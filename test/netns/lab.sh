@@ -77,7 +77,8 @@ lab_inet() {
   ns inet nft -f - <<'NFT'
 table ip lab_home {
   chain post { type nat hook postrouting priority srcnat; policy accept;
-    ip saddr 192.168.50.0/24 oifname "br0" masquerade }
+    ip saddr 192.168.50.0/24 oifname "br0" masquerade
+  }
 }
 NFT
   : > "$LAB/dns.log"

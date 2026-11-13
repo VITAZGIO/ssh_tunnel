@@ -181,7 +181,7 @@ func TestEgressLab(t *testing.T) {
 
 	// 1. Петля A→B→A: B виден снаружи адресом A — отказ, ничего не тронуто.
 	if _, err := labIn("inet", `nft -f - <<'E'
-table ip lab_loop { chain in { type nat hook input priority 100; ip saddr 203.0.113.20 ip daddr 192.0.2.80 snat to 203.0.113.10 } }
+table ip lab_loop { chain in { type nat hook input priority 100; ip saddr 203.0.113.20 ip daddr 192.0.2.80 snat to 203.0.113.10; } }
 E`); err != nil {
 		t.Fatalf("подделать петлю: %v", err)
 	}

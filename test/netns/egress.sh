@@ -42,9 +42,11 @@ ns actr ip route add default via 172.31.0.1
 ns a nft -f - <<'NFT'
 table ip lab_docker {
   chain pre { type nat hook prerouting priority dstnat; policy accept;
-    tcp dport 8081 dnat to 172.31.0.2:80 }
+    tcp dport 8081 dnat to 172.31.0.2:80
+  }
   chain post { type nat hook postrouting priority srcnat; policy accept;
-    ip saddr 172.31.0.0/24 oifname != "actr0" masquerade }
+    ip saddr 172.31.0.0/24 oifname != "actr0" masquerade
+  }
 }
 NFT
 ns a "$LAB/labd" -http 203.0.113.10:8080 > "$LAB/labd-a.log" 2>&1 &
