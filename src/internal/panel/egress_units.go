@@ -212,6 +212,22 @@ func egressModeScript(p egressPlan) string {
 		"if systemctl is-active --quiet " + egressRulesUnit + "; then /bin/sh \"$D/rules-up.sh\"; fi\n"
 }
 
+// egressCatchAllScript — снять (on=false) или вернуть правило «всё
+// остальное — в туннель» (pref 9501). Вернуть — заново поставить правила
+// целиком (rules-up.sh), если служба правил работает.
+func egressCatchAllScript(on bool) string {
+	if on {
+		return "D=" + egressVarDir + "\n" +
+			"if systemctl is-active --quiet " + egressRulesUnit + " && [ -f \"$D/rules-up.sh\" ]; then /bin/sh \"$D/rules-up.sh\"; fi\n" +
+			"echo \"сервер Б снова отвечает — выход опять через него\"\n"
+	}
+	return fmt.Sprintf(`for fam in -4 -6; do
+  while ip $fam rule del pref %d 2>/dev/null; do :; done
+done
+echo "сервер Б не отвечает — выход напрямую, пока он не вернётся"
+`, prefEgressTunnel)
+}
+
 // egressOffNowScript — кнопка «Выключить»: тот же off.sh, а если его нет
 // (сломанная установка) — его текст прямо здесь.
 func egressOffNowScript() string {

@@ -28,6 +28,14 @@ type fakeEgressSystem struct {
 
 	// confirmEffect — после скрипта подтверждения.
 	onScript func(script string)
+	// bDown — B не отвечает на порт SSH.
+	bDown bool
+}
+
+func (f *fakeEgressSystem) Reachable(context.Context, string, int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.bDown
 }
 
 func newFakeEgressSystem() *fakeEgressSystem {
@@ -282,5 +290,64 @@ func TestEgressVarDirНачинаетсяОтКорня(t *testing.T) {
 	// которой собираются тесты.
 	if !strings.HasPrefix(egressVarDir, "/") {
 		t.Fatalf("egressVarDir должен быть путём Linux от корня: %q", egressVarDir)
+	}
+}
+
+// B упал, режим «выход напрямую»: клиент держит маршруты, пока
+// переподключается, — правило «всё остальное — в туннель» снимает надзор
+// панели и возвращает, когда B снова отвечает (стенд test/netns, ТЗ 14).
+func TestEgressНапрямуюПриУпавшемB(t *testing.T) {
+	sys := newFakeEgressSystem()
+	m := newTestEgressManager(t, sys)
+	m.cfg.Target = &EgressTarget{Host: "203.0.113.50", IP: "203.0.113.50", Port: 22}
+	m.cfg.Mode = EgressModeDirect
+	sys.setState(egressSysState{RulesActive: true, RulesEnabled: true, ClientActive: true, RoutesUp: true})
+	count := func(sub string) int {
+		sys.mu.Lock()
+		defer sys.mu.Unlock()
+		n := 0
+		for _, s := range sys.scripts {
+			if strings.Contains(s, sub) {
+				n++
+			}
+		}
+		return n
+	}
+	m.tick(context.Background())
+	if m.Status().Phase != EgressOn || count("rule del pref 9501") != 0 {
+		t.Fatal("B жив — ничего не снимать")
+	}
+	sys.mu.Lock()
+	sys.bDown = true
+	sys.mu.Unlock()
+	m.tick(context.Background())
+	if count("rule del pref 9501") != 0 {
+		t.Fatal("одна неудачная проверка — ещё не падение")
+	}
+	m.tick(context.Background())
+	if count("rule del pref 9501") != 1 || m.Status().Phase != EgressDown {
+		t.Fatalf("B упал: правило не снято или фаза %s", m.Status().Phase)
+	}
+	m.tick(context.Background())
+	if count("rule del pref 9501") != 1 {
+		t.Fatal("снимать повторно незачем")
+	}
+	sys.mu.Lock()
+	sys.bDown = false
+	sys.mu.Unlock()
+	m.tick(context.Background())
+	if count("rules-up.sh") == 0 || m.Status().Phase != EgressOn {
+		t.Fatalf("B вернулся: правила не возвращены или фаза %s", m.Status().Phase)
+	}
+
+	// Режим «без интернета»: ничего не снимается — блок и так стоит.
+	m.cfg.Mode = EgressModeBlock
+	sys.mu.Lock()
+	sys.bDown, sys.scripts = true, nil
+	sys.mu.Unlock()
+	m.tick(context.Background())
+	m.tick(context.Background())
+	if count("rule del pref 9501") != 0 {
+		t.Fatal("в режиме «без интернета» правило снимать нельзя")
 	}
 }

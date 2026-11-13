@@ -16,7 +16,7 @@ D() { docker -H "unix://$SOCK" "$@"; }
 cleanup() {
   set +e
   stop_client TERM
-  D rm -f t d h s >/dev/null 2>&1
+  D rm -f tun dir hst str >/dev/null 2>&1
   [ -f /run/docker-lab.pid ] && kill "$(cat /run/docker-lab.pid)" 2>/dev/null
   sleep 2
   lab_down
@@ -58,7 +58,7 @@ run_ctr() { # имя [доп. флаги docker run]
 ip_of() { D inspect -f '{{.NetworkSettings.IPAddress}}' "$1"; }
 our_rules() { ip -n c rule | grep -E 'lookup 709[4-6]' || true; }
 count_rules() { ip -n c rule | grep -E 'lookup 709[4-6]' | grep -cE "$1" || true; }
-t_is_b() { [ "$(cecho t 2>/dev/null)" = 203.0.113.20 ]; }
+t_is_b() { [ "$(cecho tun 2>/dev/null)" = 203.0.113.20 ]; }
 
 echo "== стенд: rp_filter=$RP"
 lab_down
@@ -92,64 +92,64 @@ api /api/addons '{"op":"add","id":"docker"}' >/dev/null
 api /api/state '{"tunnel":true,"mesh":true}' >/dev/null
 tunnel_on || { echo "::error::туннель не поднялся"; api /api/state; tail -n 60 "$LAB/client-c.log"; exit 1; }
 
-run_ctr t -p 8080:80
-run_ctr d
-run_ctr h
-run_ctr s
-api /api/docker/set '{"container":"t","route":"tunnel"}' >/dev/null
-api /api/docker/set '{"container":"d","route":"direct"}' >/dev/null
-api /api/docker/set '{"container":"s","route":"tunnel","strict":true}' >/dev/null
+run_ctr tun -p 8080:80
+run_ctr dir
+run_ctr hst
+run_ctr str
+api /api/docker/set '{"container":"tun","route":"tunnel"}' >/dev/null
+api /api/docker/set '{"container":"dir","route":"direct"}' >/dev/null
+api /api/docker/set '{"container":"str","route":"tunnel","strict":true}' >/dev/null
 sleep 2
 echo "-- ip rule и nat в c:"; our_rules; ns c iptables -t nat -S | grep -E 'SSH_TUNNEL|MASQ' || true
 echo "-- /api/docker:"; api /api/docker | jq -c '.kernel, [.containers[] | {name, effective, strict, published}]'
 
 echo "== туннель включён"
-expect "«через сервер» виден адресом B" 203.0.113.20 cecho t
-expect "«напрямую» виден домашним адресом" 192.168.50.2 cecho d
-expect "«как компьютер» идёт как компьютер (через B)" 203.0.113.20 cecho h
-expect "строгий «через сервер» — через B" 203.0.113.20 cecho s
-expect "«всегда напрямую» к «через сервер» не применяется" 203.0.113.20 cecho t 192.0.2.81
-expect "у самого компьютера «всегда напрямую» действует" 192.168.50.2 cecho h 192.0.2.81
-check "DNS «через сервер» отвечает" cdns t name1.test-lab.net
+expect "«через сервер» виден адресом B" 203.0.113.20 cecho tun
+expect "«напрямую» виден домашним адресом" 192.168.50.2 cecho dir
+expect "«как компьютер» идёт как компьютер (через B)" 203.0.113.20 cecho hst
+expect "строгий «через сервер» — через B" 203.0.113.20 cecho str
+expect "«всегда напрямую» к «через сервер» не применяется" 203.0.113.20 cecho tun 192.0.2.81
+expect "у самого компьютера «всегда напрямую» действует" 192.168.50.2 cecho hst 192.0.2.81
+check "DNS «через сервер» отвечает" cdns tun name1.test-lab.net
 expect "DNS «через сервер» разрешён через B" 1 dnslog 1.1.1.1 203.0.113.20 name1.test-lab.net
 expect "DNS «через сервер» не у провайдера" 0 dnslog 192.0.2.53 192.168.50.2 name1.test-lab.net
-check "DNS имени из «всегда напрямую» у «через сервер» отвечает" cdns t direct1.d.test-lab.net
+check "DNS имени из «всегда напрямую» у «через сервер» отвечает" cdns tun direct1.d.test-lab.net
 expect "…и не у провайдера (строгий DNS)" 0 dnslog 192.0.2.53 192.168.50.2 direct1.d.test-lab.net
-check "DNS «напрямую» отвечает" cdns d name2.test-lab.net
-expect "контейнер ↔ контейнер" ok D exec t wget -qO- -T 5 "http://$(ip_of d)/"
-expect "контейнер → компьютер" "$(ip_of t)" D exec t wget -qO- -T 5 http://172.17.0.1:9090/
+check "DNS «напрямую» отвечает" cdns dir name2.test-lab.net
+expect "контейнер ↔ контейнер" ok D exec tun wget -qO- -T 5 "http://$(ip_of dir)/"
+expect "контейнер → компьютер" "$(ip_of tun)" D exec tun wget -qO- -T 5 http://172.17.0.1:9090/
 expect "опубликованный порт из домашней сети" ok ns lan curl -fsS -m 5 http://192.168.50.2:8080/
-check "исключение из MASQUERADE стоит" sh -c "ip netns exec c iptables -t nat -S SSH_TUNNEL_DOCKER | grep -q -- '-s $(ip_of t)/32 -j ACCEPT'"
+check "исключение из MASQUERADE стоит" sh -c "ip netns exec c iptables -t nat -S SSH_TUNNEL_DOCKER | grep -q -- '-s $(ip_of tun)/32 -j ACCEPT'"
 
 echo "== туннель выключен (сеть устройств включена)"
 api /api/state '{"tunnel":false}' >/dev/null
 leak=0
 for _ in $(seq 1 12); do
-  if [ "$(cecho t 2>/dev/null || true)" = "192.168.50.2" ]; then leak=1; fi
+  if [ "$(cecho tun 2>/dev/null || true)" = "192.168.50.2" ]; then leak=1; fi
   sleep 0.5
 done
 if [ $leak = 0 ]; then pass "в секунды после «Выключить» «через сервер» напрямую не вышел"; else fail "«через сервер» вышел напрямую сразу после «Выключить»"; fi
 eventually 20 is_phase tunnel off || true
 echo "-- состояние: $(api /api/state | jq -c '{tunnel:.tunnel.phase, mesh:.mesh.phase, mode}')"
-refute "«через сервер» без туннеля — без интернета" cecho t
-refute "«через сервер» без туннеля — без DNS" cdns t name3.test-lab.net
+refute "«через сервер» без туннеля — без интернета" cecho tun
+refute "«через сервер» без туннеля — без DNS" cdns tun name3.test-lab.net
 expect "…и запрос имени никуда не ушёл" 0 sh -c "grep -c 'name3.test-lab.net' $LAB/dns.log || true"
-expect "«напрямую» работает" 192.168.50.2 cecho d
-expect "«как компьютер» — как компьютер (напрямую)" 192.168.50.2 cecho h
+expect "«напрямую» работает" 192.168.50.2 cecho dir
+expect "«как компьютер» — как компьютер (напрямую)" 192.168.50.2 cecho hst
 
 echo "== туннель снова включён, контейнер пересоздан"
 api /api/state '{"tunnel":true}' >/dev/null
 tunnel_on || fail "туннель не поднялся снова"
-run_ctr t -p 8080:80
+run_ctr tun -p 8080:80
 if eventually 10 t_is_b; then pass "пересозданный «через сервер» — через B"; else fail "пересозданный «через сервер» не через B"; fi
 
 echo "== kill -9 клиента"
 stop_client KILL
 sleep 2
-refute "после kill -9 «через сервер» без интернета" cecho t
-refute "после kill -9 «через сервер» без DNS" cdns t name4.test-lab.net
-refute "после kill -9 строгий без интернета" cecho s
-expect "после kill -9 «напрямую» работает" 192.168.50.2 cecho d
+refute "после kill -9 «через сервер» без интернета" cecho tun
+refute "после kill -9 «через сервер» без DNS" cdns tun name4.test-lab.net
+refute "после kill -9 строгий без интернета" cecho str
+expect "после kill -9 «напрямую» работает" 192.168.50.2 cecho dir
 echo "-- правила после kill -9:"; our_rules
 start_client
 api /api/state '{"tunnel":true,"mesh":true}' >/dev/null
@@ -163,17 +163,17 @@ echo "-- правила после остановки:"; our_rules
 expect "после остановки остались только правила строгого (3)" 3 count_rules '^940[23]:'
 expect "обычных правил контейнеров нет" 0 count_rules '^940[01]:'
 refute "цепочки исключения NAT нет" ns c iptables -t nat -S SSH_TUNNEL_DOCKER
-expect "«через сервер» без программы — как компьютер" 192.168.50.2 cecho t
-refute "строгий без программы — без интернета" cecho s
-check "строгий без программы ходит в домашнюю сеть" D exec s ping -c1 -W2 192.168.50.3
+expect "«через сервер» без программы — как компьютер" 192.168.50.2 cecho tun
+refute "строгий без программы — без интернета" cecho str
+check "строгий без программы ходит в домашнюю сеть" D exec str ping -c1 -W2 192.168.50.3
 
 echo "== снять галочку (VPN выключен)"
 start_client
 api /api/state '{"tunnel":false,"mesh":false}' >/dev/null
 sleep 2
-api /api/docker/set '{"container":"s","strict":false}' >/dev/null
+api /api/docker/set '{"container":"str","strict":false}' >/dev/null
 sleep 2
-expect "галочка снята — строгий идёт как компьютер" 192.168.50.2 cecho s
+expect "галочка снята — строгий идёт как компьютер" 192.168.50.2 cecho str
 stop_client TERM
 expect "после всего правил нет" 0 count_rules '.'
 expect "после всего таблица 7094 пуста" 0 sh -c "ip -n c route show table 7094 | wc -l"

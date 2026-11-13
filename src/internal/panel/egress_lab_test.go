@@ -161,9 +161,14 @@ func TestEgressLab(t *testing.T) {
 	}
 	link, bin := os.Getenv("LAB_LINK"), os.Getenv("LAB_VPN_BIN")
 	ipEchoURLs = []string{"http://192.0.2.80/"}
-	dir := filepath.Join(lab, "panel-egress")
+	// Как в cmd/ssh_tunnel_panel: папка выхода — <данные панели>/egress.
+	dir := filepath.Join(lab, "egress")
 	os.RemoveAll(dir)
-	m := NewEgressManager(labEgress{systemEgress: NewSystemEgress(dir).(systemEgress), bin: bin}, dir, "v0.0.0-lab", nil)
+	m := NewEgressManager(labEgress{systemEgress: NewSystemEgress(lab).(systemEgress), bin: bin}, dir, "v0.0.0-lab", nil)
+	// Надзор панели — как в настоящей: проверка B, перезапуск клиента.
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	m.Start(ctx)
 
 	base := labSnapshot(t)
 	if got := labEcho(); got != "203.0.113.10" {
