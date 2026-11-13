@@ -128,6 +128,7 @@
   .msg{font-size:12.5px;border-radius:8px;padding:9px 10px;margin-bottom:12px}
   .msg.err{background:rgba(229,72,77,.12);color:var(--err)}
   .msg.ok{background:rgba(47,191,113,.12);color:var(--ok)}
+  .msg.warn{background:rgba(232,179,57,.14);color:var(--warn)}
 
   .kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;
       border-bottom:1px solid var(--line);font-size:13px}
@@ -986,9 +987,23 @@
       <div class="cards">
         <div class="card" id="meshServersCard" hidden>
           <h1><span data-i18n="mesh_servers_title">Серверы сети</span><button class="hint" data-hint="hint_servers">?</button></h1>
+          <p class="note" data-i18n="srv_multi_note">Главного сервера нет: на каждом сервере сети — своя служба, а устройство держит связь со всеми серверами, которые знает. Два устройства видят друг друга, если у них есть общий сервер на связи.</p>
           <div id="meshServers"></div>
+          <div class="msg warn" id="meshPolWarn" hidden style="margin-top:10px"></div>
+          <p class="note" style="margin:10px 0 0" data-i18n="srv_scope_note">Правила доступа, журнал, имена и удаление сетей и устройств — свои у каждого сервера: здесь видно и меняется только то, что на этом.</p>
+          <h2 style="margin-top:16px"><span data-i18n="srv_known_title">Советовать устройствам</span><button class="hint" data-hint="hint_srv_known">?</button></h2>
+          <div id="meshKnown"></div>
+          <div class="cap-row" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) 90px;margin-top:8px">
+            <div class="field"><label for="knownName" data-i18n="srv_known_name">Имя</label>
+              <input type="text" id="knownName" data-i18n-ph="link_name_ph" placeholder="Германия"></div>
+            <div class="field"><label for="knownHost" data-i18n="srv_known_host">Адрес сервера</label>
+              <input type="text" id="knownHost" placeholder="de.example.com"></div>
+            <div class="field"><label for="knownPort" data-i18n="port_label">Порт</label>
+              <input type="number" id="knownPort" min="1" max="65535" value="22"></div>
+          </div>
+          <button class="btn" id="knownAddBtn" data-i18n="srv_known_add">Добавить сервер</button>
           <div id="meshLinkMsg"></div>
-          <button class="btn" id="meshAddLinkBtn" style="margin-top:12px" data-i18n="mesh_add_server">+ Подключить сервер</button>
+          <button class="btn ghost" id="meshAddLinkBtn" style="margin-top:12px" data-i18n="mesh_add_server">+ Подключить сервер</button>
           <div id="meshLinkForm" hidden style="margin-top:14px">
             <div class="field">
               <label for="linkName" data-i18n="link_name_label">Имя побочного сервера</label>
@@ -1131,6 +1146,7 @@
           <div class="console" id="secLog"></div>
           <p class="note" style="margin:12px 0 0" data-i18n="sec_note">Устройства всей сети, качество связи и переименование — в панели главного сервера.</p>
           <div class="row-inline" style="margin-top:12px">
+            <button class="btn" id="secToMainBtn" data-i18n="sec_to_main">Перейти на свою службу сети</button>
             <button class="btn ghost" id="secRejoinBtn" data-i18n="sec_rejoin">Подключить по новому коду</button>
             <button class="btn danger" id="secOffBtn" data-i18n="mesh_off">Выключить сеть на сервере</button>
           </div>
@@ -1536,15 +1552,15 @@ const I18N = {
     mesh_sub:'Твои устройства в одной сети через твои же серверы — как NetBird: каждое получает '+
       'постоянный адрес и имя вида «ноутбук.mesh».',
     mesh_role_title:'Роль этого сервера',
-    mesh_role_note:'Серверов может быть несколько: один главный, остальные подключаются к нему. '+
-      'Устройства, подключённые к любому из них, окажутся в одной сети.',
-    role_main:'Главный сервер', role_secondary:'Побочный сервер',
-    role_main_d:'Здесь работает служба сети. К нему подключаются устройства и другие серверы, '+
-      'здесь видна вся сеть.',
-    role_secondary_d:'Подключается к главному. Устройства этого сервера попадают в общую сеть, '+
-      'выход в интернет остаётся здесь.',
+    mesh_role_note:'Серверов в сети может быть сколько угодно, главного нет: на каждом — своя служба сети, '+
+      'а устройства держат связь со всеми серверами, которые знают. Старый способ — проброс к другому серверу — тоже работает.',
+    role_main:'Сервер сети', role_secondary:'Проброс к другому серверу (старый способ)',
+    role_main_d:'Здесь работает своя служба сети. Устройства этого сервера видят устройства других серверов, '+
+      'если у них есть общий сервер. Сеть не зависит от одного сервера.',
+    role_secondary_d:'Своей службы нет: вход сети — проброс к серверу, где она есть. Упал тот — у устройств '+
+      'этого сервера сети нет. Для новых серверов лучше «Сервер сети».',
     mesh_name_label:'Как назвать этот сервер', mesh_name_ph:'Москва, Германия…',
-    mesh_make_main:'Сделать главным и установить',
+    mesh_make_main:'Установить службу сети',
     mesh_code_label:'Код подключения с главного сервера',
     mesh_self_host:'Адрес этого сервера для устройств', mesh_join:'Подключить к главному',
     job_install:'Устанавливаю службу сети', job_done:'Установка закончена', job_failed:'Установка не удалась',
@@ -1558,7 +1574,17 @@ const I18N = {
     mesh_no_devices:'В сети пока нет устройств. Включи «Сеть устройств» в настройках сервера в программе '+
       'на компьютере или телефоне — они появятся здесь сами.',
     mesh_no_match:'Ничего не нашлось',
-    mesh_servers_title:'Серверы сети', mesh_add_server:'+ Подключить сервер',
+    mesh_servers_title:'Серверы сети', mesh_add_server:'+ Побочный сервер старым способом (проброс)',
+    srv_multi_note:'Главного сервера нет: на каждом сервере сети — своя служба, а устройство держит связь со всеми '+
+      'серверами, которые знает. Два устройства видят друг друга, если у них есть общий сервер на связи.',
+    srv_scope_note:'Правила доступа, журнал, имена и удаление сетей и устройств — свои у каждого сервера: '+
+      'здесь видно и меняется только то, что на этом.',
+    srv_legacy:'старый способ', srv_pol_same:'правила те же', srv_pol_other:'правила другие',
+    srv_peer_devs:'устройств этого сервера на связи и с ним: {n}',
+    srv_pol_warn:'На сервере {s} правила доступа другие. Устройство может пойти к другому через любой общий сервер, '+
+      'поэтому на деле действует самое мягкое из правил. Задай одинаковые правила в панелях всех серверов.',
+    srv_known_title:'Советовать устройствам', srv_known_name:'Имя', srv_known_host:'Адрес сервера',
+    srv_known_add:'Добавить сервер', srv_known_remove:'Убрать', srv_known_empty:'Пока никого — устройства знают только свои профили.',
     link_name_label:'Имя побочного сервера', link_name_ph:'Германия',
     link_host_label:'Адрес этого (главного) сервера', link_create:'Получить код',
     link_code_ready:'Код готов. Он содержит ключ доступа — передай его только на свой сервер. Один код — для одного сервера: '+
@@ -1568,7 +1594,7 @@ const I18N = {
     link_step3:'Нажми «Подключить к главному» — через несколько секунд сервер появится здесь на схеме.',
     link_remove:'Отключить', confirm_link_remove:'Отключить сервер «{n}»? Его ключ перестанет работать, '+
       'устройства этого сервера пропадут из сети, пока его не подключат снова.',
-    srv_main:'главный', srv_waiting:'ждёт подключения', srv_self_joined:'подключился сам',
+    srv_main:'этот сервер', srv_waiting:'ждёт подключения', srv_self_joined:'подключился сам',
     mesh_service_title:'Служба сети', mesh_version:'Версия meshd', mesh_since:'Работает с',
     mesh_reinstall:'Обновить meshd', udprelay_label:'Ретранслятор UDP', udprelay_install:'Поставить ретранслятор UDP',
     udprelay_update:'Обновить ретранслятор UDP', udprelay_none:'не установлен', job_udprelay:'Ставлю ретранслятор UDP',
@@ -1607,6 +1633,7 @@ const I18N = {
       '<p>После включения есть 60 секунд, чтобы подтвердить, что панель всё ещё отвечает. Без подтверждения — '+
       'отдельный таймер systemd, независимый от панели и от сети, возвращает всё как было (и после перезагрузки тоже).</p>',
     svc_active:'работает', svc_stopped:'остановлена', svc_missing:'не установлена',
+    sec_to_main:'Перейти на свою службу сети',
     sec_title:'Связь с главным сервером', sec_since:'На связи с', sec_last_ping:'Последняя проверка',
     sec_uplink:'Служба проброса', sec_log:'Журнал проброса',
     sec_note:'Устройства всей сети, качество связи и переименование — в панели главного сервера.',
@@ -1634,9 +1661,8 @@ const I18N = {
     hint_mesh_what:'<p><b>Сеть устройств</b> — твои компьютеры и телефоны видят друг друга, где бы они ни были, '+
       'как в одной домашней сети.</p><p>Каждое устройство получает постоянный адрес 198.19.x.x и имя '+
       '«имя.mesh». Весь трафик идёт через твой сервер по SSH — белые адреса и проброс портов на роутере не нужны.</p>',
-    hint_role_main:'<p>На главном работает <b>meshd</b> — служба, которая раздаёт адреса и соединяет устройства.</p>'+
-      '<p>Главный нужен один на всю сеть. Выбирай самый надёжный сервер: если он недоступен, устройства '+
-      'не видят друг друга (интернет при этом работает).</p>',
+    hint_role_main:'<p>Здесь работает <b>meshd</b> — служба, которая проверяет адреса устройств и соединяет их.</p>'+
+      '<p>Таких серверов в сети может быть сколько угодно: упал один — устройства на связи через остальные.</p>',
     hint_role_secondary:'<p>Побочный сервер держит SSH-соединение с главным и пробрасывает к нему '+
       'подключения своих устройств.</p><p>Так можно выходить в интернет через Германию, а друзья — через '+
       'Нидерланды, и при этом все устройства остаются в одной сети.</p>',
@@ -1647,7 +1673,7 @@ const I18N = {
       'понимает, какие устройства пришли через этот сервер. Можно оставить пустым.',
     hint_tile_devices:'Сколько устройств сейчас на связи и сколько всего сервер помнит. Устройство, '+
       'не появлявшееся полгода, забывается само.',
-    hint_tile_servers:'Главный и подключённые к нему побочные серверы.',
+    hint_tile_servers:'Этот сервер, старые побочные (проброс к нему) и другие серверы сети, о которых рассказали устройства.',
     hint_tile_latency:'<p>Время туда-обратно от главного сервера до устройства (<b>RTT</b>), '+
       'измеряется каждые 15 секунд.</p><p>До 60 мс — отлично, до 150 — хорошо, больше 400 — плохо.</p>',
     hint_tile_traffic:'Сколько данных устройства передали друг другу через сеть (не весь интернет-трафик, '+
@@ -1661,9 +1687,13 @@ const I18N = {
     hint_devices_list:'<p>Имя можно поменять прямо здесь (карандаш) — новое имя «.mesh» сразу увидят '+
       'все устройства сети.</p><p><b>Джиттер</b> — насколько скачет задержка; <b>потери</b> — доля '+
       'проверок, на которые устройство не ответило.</p>',
-    hint_servers:'<p>Побочные серверы подключаются к главному по SSH под отдельным пользователем '+
-      '<b>meshlink</b>, которому разрешено только одно — проброс до службы сети.</p><p>Ни оболочки, '+
-      'ни доступа к другим портам у него нет.</p>',
+    hint_servers:'<p>Сервер попадает в сеть, когда на устройстве есть его профиль с тем же ключом сети: '+
+      'тогда устройство держит связь и с ним (лёгкое SSH-соединение, интернет через него не идёт).</p>'+
+      '<p>Другие серверы здесь видны по рассказам устройств. Старые побочные серверы (проброс под пользователем '+
+      '<b>meshlink</b>) тоже показаны — они ходят в службу этого сервера.</p>',
+    hint_srv_known:'<p>Устройства этого сервера узнают из списка, какие ещё серверы есть в сети.</p>'+
+      '<p>Это только подсказка: на сервер из списка устройство пойдёт, лишь когда на нём заведут профиль '+
+      'этого сервера (свой ключ входа, тот же ключ сети) — с той же проверкой ключа сервера, что и всегда.</p>',
     hint_link_host:'Адрес, по которому побочный сервер достучится до этого по SSH. Обычно это тот же '+
       'адрес, что вписан у устройств.',
     hint_service:'<b>meshd</b> слушает только 127.0.0.1 — снаружи его не видно, до него добираются лишь '+
@@ -1872,14 +1902,15 @@ const I18N = {
     mesh_sub:'Your devices in one network through your own servers — like NetBird: each gets a '+
       'permanent address and a name like "laptop.mesh".',
     mesh_role_title:'Role of this server',
-    mesh_role_note:'You can have several servers: one main, the rest connect to it. Devices connected '+
-      'to any of them end up in the same network.',
-    role_main:'Main server', role_secondary:'Secondary server',
-    role_main_d:'Runs the network service. Devices and other servers connect here; the whole network is visible here.',
-    role_secondary_d:'Connects to the main one. Devices of this server join the shared network, '+
-      'internet exit stays here.',
+    mesh_role_note:'A network can have any number of servers and none is the main one: each runs its own network '+
+      'service, devices stay connected to every server they know. The old way — forwarding to another server — still works.',
+    role_main:'Network server', role_secondary:'Forward to another server (old way)',
+    role_main_d:'Runs its own network service. Devices of this server see devices of other servers when they share '+
+      'a server. The network does not depend on one server.',
+    role_secondary_d:'No own service: the network entry is a forward to a server that has one. If that one is down, '+
+      'devices of this server have no network. For new servers prefer "Network server".',
     mesh_name_label:'Name of this server', mesh_name_ph:'Frankfurt, Amsterdam…',
-    mesh_make_main:'Make main and install',
+    mesh_make_main:'Install the network service',
     mesh_code_label:'Connection code from the main server',
     mesh_self_host:'Address of this server for devices', mesh_join:'Connect to main',
     job_install:'Installing the network service', job_done:'Installation finished', job_failed:'Installation failed',
@@ -1893,7 +1924,17 @@ const I18N = {
     mesh_no_devices:'No devices yet. Turn on "Device network" in the server settings of the app on a '+
       'computer or phone — they will show up here by themselves.',
     mesh_no_match:'Nothing found',
-    mesh_servers_title:'Servers of the network', mesh_add_server:'+ Connect a server',
+    mesh_servers_title:'Servers of the network', mesh_add_server:'+ Secondary server the old way (forward)',
+    srv_multi_note:'There is no main server: every server of the network runs its own service, and a device stays '+
+      'connected to every server it knows. Two devices see each other when they share a connected server.',
+    srv_scope_note:'Access rules, the journal, names and removal of networks and devices are per server: '+
+      'here you see and change only this one.',
+    srv_legacy:'old way', srv_pol_same:'same rules', srv_pol_other:'different rules',
+    srv_peer_devs:'devices of this server also connected to it: {n}',
+    srv_pol_warn:'Server {s} has different access rules. A device may reach another one through any shared server, '+
+      'so in practice the most permissive rules apply. Set the same rules in the panels of all servers.',
+    srv_known_title:'Suggest to devices', srv_known_name:'Name', srv_known_host:'Server address',
+    srv_known_add:'Add server', srv_known_remove:'Remove', srv_known_empty:'None yet — devices know only their own profiles.',
     link_name_label:'Name of the secondary server', link_name_ph:'Frankfurt',
     link_host_label:'Address of this (main) server', link_create:'Get code',
     link_code_ready:'The code is ready. It contains an access key — give it only to your own server. One code — one server: '+
@@ -1903,7 +1944,7 @@ const I18N = {
     link_step3:'Press "Connect to main" — in a few seconds the server shows up here on the map.',
     link_remove:'Disconnect', confirm_link_remove:'Disconnect server "{n}"? Its key stops working, its '+
       'devices leave the network until it is connected again.',
-    srv_main:'main', srv_waiting:'waiting to connect', srv_self_joined:'joined by itself',
+    srv_main:'this server', srv_waiting:'waiting to connect', srv_self_joined:'joined by itself',
     mesh_service_title:'Network service', mesh_version:'meshd version', mesh_since:'Running since',
     mesh_reinstall:'Update meshd', udprelay_label:'UDP relay', udprelay_install:'Install UDP relay',
     udprelay_update:'Update UDP relay', udprelay_none:'not installed', job_udprelay:'Installing the UDP relay',
@@ -1942,6 +1983,7 @@ const I18N = {
       '<p>After turning it on there are 60 seconds to confirm the panel still answers. Without confirmation, '+
       'a systemd timer independent of the panel and the network reverts everything (across reboots too).</p>',
     svc_active:'running', svc_stopped:'stopped', svc_missing:'not installed',
+    sec_to_main:'Switch to an own network service',
     sec_title:'Link to the main server', sec_since:'Connected since', sec_last_ping:'Last check',
     sec_uplink:'Forwarding service', sec_log:'Forwarding log',
     sec_note:'Devices of the whole network, link quality and renaming — in the main server panel.',
@@ -1969,9 +2011,8 @@ const I18N = {
     hint_mesh_what:'<p>The <b>device network</b> lets your computers and phones see each other wherever '+
       'they are, like one home network.</p><p>Each device gets a permanent 198.19.x.x address and a '+
       '"name.mesh" name. All traffic goes through your server over SSH — no public IPs or router port forwarding needed.</p>',
-    hint_role_main:'<p>The main server runs <b>meshd</b> — the service that hands out addresses and connects devices.</p>'+
-      '<p>One main server per network. Pick the most reliable one: if it is down, devices do not see each '+
-      'other (internet still works).</p>',
+    hint_role_main:'<p>This server runs <b>meshd</b> — the service that checks device addresses and connects devices.</p>'+
+      '<p>A network can have any number of such servers: if one is down, devices stay connected through the others.</p>',
     hint_role_secondary:'<p>A secondary server keeps an SSH connection to the main one and forwards its '+
       'devices\' connections there.</p><p>This way you can exit to the internet via Germany, friends via '+
       'the Netherlands, and all devices stay in one network.</p>',
@@ -1982,7 +2023,7 @@ const I18N = {
       'it to tell which devices came through this server. May be left empty.',
     hint_tile_devices:'How many devices are online now and how many the server remembers. A device not '+
       'seen for half a year is forgotten automatically.',
-    hint_tile_servers:'The main server and the secondary servers connected to it.',
+    hint_tile_servers:'This server, old secondary ones (forwarding to it) and other network servers reported by devices.',
     hint_tile_latency:'<p>Round-trip time from the main server to the device (<b>RTT</b>), measured every 15 seconds.</p>'+
       '<p>Up to 60 ms is excellent, up to 150 good, over 400 poor.</p>',
     hint_tile_traffic:'How much data devices sent each other through the network (not all internet '+
@@ -1994,8 +2035,13 @@ const I18N = {
       'map: mouse wheel or two fingers zoom, dragging the background pans, ⤢ shows everything.</p>',
     hint_devices_list:'<p>Rename right here (pencil) — every device in the network sees the new ".mesh" '+
       'name at once.</p><p><b>Jitter</b> is how much the latency jumps; <b>loss</b> is the share of checks the device did not answer.</p>',
-    hint_servers:'<p>Secondary servers connect to the main one over SSH as a separate user '+
-      '<b>meshlink</b>, which may do only one thing — forward to the network service.</p><p>No shell, no access to other ports.</p>',
+    hint_servers:'<p>A server joins the network when a device has its profile with the same network key: then the '+
+      'device stays connected to it too (a light SSH connection, no internet traffic through it).</p>'+
+      '<p>Other servers show up here from what devices report. Old secondary servers (a forward as user '+
+      '<b>meshlink</b>) are shown too — they use this server\'s service.</p>',
+    hint_srv_known:'<p>Devices of this server learn from this list which other servers the network has.</p>'+
+      '<p>Only a hint: a device uses a listed server only once it gets a profile for it (its own login key, the '+
+      'same network key) — with the usual server key check.</p>',
     hint_link_host:'The address the secondary server uses to reach this one over SSH. Usually the same '+
       'as in the devices\' profile.',
     hint_service:'<b>meshd</b> listens on 127.0.0.1 only — invisible from outside, reachable only through '+
@@ -3286,10 +3332,10 @@ function renderMesh(){
 
   // Выбор роли: пока она не закреплена в панели или когда побочный
   // переподключают по новому коду.
-  const showRole = m.role === '' || MESH_PICK === 'rejoin';
+  const showRole = m.role === '' || MESH_PICK === 'rejoin' || MESH_PICK === 'tomain';
   $('meshRoleCard').hidden = !showRole;
   if (showRole){
-    const pick = MESH_PICK === 'rejoin' ? 'secondary' : MESH_PICK;
+    const pick = MESH_PICK === 'rejoin' ? 'secondary' : MESH_PICK === 'tomain' ? 'main' : MESH_PICK;
     $('roleMainBtn').classList.toggle('on', pick === 'main');
     $('roleSecBtn').classList.toggle('on', pick === 'secondary');
     $('meshMainForm').hidden = pick !== 'main';
@@ -4268,16 +4314,24 @@ function renderForecast(devices){
 }
 
 /* ---------- серверы сети ---------- */
+// Несколько серверов без главного (ТЗ 12): этот сервер, старые побочные
+// (проброс к этому), другие серверы сети по рассказам устройств и те, что
+// панель советует устройствам.
 function renderMeshServers(servers){
   const box = $('meshServers');
   box.innerHTML = '';
+  const m = MESH || {};
+  const peers = m.peers || [];
   servers.forEach(s => {
     const row = el('div', 'srv-row');
     row.appendChild(el('span', 'dot' + (s.online ? ' on' : '')));
     const nm = el('div', 'nm');
     const n = el('div', 'n', s.name);
     if (s.main) n.appendChild(el('span', 'badge dim', t('srv_main'))).style.marginLeft = '8px';
-    else if (!s.known) n.appendChild(el('span', 'badge warn', t('srv_self_joined'))).style.marginLeft = '8px';
+    else {
+      n.appendChild(el('span', 'badge dim', t('srv_legacy'))).style.marginLeft = '8px';
+      if (!s.known) n.appendChild(el('span', 'badge warn', t('srv_self_joined'))).style.marginLeft = '8px';
+    }
     nm.appendChild(n);
     nm.appendChild(el('div', 'h', [s.host || (s.online ? '' : t('srv_waiting')), s.meshHost ? s.meshHost + '.mesh' : '']
       .filter(Boolean).join(' · ')));
@@ -4301,7 +4355,65 @@ function renderMeshServers(servers){
     }
     box.appendChild(row);
   });
+  // Другие серверы сети: о них рассказали устройства, которые на связи и с
+  // ними. Правила доступа там свои — другие правила панель называет прямо.
+  peers.forEach(p => {
+    const row = el('div', 'srv-row');
+    row.appendChild(el('span', 'dot on'));
+    const nm = el('div', 'nm');
+    const n = el('div', 'n', p.name || p.id);
+    n.appendChild(el('span', 'badge ' + (p.same ? 'ok' : 'warn'), t(p.same ? 'srv_pol_same' : 'srv_pol_other'))).style.marginLeft = '8px';
+    nm.appendChild(n);
+    nm.appendChild(el('div', 'h', t('srv_peer_devs').replace('{n}', p.devices)));
+    row.appendChild(nm);
+    box.appendChild(row);
+  });
+  const other = peers.filter(p => !p.same).map(p => p.name || p.id);
+  $('meshPolWarn').hidden = !other.length;
+  $('meshPolWarn').textContent = other.length ? t('srv_pol_warn').replace('{s}', other.join(', ')) : '';
+  renderKnown();
 }
+
+function renderKnown(){
+  const box = $('meshKnown');
+  box.innerHTML = '';
+  const list = (MESH && MESH.known) || [];
+  if (!list.length){
+    const e = el('div', 'empty', t('srv_known_empty'));
+    e.style.padding = '8px 2px';
+    box.appendChild(e);
+  }
+  list.forEach((k, i) => {
+    const row = el('div', 'srv-row');
+    const nm = el('div', 'nm');
+    nm.appendChild(el('div', 'n', k.name || k.host));
+    nm.appendChild(el('div', 'h', k.host + (k.port && k.port !== 22 ? ':' + k.port : '')));
+    row.appendChild(nm);
+    const del = el('button', 'btn ghost small', t('srv_known_remove'));
+    del.addEventListener('click', async () => {
+      const next = list.filter((_, j) => j !== i);
+      const {ok, data} = await api('/api/mesh/known', {servers: next});
+      if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+      loadMesh();
+    });
+    row.appendChild(del);
+    box.appendChild(row);
+  });
+}
+$('knownAddBtn').addEventListener('click', async () => {
+  const host = $('knownHost').value.trim();
+  if (!host) { $('knownHost').focus(); return; }
+  const list = ((MESH && MESH.known) || []).concat([{name: $('knownName').value.trim(), host,
+    port: Number($('knownPort').value) || 22}]);
+  const btn = $('knownAddBtn');
+  btn.disabled = true;
+  const {ok, data} = await api('/api/mesh/known', {servers: list});
+  btn.disabled = false;
+  if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+  $('knownName').value = ''; $('knownHost').value = ''; $('knownPort').value = 22;
+  toast(t('saved'));
+  loadMesh();
+});
 
 /* ---------- сам сервер как узел сети ---------- */
 let SELF_DIRTY = false;
@@ -4355,6 +4467,15 @@ function renderMeshSecondary(){
 }
 
 /* ---------- действия ---------- */
+// ТЗ 12: побочный (проброс) — на свою службу сети: та же установка, проброс
+// снимается сам, прежний адрес сервера в сети сохраняется.
+$('secToMainBtn').addEventListener('click', () => {
+  MESH_PICK = 'tomain';
+  if (!$('meshName').value) $('meshName').value = (MESH && MESH.name) || '';
+  renderMesh();
+  $('meshRoleCard').scrollIntoView({behavior: 'smooth'});
+  $('meshName').focus();
+});
 $('roleMainBtn').addEventListener('click', () => {
   MESH_PICK = 'main';
   if (!$('meshName').value) $('meshName').value = (MESH && MESH.name) || '';

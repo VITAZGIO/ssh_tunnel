@@ -2028,6 +2028,8 @@ const I18N = {
     mesh_direct_hint:'Устройства пробуют найти путь друг к другу мимо сервера (пробивание NAT по UDP, шифрование '+
       'QUIC/TLS 1.3) — так быстрее и не тратит канал сервера. Не получилось — всё идёт через сервер, как раньше.',
     mesh_path_direct:'напрямую',
+    mesh_servers:'Серверы сети', mesh_srv_online:'на связи', mesh_srv_connecting:'подключение', mesh_srv_error:'нет связи',
+    mesh_no_common:'нет общего сервера', mesh_via:'через',
     mesh_intro:'Твои устройства — компьютер, телефон, домашний сервер — видят друг друга по именам вида '+
       '«ноутбук.mesh», как в NetBird. Всё идёт через этот сервер: белые адреса и проброс портов на роутерах не '+
       'нужны. На сервере должна стоять служба сети устройств — её ставит мастер настройки VPS.',
@@ -2353,6 +2355,8 @@ const I18N = {
       'QUIC/TLS 1.3 encryption) — faster and saves server bandwidth. If it fails, everything goes through the '+
       'server as before.',
     mesh_path_direct:'direct',
+    mesh_servers:'Network servers', mesh_srv_online:'online', mesh_srv_connecting:'connecting', mesh_srv_error:'unreachable',
+    mesh_no_common:'no common server', mesh_via:'via',
     mesh_intro:'Your devices — computer, phone, home server — see each other by names like "laptop.mesh", like '+
       'NetBird. Everything goes through this server: no public IPs or router port forwarding needed. The server '+
       'needs the device network service — the VPS setup wizard installs it.',
@@ -4038,6 +4042,10 @@ function renderMesh(st){
   if(st.state === 'online' && st.self && st.self.host) state += ' — ' + st.self.host + '.mesh (' + st.self.ip + ')';
   if(st.error && st.state !== 'local') state += ': ' + st.error;
   if(st.nat) state += '\n' + tr('mesh_nat') + ': ' + natText(st.nat);
+  // Несколько серверов сети (ТЗ 12): с каждым — своя связь.
+  const srvs = (st.servers || []).filter(s => s.state !== 'duplicate');
+  if(srvs.length > 1) state += '\n' + tr('mesh_servers') + ': ' +
+    srvs.map(s => (s.name || s.key) + ' — ' + (tr('mesh_srv_' + s.state) || s.state)).join(', ');
   $('meshState').textContent = state;
   $('meshState').style.whiteSpace = 'pre-line';
   const box = $('meshPeers');
@@ -4050,7 +4058,9 @@ function renderMesh(st){
     row.querySelector('.h').textContent = p.host + '.mesh' + (p.self ? ' ' + tr('mesh_this') : '');
     // Прямое соединение (минуя сервер) — с его задержкой.
     row.querySelector('.n').textContent = p.name + (p.direct ? ' · ' + tr('mesh_path_direct') +
-      (p.directRttMs ? ' · ' + (p.directRttMs < 10 ? p.directRttMs.toFixed(1) : Math.round(p.directRttMs)) + ' ms' : '') : '');
+      (p.directRttMs ? ' · ' + (p.directRttMs < 10 ? p.directRttMs.toFixed(1) : Math.round(p.directRttMs)) + ' ms' : '') : '') +
+      (p.noCommon ? ' · ' + tr('mesh_no_common') + ' (' + (p.elsewhere || []).join(', ') + ')' :
+        (!p.direct && (p.servers || []).length > 1 ? ' · ' + tr('mesh_via') + ' ' + p.servers.join(', ') : ''));
     row.querySelector('.ip').textContent = p.ip;
     row.onclick = async () => {
       if(await copyToClipboard(p.host + '.mesh')) $('meshNote').textContent = tr('copied') + ': ' + p.host + '.mesh';

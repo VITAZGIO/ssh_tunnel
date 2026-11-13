@@ -168,7 +168,7 @@ func TestПрямойПутьНеПробитьИдёмЧерезСервер(t 
 	key := NewKey()
 	hard := func(string) (net.PacketConn, error) { return newFakeNAT(true, true), nil }
 	a, alog := startClientLog(t, addr, Config{Key: key, Name: "a", Via: "127.0.0.1", ProbeListen: hard})
-	b, _ := startClientLog(t, addr, Config{Key: key, Name: "b", Via: "127.0.0.1", AllowIncoming: true, ProbeListen: hard})
+	b, blog := startClientLog(t, addr, Config{Key: key, Name: "b", Via: "127.0.0.1", AllowIncoming: true, ProbeListen: hard})
 	bIP := b.Status().Self.IP.String()
 	waitFor(t, func() bool { _, ok := a.Resolve("b"); return ok }, "a не увидел b")
 	port := echoService(t, "b")
@@ -182,7 +182,10 @@ func TestПрямойПутьНеПробитьИдёмЧерезСервер(t 
 			t.Fatalf("ответ %q", got)
 		}
 	}
-	waitLong(t, 15*time.Second, func() bool { return alog.has("не нашёлся") }, "попытка не закончилась")
+	// Встречные попытки решаются по адресу (меньший — инициатор), а адреса
+	// теперь из хеша id устройства (ТЗ 12): неудачу пишет в журнал тот, кто
+	// оказался инициатором, — a или b.
+	waitLong(t, 15*time.Second, func() bool { return alog.has("не нашёлся") || blog.has("не нашёлся") }, "попытка не закончилась")
 	if peerStatus(a, bIP).Direct {
 		t.Fatal("прямое соединение сквозь жёсткий NAT?")
 	}

@@ -53,6 +53,7 @@ type demoBackend struct {
 	nets     []*MeshNetwork
 	servers  []MeshServer
 	self     meshsvc.Self
+	known    []meshsvc.KnownServer // серверы, которые панель советует устройствам (ТЗ 12)
 	capacity int
 
 	meshdStarted int64
@@ -879,6 +880,22 @@ func (d *demoBackend) routes() http.Handler {
 	h("/api/mesh/join", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "в режиме показа сервер остаётся главным"})
 	})
+	h("/api/mesh/known", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Servers []meshsvc.KnownServer `json:"servers"`
+		}
+		if !decodePost(w, r, &req) {
+			return
+		}
+		for _, k := range req.Servers {
+			if err := validHost(strings.TrimSpace(k.Host)); err != nil {
+				replyErr(w, err, nil)
+				return
+			}
+		}
+		d.known = append([]meshsvc.KnownServer{}, req.Servers...)
+		writeJSON(w, http.StatusOK, ok)
+	})
 	h("/api/mesh/serveraccess", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Enabled bool   `json:"enabled"`
@@ -1217,6 +1234,12 @@ func (d *demoBackend) state() MeshState {
 	if d.oldMeshd {
 		st.Version = "1.6.0 (старая)"
 	}
+	// Другие серверы сети по рассказам устройств: у Амстердама правила
+	// доступа другие — панель должна это сказать.
+	st.Peers = []meshsvc.SeenServer{
+		{ID: "ams01", Name: "Амстердам", Pol: "a1b2c3", Same: false, Devices: 2, LastSeen: time.Now().Unix()},
+	}
+	st.Known = append([]meshsvc.KnownServer{}, d.known...)
 	self := d.self
 	st.Self = &self
 	for _, n := range d.nets {
