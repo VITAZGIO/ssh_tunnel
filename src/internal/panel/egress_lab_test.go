@@ -55,7 +55,10 @@ func labSnapshot(t *testing.T) string {
 	var b strings.Builder
 	for _, c := range []string{
 		"ip -4 rule", "ip -6 rule",
-		"ip -4 route show table all", "ip -6 route show table all | grep -v '^ff00::/8\\|^multicast'",
+		"ip -4 route show table all",
+		// Адреса fe80:: появляются у карт сами через секунды после подъёма
+		// (DAD) — к выходу сервера отношения не имеют.
+		"ip -6 route show table all | grep -v 'fe80::\\|^ff00::/8\\|^multicast'",
 		"nft list ruleset",
 		"sysctl net.ipv4.conf.all.src_valid_mark net.ipv4.conf.all.rp_filter net.ipv4.conf.default.rp_filter net.ipv4.ip_forward",
 		"ls /etc/systemd/system | grep ssh_tunnel_egress || true",
