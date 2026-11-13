@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -475,9 +474,11 @@ func (t *Tunnel) StartCore() error {
 	// Пока идёт первое подключение с запасным путём «без сервера», его
 	// «ошибка» экрану не нужна: если сервер не ответит, туннель всё равно
 	// поднимется (без него), и состояние скажем в конце.
-	var quiet atomic.Bool
-	quiet.Store(mc != nil)
-	go t.forwardEvents(ch, unsub, stop, cb, &quiet)
+	var unquiet chan struct{}
+	if mc != nil {
+		unquiet = make(chan struct{})
+	}
+	go t.forwardEvents(ch, unsub, stop, cb, unquiet)
 
 	tun := tunnel.New(cfg, bus)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -510,7 +511,9 @@ func (t *Tunnel) StartCore() error {
 			bus.Warnf("Сервер недоступен (%v) — сеть устройств работает без него, сервер ищу в фоне", serverErr)
 		}
 	}
-	quiet.Store(false)
+	if unquiet != nil {
+		close(unquiet)
+	}
 	t.mu.Lock()
 	t.startCancel = nil
 	t.mu.Unlock()
@@ -671,33 +674,54 @@ func (t *Tunnel) StartStack(tunFD int, mtu int) error {
 }
 
 // forwardEvents перекладывает события ядра на экран приложения.
-// quiet — пока true, состояния не передаются (см. StartCore), строки
-// журнала — передаются.
-func (t *Tunnel) forwardEvents(ch <-chan events.Event, unsub func(), stop <-chan struct{}, cb Callbacks, quiet *atomic.Bool) {
+// unquiet — пока канал не закрыт, состояния не передаются (см. StartCore),
+// строки журнала — передаются; nil — передаётся всё сразу. Закрытие канала
+// разбирается здесь же, по порядку с событиями: сначала всё, что уже лежит
+// в очереди (шина кладёт события синхронно, значит всё опубликованное до
+// закрытия уже там), и только потом состояния начинают доходить до экрана.
+// Флаг, снимаемый из другого потока, этого порядка не давал: «error» первой
+// попытки мог проскочить на экран.
+func (t *Tunnel) forwardEvents(ch <-chan events.Event, unsub func(), stop <-chan struct{}, cb Callbacks, unquiet <-chan struct{}) {
 	defer unsub()
 	if cb == nil {
 		return
+	}
+	quiet := unquiet != nil
+	handle := func(ev events.Event) {
+		switch ev.Kind {
+		case events.KindState:
+			if !quiet {
+				cb.OnState(ev.State, ev.Detail, ev.ErrorKind)
+			}
+		case events.KindLog:
+			cb.OnLog(ev.Text)
+		case events.KindConn:
+			cb.OnLog(describeConn(ev))
+		}
 	}
 
 	for {
 		select {
 		case <-stop:
 			return
+		case <-unquiet:
+			for drained := false; !drained; {
+				select {
+				case ev, ok := <-ch:
+					if !ok {
+						return
+					}
+					handle(ev)
+				default:
+					drained = true
+				}
+			}
+			quiet, unquiet = false, nil
 		case ev, ok := <-ch:
 			if !ok {
 				return
 			}
-			switch ev.Kind {
-			case events.KindState:
-				if quiet != nil && quiet.Load() {
-					continue
-				}
-				cb.OnState(ev.State, ev.Detail, ev.ErrorKind)
-			case events.KindLog:
-				cb.OnLog(ev.Text)
-			case events.KindConn:
-				cb.OnLog(describeConn(ev))
-			}
+			handle(ev)
 		}
 	}
 }
