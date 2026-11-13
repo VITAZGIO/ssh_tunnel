@@ -46,6 +46,14 @@ type sys struct {
 	v6     bool   // у интерфейса есть IPv6 — маршруты ::/1 ставить есть куда
 	full   bool   // стоят маршруты всего интернета (обход блокировок включён)
 
+	// egressTable — своя таблица маршрутов для 0/1,128/1,::/1,8000::/1
+	// вместо main (см. egress_linux.go): так работает выход самого сервера
+	// через другой сервер (ТЗ 10) — таблица main и её настоящий маршрут по
+	// умолчанию при этом не трогаются вовсе, панель сервера строит вокруг
+	// этой таблицы свои правила ip rule. 0 — обычный режим (маршруты в
+	// main, как на устройстве).
+	egressTable int
+
 	// Настоящая сеть для маршрутов к прямым адресам и серверу (pins_linux.go):
 	// номер карты и роутер.
 	idx4, idx6 int
@@ -59,7 +67,7 @@ type sys struct {
 }
 
 func newSys(bus *events.Bus) *sys {
-	s := &sys{bus: bus}
+	s := &sys{bus: bus, egressTable: egressTableFromEnv()}
 	// Прошлый запуск мог упасть, не вернув /etc/resolv.conf, — возвращаем
 	// сразу, до всего остального.
 	if restoreResolvConf() {
@@ -236,7 +244,7 @@ func (s *sys) configureRoutes(full bool) error {
 func (s *sys) setInternetRoutes(on bool) error {
 	link := s.link
 	route := func(r netip.Prefix) *netlink.Route {
-		return &netlink.Route{LinkIndex: link.Attrs().Index, Dst: prefixNet(r)}
+		return &netlink.Route{LinkIndex: link.Attrs().Index, Dst: prefixNet(r), Table: s.egressTable}
 	}
 	if !on {
 		for _, r := range append(append([]netip.Prefix{}, routes4...), routes6...) {
@@ -262,6 +270,15 @@ func (s *sys) setInternetRoutes(on bool) error {
 }
 
 func (s *sys) configureDNS(full bool) error {
+	if s.egressTable != 0 {
+		// Выход сервера через другой сервер: DNS-запросы хоста идут как
+		// самые обычные соединения — через правила ip rule панели в нашу
+		// таблицу, а дальше туда же, куда и весь остальной трафик (на B).
+		// Резолвер и /etc/resolv.conf хоста не трогаем вовсе: это не
+		// сетевой адаптер пользователя, которому нужен свой DNS внутри сети
+		// устройств.
+		return nil
+	}
 	switch {
 	case hasResolved():
 		// systemd-resolved: DNS на нашем интерфейсе. При обходе блокировок —
