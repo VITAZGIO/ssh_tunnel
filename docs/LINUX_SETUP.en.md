@@ -240,9 +240,14 @@ containers with three buttons each: **like the computer** (default), **via
 the server**, **direct**. A compose project switches as a whole; the label
 `ssh_tunnel.route=tunnel|direct|host` in `compose.yaml` wins over the buttons.
 
-- "Via the server" never goes around: tunnel off, reconnecting or the
-  program crashed — the container has no internet; its DNS also goes only
-  into the tunnel.
+- "Via the server" is strict and never goes around: tunnel off,
+  reconnecting, the seconds after "Turn off" or the program crashed — the
+  container has no internet; "always direct" and per-program rules do not
+  apply to it; its DNS also goes only into the tunnel and is resolved via the
+  server.
+- The **"no VPN — no internet"** checkbox on a "via the server" container:
+  no internet with the VPN off and with the program not running (without it
+  a VPN turned off puts the container back to "like the computer").
 - The home network, the machine itself, neighbouring containers and ports
   published to the home network (`-p`) work with any choice. A port forwarded
   on the router to the internet does not work for a "via the server"
@@ -253,8 +258,15 @@ the server**, **direct**. A compose project switches as a whole; the label
 - Needs access to the `/var/run/docker.sock` socket (the VPN version has it —
   it runs as root); the `docker` program is not needed.
 - How it works: `ip rule from <container address>` rules into tables
-  7094–7096, priorities 9400–9401 (`ip rule`, `ip route show table 7094`).
-  Turn the VPN or the app off — they are removed.
+  7094–7096, priorities 9400–9401 (9402–9403 with "no VPN — no internet";
+  `ip rule`, `ip route show table 7094`). "Via the server" containers skip
+  Docker's address rewriting (chain `SSH_TUNNEL_DOCKER` in
+  `iptables -t nat`): the program recognises their connections by the
+  address. Turn the VPN or the app off — they are removed (except those with
+  the checkbox).
+- Tested on a real kernel: the `netns-lab` GitHub build sets up a lab of
+  network namespaces with its own Docker and runs all of this with
+  `rp_filter` 0, 1 and 2 (`test/netns/`).
 
 From the command line:
 
@@ -262,6 +274,7 @@ From the command line:
 ssh_tunnel_linux docker
 ssh_tunnel_linux docker set container=qbittorrent route=tunnel
 ssh_tunnel_linux docker set project=media route=direct
+ssh_tunnel_linux docker set container=qbittorrent strict=true
 ```
 
 ---

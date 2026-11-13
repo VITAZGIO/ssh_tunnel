@@ -15,7 +15,8 @@
 #
 # RP — rp_filter во всех пространствах (0, 1 или 2).
 
-set -euo pipefail
+set -eEuo pipefail
+trap 'echo "::error::стенд упал: ${BASH_SOURCE[0]##*/}:$LINENO: $BASH_COMMAND"' ERR
 
 LAB=${LAB:-/tmp/sshlab}
 RP=${RP:-2}
@@ -118,7 +119,7 @@ CFG
 
 start_b() {
   ns b /usr/sbin/sshd -f "$LAB/sshd_config" -E "$LAB/sshd_b.log"
-  eventually 10 ns b sh -c 'exec 3<>/dev/tcp/203.0.113.20/22'
+  eventually 10 ns b bash -c 'exec 3<>/dev/tcp/203.0.113.20/22'
 }
 
 # Убить B: sshd и все его сеансы (сервер «упал»).
