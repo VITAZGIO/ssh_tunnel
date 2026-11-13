@@ -418,3 +418,53 @@ func TestAdmitЗакрываетЧужиеСоединения(t *testing.T) {
 		t.Fatalf("опознанное соединение не ответило: %v", err)
 	}
 }
+
+// Выйти из папки плагина нельзя: ни «..» в пути файла, ни чужой id сети.
+func TestНельзяВыйтиЗаПапку(t *testing.T) {
+	h := newTestHost(t)
+	on := true
+	if _, err := h.SetConfig(nodeapi.ConfigPatch{Files: &on, FilesWrite: &on, Mirror: &on}); err != nil {
+		t.Fatal(err)
+	}
+	netID := strings.Repeat("4", 64)
+	srv := serverFor(h, nodeapi.PluginFiles, nodeapi.Caller{Net: netID, Device: "pc", Host: "pc"})
+	defer srv.Close()
+
+	outside := filepath.Join(h.opt.Dir, "nets", "evil.txt")
+	for _, p := range []string{"/../evil.txt", "/../../evil.txt", `/..\..\evil.txt`} {
+		req, _ := http.NewRequest(http.MethodPut, srv.URL+"/put?s=server&off=0&done=1&p="+p, strings.NewReader("x"))
+		resp, err := srv.Client().Do(req)
+		if err == nil {
+			resp.Body.Close()
+		}
+	}
+	if _, err := os.Stat(outside); err == nil {
+		t.Fatal("файл записан вне общей папки")
+	}
+	if _, err := os.Stat(filepath.Join(h.opt.Dir, "evil.txt")); err == nil {
+		t.Fatal("файл записан в корень данных")
+	}
+
+	// Зеркальная папка: путь с «..» сервер не принимает.
+	f, err := h.AddFolder(nodeapi.FolderReq{Net: netID, Name: "П"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := serverFor(h, nodeapi.PluginMirror, nodeapi.Caller{Net: netID, Device: "pc", Host: "pc"})
+	defer ms.Close()
+	hash := strings.Repeat("a", 64)
+	req, _ := http.NewRequest(http.MethodPut, ms.URL+"/put?f="+f.ID+"&p=../../evil.txt&hash="+hash+"&off=0", strings.NewReader("x"))
+	resp, err := ms.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		t.Fatal("загрузка с «..» принята")
+	}
+
+	// Неверный id сети (путь на диске) — отказ.
+	if _, err := h.netFor("../" + netID); err == nil {
+		t.Fatal("принят id сети с «..»")
+	}
+}
