@@ -20,9 +20,44 @@ through): in its panel, «Plugins» tab → «Mirrored folders» → «Add folde
 That way the folder stays in sync even when no two devices are ever online
 together — the VPS is always reachable.
 
+## Who sees a folder
+
+Like Syncthing: **a new device of the network sees no folders until you
+tick them for it.**
+
+1. On the folder server — the **«Access»** tab: every device of the network,
+   servers first, then the rest, alphabetically. Offline devices are listed
+   too (greyed), so access can be given in advance. On the right — how many
+   folders each one sees.
+2. Tap a device → tick folders. A tick is saved at once; «All» and «None»
+   do it in one go.
+3. A new device is not listed yet — «Refresh».
+
+On the «Sharing» tab each folder says which devices see it.
+
+Untick — syncing of that folder stops on the device with «the owner closed
+access to the folder», **its files stay where they are**. Tick again —
+syncing continues from the same point; what is already there is not
+downloaded again.
+
+Access belongs to the device, not to its address or name: renamed or
+readdressed — access stays. A device that was removed in the panel and
+comes back with a new id is a new device.
+
+**Upgrading cuts nobody off:** folders shared before this version are first
+visible to everyone, as before. As soon as the network starts naming
+devices (a new `meshd` on the network server), every device known at that
+moment gets those folders; after that, only by ticks. A new folder is
+visible to nobody until you tick it.
+
+Folders on the rented server («Plugins» → «Mirrored folders») work the same:
+in the panel under the folders, «Who sees the folders» → «Folders…» at a
+device.
+
 ## Connect a folder on another device
 
-1. Add the app. The **«Folders»** tab shows «Server found».
+1. Add the app. The **«Folders»** tab shows «Server found» — once the owner
+   has ticked at least one folder for this device.
 2. Pick **where to keep** the folder on this device and the mode.
 3. «Connect».
 
@@ -44,7 +79,7 @@ transferred, different ones become conflict copies — nothing is overwritten.
 
 Each folder shows «in sync», «N files waiting» (e.g. the server is
 unreachable — edits queue up and go out by themselves, even after a day
-and a reboot) or «conflict».
+and a reboot), «conflict» or «the owner closed access to the folder».
 
 ## Conflicts
 

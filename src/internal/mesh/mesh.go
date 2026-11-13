@@ -95,6 +95,9 @@ func randomString(n int) string {
 
 // Peer — устройство сети.
 type Peer struct {
+	// ID — постоянный id устройства (ТЗ 18, PeerID): адрес и имя меняются,
+	// он — нет. Пусто — старый meshd.
+	ID       string     `json:"id,omitempty"`
 	Name     string     `json:"name"`
 	Host     string     `json:"host"`
 	IP       netip.Addr `json:"ip"`
@@ -303,6 +306,7 @@ type wire struct {
 	Host     string     `json:"host,omitempty"`
 	From     string     `json:"from,omitempty"`
 	FromHost string     `json:"fromHost,omitempty"`
+	FromID   string     `json:"fromId,omitempty"` // ТЗ 18, новый meshd
 	Peers    []wirePeer `json:"peers,omitempty"`
 
 	Platform string `json:"platform,omitempty"`
@@ -332,6 +336,7 @@ type wire struct {
 }
 
 type wirePeer struct {
+	ID       string       `json:"id,omitempty"`
 	Name     string       `json:"name"`
 	Host     string       `json:"host"`
 	IP       string       `json:"ip"`
@@ -525,7 +530,7 @@ func (c *Client) loadState() {
 		if err != nil {
 			continue
 		}
-		c.status.Peers = append(c.status.Peers, Peer{Name: p.Name, Host: p.Host, IP: ip, Platform: p.Platform,
+		c.status.Peers = append(c.status.Peers, Peer{ID: p.ID, Name: p.Name, Host: p.Host, IP: ip, Platform: p.Platform,
 			OS: p.OS, Via: p.Via, LastSeen: p.LastSeen, Self: ip == self})
 	}
 }
@@ -1027,7 +1032,7 @@ func (c *Client) setPeers(l *srvLink, list []wirePeer) {
 	cached := make([]cachedPeer, 0, len(st.Peers))
 	now := time.Now().Unix()
 	for _, pr := range st.Peers {
-		cp := cachedPeer{IP: pr.IP.String(), Host: pr.Host, Name: pr.Name, Platform: pr.Platform,
+		cp := cachedPeer{ID: pr.ID, IP: pr.IP.String(), Host: pr.Host, Name: pr.Name, Platform: pr.Platform,
 			OS: pr.OS, Via: pr.Via, LastSeen: pr.LastSeen}
 		if pr.Online {
 			cp.LastSeen = now
@@ -1084,14 +1089,20 @@ func (c *Client) rebuildLocked() {
 				order = append(order, wp.IP)
 			}
 			if e.p.Host == "" || (live && !e.live) {
-				last := e.p.LastSeen
-				e.p = Peer{Name: wp.Name, Host: wp.Host, IP: ip, LastSeen: wp.LastSeen,
+				last, id := e.p.LastSeen, e.p.ID
+				e.p = Peer{ID: wp.ID, Name: wp.Name, Host: wp.Host, IP: ip, LastSeen: wp.LastSeen,
 					Platform: wp.Platform, OS: wp.OS, Via: wp.Via}
 				if last > e.p.LastSeen {
 					e.p.LastSeen = last
 				}
+				if e.p.ID == "" {
+					e.p.ID = id // этот сервер — старый meshd, id знает другой
+				}
 			} else if wp.LastSeen > e.p.LastSeen {
 				e.p.LastSeen = wp.LastSeen
+			}
+			if e.p.ID == "" {
+				e.p.ID = wp.ID
 			}
 			if live {
 				e.live = true
@@ -1166,6 +1177,18 @@ func (c *Client) updateStateLocked() {
 }
 
 // hostOf — имя устройства с адресом ip (без «.mesh»), "" — не знаем.
+// idOf — постоянный id устройства с адресом ip (из списка от meshd) или "".
+func (c *Client) idOf(ip string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, p := range c.status.Peers {
+		if p.IP.String() == ip {
+			return p.ID
+		}
+	}
+	return ""
+}
+
 func (c *Client) hostOf(ip string) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1183,6 +1206,7 @@ func (c *Client) Status() Status {
 	defer c.mu.Unlock()
 	c.updateStateLocked()
 	st := c.status
+	st.Self.ID = PeerID(c.cfg.DeviceID)
 	st.Peers = make([]Peer, len(c.status.Peers))
 	copy(st.Peers, c.status.Peers)
 	seen := map[string]bool{}
@@ -1365,7 +1389,7 @@ func (c *Client) DialPeer(target string) (net.Conn, error) {
 		// Сам к себе — незачем гонять через сервер.
 		if h := service(port); h != nil {
 			c.mu.Lock()
-			me := Caller{IP: self.String(), Host: c.status.Self.Host}
+			me := Caller{IP: self.String(), Host: c.status.Self.Host, ID: PeerID(c.cfg.DeviceID)}
 			c.mu.Unlock()
 			return localService(h, me), nil
 		}
@@ -1530,7 +1554,13 @@ func (c *Client) incoming(l *srvLink, m wire) {
 	var local net.Conn
 	var err error
 	if h != nil {
-		local = localService(h, Caller{IP: m.From, Host: m.FromHost})
+		// id звонящего ставит новый meshd; старый (через этот сервер) — нет,
+		// тогда по адресу из общего списка (его мог прислать другой сервер).
+		id := m.FromID
+		if id == "" {
+			id = c.idOf(m.From)
+		}
+		local = localService(h, Caller{IP: m.From, Host: m.FromHost, ID: id})
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		local, err = c.LocalDial(ctx, m.Port)

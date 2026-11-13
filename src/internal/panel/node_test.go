@@ -64,6 +64,9 @@ type fakeNodeAPI struct {
 	folders map[string][]nodeapi.Folder
 	cleared []string
 	down    bool
+	// ТЗ 18: что просили сделать с доступом к папкам.
+	access   []nodeapi.AccessReq
+	migrated []nodeapi.MigrateReq
 }
 
 func newFakeNodeAPI() *fakeNodeAPI {
@@ -127,6 +130,43 @@ func (a *fakeNodeAPI) ClearClipboard(_ context.Context, netID string) error {
 }
 
 func (a *fakeNodeAPI) DeleteBackup(context.Context, nodeapi.BackupReq) error { return nil }
+
+func (a *fakeNodeAPI) SetFolderAccess(_ context.Context, r nodeapi.AccessReq) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.access = append(a.access, r)
+	for i, f := range a.folders[r.Net] {
+		if r.Folder != "*" && f.ID != r.Folder {
+			continue
+		}
+		devs := []string{}
+		for _, d := range f.Devices {
+			if d != r.Device {
+				devs = append(devs, d)
+			}
+		}
+		if r.On {
+			devs = append(devs, r.Device)
+		}
+		a.folders[r.Net][i].Devices, a.folders[r.Net][i].Old = devs, false
+	}
+	return nil
+}
+
+func (a *fakeNodeAPI) MigrateAccess(_ context.Context, r nodeapi.MigrateReq) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.migrated = append(a.migrated, r)
+	for i, f := range a.folders[r.Net] {
+		if f.Old {
+			for _, d := range r.Devices {
+				a.folders[r.Net][i].Devices = append(a.folders[r.Net][i].Devices, d.ID)
+			}
+			a.folders[r.Net][i].Old = false
+		}
+	}
+	return nil
+}
 
 func (a *fakeNodeAPI) DeleteNet(_ context.Context, netID string) error {
 	a.mu.Lock()

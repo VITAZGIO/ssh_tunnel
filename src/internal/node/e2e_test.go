@@ -245,6 +245,21 @@ func TestСквозьНастоящийMeshd(t *testing.T) {
 	os.WriteFile(filepath.Join(pcDir, "заметка.md"), []byte("написано на ПК"), 0o644)
 	repPC := &mirror.Replica{Folder: f.ID, Path: pcDir, Mode: mirror.ModeBoth, Device: "pc",
 		State: filepath.Join(t.TempDir(), "pc.json"), R: &mirror.Remote{Base: base(nodeapi.PortMirror), HC: pc.hc}}
+	// ТЗ 18: новая папка ни для кого — пока не отметили, ПК её не видит.
+	if fs, err := repPC.R.Folders(ctx); err != nil || len(fs) != 0 {
+		t.Fatalf("неотмеченный ПК видит папки: %v %v", fs, err)
+	}
+	if _, err := repPC.Sync(ctx, 0, false); !mirror.Closed(err) || repPC.Status().State != "closed" {
+		t.Fatalf("неотмеченный ПК: %v %+v", err, repPC.Status())
+	}
+	if b, _ := os.ReadFile(filepath.Join(pcDir, "заметка.md")); string(b) != "написано на ПК" {
+		t.Fatal("закрытая папка тронула файл на устройстве")
+	}
+	// Галочка — по id, который назвал meshd (op who), тот же, что видят
+	// устройства в списке.
+	if err := h.SetFolderAccess(nodeapi.AccessReq{Net: netID, Folder: f.ID, Device: nodeapi.PeerID(pcID), On: true}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := repPC.Sync(ctx, 0, false); err != nil {
 		t.Fatalf("зеркало ПК: %v", err)
 	}
@@ -272,6 +287,34 @@ func TestСквозьНастоящийMeshd(t *testing.T) {
 	phDir := t.TempDir()
 	repPh := &mirror.Replica{Folder: f.ID, Path: phDir, Mode: mirror.ModeBoth, Device: "phone",
 		State: filepath.Join(t.TempDir(), "ph.json"), R: &mirror.Remote{Base: base(nodeapi.PortMirror), HC: phone.hc}}
+	// Телефон появился позже — не видит ничего, пока не отметили.
+	if _, err := repPh.Sync(ctx, 0, false); !mirror.Closed(err) {
+		t.Fatalf("неотмеченный телефон: %v", err)
+	}
+	phID := ""
+	cmu.Lock()
+	for id, c := range callers {
+		if c.Name == "Телефон" && c.Net == netID {
+			phID = id
+		}
+	}
+	cmu.Unlock()
+	// Устройства видят друг друга с тем же id, что у сервера (новый meshd).
+	sawPC := false
+	for _, p := range phone.c.Status().Peers {
+		if p.Name == "ПК" {
+			sawPC = p.ID == nodeapi.PeerID(pcID) && p.ID != ""
+		}
+	}
+	if phID == "" || !sawPC || phone.c.Status().Self.ID != nodeapi.PeerID(phID) {
+		t.Fatalf("id устройств: телефон %q, ПК в списке %v: %+v", phID, sawPC, phone.c.Status())
+	}
+	if err := h.SetFolderAccess(nodeapi.AccessReq{Net: netID, Folder: f.ID, Device: nodeapi.PeerID(phID), On: true}); err != nil {
+		t.Fatal(err)
+	}
+	if st := h.State(); len(st.Networks[0].Folders[0].Devices) != 2 {
+		t.Fatalf("кому видна папка: %+v", st.Networks[0].Folders)
+	}
 	if _, err := repPh.Sync(ctx, 0, false); err != nil {
 		t.Fatalf("зеркало телефона: %v", err)
 	}

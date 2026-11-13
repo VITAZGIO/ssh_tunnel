@@ -854,7 +854,7 @@ func (p *p2p) handleStream(peerIP string, conn quic.Connection, str quic.Stream)
 	var local net.Conn
 	var err error
 	if h != nil {
-		local = localService(h, Caller{IP: peerIP, Host: p.c.hostOf(peerIP)})
+		local = localService(h, Caller{IP: peerIP, Host: p.c.hostOf(peerIP), ID: p.c.idOf(peerIP)})
 	} else {
 		ctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
 		local, err = p.c.LocalDial(ctx, port)

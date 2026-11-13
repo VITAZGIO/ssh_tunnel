@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -36,6 +37,9 @@ type Hub struct {
 	Room func(folder string, used int64) (left int64, why string)
 	// OnUsage — занятое место папки изменилось на delta байт (сразу).
 	OnUsage func(folder string, delta int64)
+	// Visible — видна ли папка тому, кто пришёл (ТЗ 18, access.go); nil —
+	// всем. Невидимая папка во всём протоколе — как несуществующая.
+	Visible func(r *http.Request, folder string) bool
 
 	mu      sync.Mutex
 	folders map[string]*hfolder
@@ -185,6 +189,10 @@ func (h *Hub) folder(id string) (*hfolder, error) {
 	}
 	return f, nil
 }
+
+// Changed будит долгие опросы: изменился доступ (Visible) — пусть
+// ожидающие запросы перепроверят его сразу.
+func (h *Hub) Changed() { h.changed() }
 
 // changed будит долгие опросы.
 func (h *Hub) changed() {

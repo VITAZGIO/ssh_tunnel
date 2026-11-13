@@ -108,6 +108,7 @@ type netData struct {
 
 	mu       sync.Mutex
 	hub      *mirror.Hub
+	acl      *mirror.Access // кому видна каждая папка (ТЗ 18)
 	mirrorH  http.Handler
 	board    *clipshare.ServerBoard
 	filesH   http.Handler
@@ -465,9 +466,18 @@ func (h *Host) hubOf(nd *netData) (*mirror.Hub, http.Handler, error) {
 	nd.mu.Lock()
 	defer nd.mu.Unlock()
 	if nd.hub == nil {
+		acl, err := h.aclLocked(nd)
+		if err != nil {
+			return nil, nil, err
+		}
 		hub, err := mirror.OpenHub(filepath.Join(nd.dir, "mirror", "hub"), "сервер")
 		if err != nil {
 			return nil, nil, err
+		}
+		// Доступ по устройствам: кто пришёл — из meshd (op who), id
+		// устройства в meshd → PeerID, как его видят устройства.
+		hub.Visible = func(r *http.Request, folder string) bool {
+			return acl.Allowed(folder, nodeapi.PeerID(callerOf(r).Device))
 		}
 		// Квота — в самом сервере папок: проверка до записи и точный учёт
 		// сразу после неё (и при копии уже лежащего содержимого).
@@ -483,6 +493,94 @@ func (h *Host) hubOf(nd *netData) (*mirror.Hub, http.Handler, error) {
 		})
 	}
 	return nd.hub, nd.mirrorH, nil
+}
+
+// aclLocked — список доступа к папкам сети (под nd.mu). Папки, которые
+// уже были до первого открытия (обновление на ТЗ 18), — старые: видны
+// всем до MigrateAccess.
+func (h *Host) aclLocked(nd *netData) (*mirror.Access, error) {
+	if nd.acl != nil {
+		return nd.acl, nil
+	}
+	var ids []string
+	for _, f := range h.folders(nd.id) {
+		ids = append(ids, f.ID)
+	}
+	acl, err := mirror.OpenAccess(filepath.Join(nd.dir, "mirror", "access.json"), ids)
+	if err != nil {
+		return nil, err
+	}
+	nd.acl = acl
+	return acl, nil
+}
+
+func (h *Host) aclOf(nd *netData) (*mirror.Access, error) {
+	nd.mu.Lock()
+	defer nd.mu.Unlock()
+	return h.aclLocked(nd)
+}
+
+// SetFolderAccess — галочка устройства у папки сети (Folder "*" — у всех).
+func (h *Host) SetFolderAccess(req nodeapi.AccessReq) error {
+	nd, err := h.netFor(req.Net)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	if req.Folder == "*" {
+		for _, f := range h.folders(nd.id) {
+			ids = append(ids, f.ID)
+		}
+	} else if f, ok := h.folder(nd.id, req.Folder); ok {
+		ids = []string{f.ID}
+	} else {
+		return errors.New("нет такой папки")
+	}
+	acl, err := h.aclOf(nd)
+	if err != nil {
+		return err
+	}
+	for _, f := range ids {
+		if err := acl.Set(f, req.Device, req.Name, req.On); err != nil {
+			return err
+		}
+	}
+	h.wakeMirror(nd)
+	return nil
+}
+
+// MigrateAccess — правило обновления: старые папки сети получают все
+// устройства, которые сейчас знает meshd (их передаёт панель).
+func (h *Host) MigrateAccess(req nodeapi.MigrateReq) error {
+	nd, err := h.netFor(req.Net)
+	if err != nil {
+		return err
+	}
+	acl, err := h.aclOf(nd)
+	if err != nil {
+		return err
+	}
+	var known []mirror.Known
+	for _, d := range req.Devices {
+		known = append(known, mirror.Known{ID: d.ID, Name: d.Name})
+	}
+	did, err := acl.Migrate(known)
+	if did {
+		h.wakeMirror(nd)
+		h.event(nodeapi.Event{Plugin: nodeapi.PluginMirror, Net: nd.id,
+			Text: fmt.Sprintf("доступ к прежним папкам выдан %d устройствам сети", len(known))})
+	}
+	return err
+}
+
+// wakeMirror — доступ изменился: ждущие запросы устройств перепроверят его.
+func (h *Host) wakeMirror(nd *netData) {
+	nd.mu.Lock()
+	hub := nd.hub
+	nd.mu.Unlock()
+	if hub != nil {
+		hub.Changed()
+	}
 }
 
 // backupOf — резервные копии сети; открываются при первом обращении.
@@ -834,8 +932,15 @@ func (h *Host) State() nodeapi.State {
 			by[k] = v
 		}
 		nd.mu.Unlock()
+		var acl *mirror.Access
+		if len(h.folders(id)) > 0 {
+			acl, _ = h.aclOf(nd)
+		}
 		for _, f := range h.folders(id) {
-			out := nodeapi.Folder{ID: f.ID, Name: f.Name, QuotaMB: f.QuotaMB, UsedBytes: by[f.ID]}
+			out := nodeapi.Folder{ID: f.ID, Name: f.Name, QuotaMB: f.QuotaMB, UsedBytes: by[f.ID], Devices: []string{}}
+			if acl != nil {
+				out.Devices, out.Old = acl.Devices(f.ID), acl.IsOld(f.ID)
+			}
 			if hub != nil {
 				if rep, err := hub.Index(f.ID, 0, 0, nil); err == nil {
 					for _, fi := range rep.Files {
@@ -977,6 +1082,9 @@ func (h *Host) RemoveFolder(req nodeapi.FolderReq) error {
 	}
 	if err := hub.RemoveFolder(f.ID); err != nil {
 		return err
+	}
+	if acl, err := h.aclOf(nd); err == nil {
+		_ = acl.Remove(f.ID)
 	}
 	h.mu.Lock()
 	list := h.conf.Folders[nd.id]
@@ -1155,6 +1263,20 @@ func (h *Host) ControlHandler() http.Handler {
 			return nil, err
 		}
 		return ok, h.DeleteNet(req.Net)
+	})
+	post("/folder/access", func(b []byte) (any, error) {
+		var req nodeapi.AccessReq
+		if err := json.Unmarshal(b, &req); err != nil {
+			return nil, err
+		}
+		return ok, h.SetFolderAccess(req)
+	})
+	post("/folder/migrate", func(b []byte) (any, error) {
+		var req nodeapi.MigrateReq
+		if err := json.Unmarshal(b, &req); err != nil {
+			return nil, err
+		}
+		return ok, h.MigrateAccess(req)
 	})
 	post("/clipboard/clear", func(b []byte) (any, error) {
 		var req struct {

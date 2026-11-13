@@ -135,6 +135,9 @@
   .nrow .grow{flex:1;min-width:150px}
   .nrow .sub{color:var(--dim);font-size:12px;font-family:var(--mono)}
   .nrow input[type=number]{width:96px}
+  .accbox{display:flex;flex-direction:column;gap:2px;padding:4px 0 8px 12px;border-bottom:1px solid var(--line)}
+  .acchk{display:flex;gap:8px;align-items:center;font-size:13px;padding:4px 0;cursor:pointer}
+  .acchk input{width:18px;height:18px;margin:0;flex:none}
   .nsec{margin-top:12px;font-size:12px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
   .card.gone{border-color:var(--warn)}
   .acts{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--dim);margin:2px 0 4px}
@@ -1756,6 +1759,16 @@ const I18N = {
     folder_remove:'Убрать', folder_remove_data:'и данные',
     confirm_folder_remove:'Убрать папку «{n}» с сервера? Устройства перестанут синхронизироваться через неё.',
     confirm_folder_remove_data:'Убрать папку «{n}» с сервера и стереть её данные? Отменить это будет нельзя.',
+    node_access_title:'Кому видны папки',
+    node_access_hint:'Новое устройство сети не видит папок сервера, пока его не отметят. Галочка сохраняется сразу; снятая — останавливает синхронизацию у устройства, его файлы остаются.',
+    node_access_nomeshd:'meshd не ответил — список устройств сети не узнать. Галочки появятся, когда он ответит.',
+    node_access_nodev:'В этой сети пока нет устройств.',
+    node_access_old:'Папки с прошлой версии видны всем устройствам сети. Как только meshd назовёт устройства, каждое известное сейчас получит к ним доступ, дальше — только по галочкам.',
+    node_access_old_one:'сейчас видна всем',
+    node_access_online:'в сети', node_access_offline:'не в сети', node_access_gone:'нет в meshd',
+    node_access_count:'папок: {n} из {m}', node_access_edit:'Папки…', node_access_hide:'Скрыть',
+    node_access_all:'Все', node_access_none:'Ни одной', node_access_failed:'Не сохранилось',
+    node_visible_to:'видна: ', node_visible_none:'не видна ни одному устройству', node_visible_all:'видна всем (прошлая версия)',
     node_clipboard_title:'Общий буфер', clip_items:'записей', clip_devices:'устройств знают',
     clip_clear:'Очистить буфер',
     confirm_clip_clear:'Стереть историю общего буфера этой сети на сервере? Отменить это будет нельзя.',
@@ -2132,6 +2145,16 @@ const I18N = {
     folder_remove:'Remove', folder_remove_data:'and data',
     confirm_folder_remove:'Remove the folder "{n}" from the server? Devices will stop syncing through it.',
     confirm_folder_remove_data:'Remove the folder "{n}" from the server and delete its data? This cannot be undone.',
+    node_access_title:'Who sees the folders',
+    node_access_hint:'A new device of the network sees no server folders until it is ticked. A tick is saved at once; removing it stops syncing on that device, its files stay.',
+    node_access_nomeshd:'meshd did not answer — the device list is unknown. Ticks appear once it answers.',
+    node_access_nodev:'No devices in this network yet.',
+    node_access_old:'Folders from the previous version are visible to every device of the network. Once meshd names the devices, each device known at that moment gets them; after that, only by ticks.',
+    node_access_old_one:'visible to all now',
+    node_access_online:'online', node_access_offline:'offline', node_access_gone:'not in meshd',
+    node_access_count:'folders: {n} of {m}', node_access_edit:'Folders…', node_access_hide:'Hide',
+    node_access_all:'All', node_access_none:'None', node_access_failed:'Not saved',
+    node_visible_to:'visible to: ', node_visible_none:'visible to no device', node_visible_all:'visible to all (previous version)',
     node_clipboard_title:'Shared clipboard', clip_items:'items', clip_devices:'devices known',
     clip_clear:'Clear clipboard',
     confirm_clip_clear:'Erase this network\'s clipboard history on the server? This cannot be undone.',
@@ -4806,6 +4829,74 @@ function nodeRow(main, sub){
   return row;
 }
 
+// ---- Доступ к зеркальным папкам сервера (ТЗ 18) ----
+const NODE_ACC_OPEN = {}; // «сеть/устройство» → открыт список папок
+
+function nodeVisibleTo(n, f){
+  if (f.old) return t('node_visible_all');
+  const ds = f.devices || [];
+  if (!ds.length) return t('node_visible_none');
+  const devs = (NODE.access || {})[n.id] || [];
+  return t('node_visible_to') + ds.map(id => { const d = devs.find(x => x.id === id); return d ? d.name : id; }).join(', ');
+}
+
+async function nodeSetAccess(n, f, d, on){
+  const {ok, data} = await api('/api/node/folder/access', {net: n.id, folder: f, device: d.id, on});
+  if (!ok){ toast(t('node_access_failed') + ': ' + (data.error || t('err_internal')), 'err'); return false; }
+  return true;
+}
+
+function renderNodeAccess(n, card){
+  const folders = n.folders || [];
+  if (!folders.length) return;
+  card.appendChild(el('div', 'nsec', t('node_access_title')));
+  const devs = (NODE.access || {})[n.id];
+  if (!devs){ card.appendChild(el('p', 'note', t('node_access_nomeshd'))); return; }
+  card.appendChild(el('p', 'note', t('node_access_hint')));
+  if (folders.some(f => f.old)) card.appendChild(el('div', 'msg warn', t('node_access_old')));
+  if (!devs.length){ card.appendChild(el('p', 'note', t('node_access_nodev'))); return; }
+  devs.forEach(d => {
+    const key = n.id + '/' + d.id;
+    const state = d.gone ? t('node_access_gone') : (d.online ? t('node_access_online') : t('node_access_offline'));
+    const row = nodeRow(d.name, state + ' · ' + t('node_access_count').replace('{n}', d.folders).replace('{m}', folders.length));
+    if (!d.online) row.style.opacity = '.65';
+    const btn = el('button', 'btn ghost small', NODE_ACC_OPEN[key] ? t('node_access_hide') : t('node_access_edit'));
+    btn.addEventListener('click', () => { NODE_ACC_OPEN[key] = !NODE_ACC_OPEN[key]; renderNode(); });
+    row.appendChild(btn);
+    card.appendChild(row);
+    if (!NODE_ACC_OPEN[key]) return;
+    const box = el('div', 'accbox');
+    folders.forEach(f => {
+      const lab = document.createElement('label');
+      lab.className = 'acchk';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !f.old && (f.devices || []).includes(d.id);
+      lab.appendChild(cb);
+      lab.appendChild(el('span', '', f.name + (f.old ? ' — ' + t('node_access_old_one') : '')));
+      // Галочка — свой запрос сразу; не сохранилось — вернуть как было.
+      cb.addEventListener('change', async () => {
+        const want = cb.checked;
+        cb.disabled = true;
+        const ok = await nodeSetAccess(n, f.id, d, want);
+        cb.disabled = false;
+        if (!ok){ cb.checked = !want; return; }
+        cb.blur();
+        loadNode();
+      });
+      box.appendChild(lab);
+    });
+    const bar = el('div', 'row-inline');
+    [['node_access_all', true], ['node_access_none', false]].forEach(([k, on]) => {
+      const b = el('button', 'btn ghost small', t(k));
+      b.addEventListener('click', async () => { if (await nodeSetAccess(n, '*', d, on)) loadNode(); });
+      bar.appendChild(b);
+    });
+    box.appendChild(bar);
+    card.appendChild(box);
+  });
+}
+
 function renderNodeNet(n){
   const gone = netGone(n.id);
   const card = el('div', 'card' + (gone ? ' gone' : ''));
@@ -4857,6 +4948,7 @@ function renderNodeNet(n){
       if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
       loadNode();
     });
+    row.querySelector('.grow').appendChild(el('div', 'sub', nodeVisibleTo(n, f)));
     row.appendChild(q);
     row.appendChild(save);
     row.appendChild(rm);
@@ -4892,6 +4984,7 @@ function renderNodeNet(n){
     form.appendChild(addBtn);
     card.appendChild(form);
   }
+  if (!gone) renderNodeAccess(n, card);
 
   if (n.filesBytes){
     card.appendChild(el('div', 'nsec', t('node_files_title')));

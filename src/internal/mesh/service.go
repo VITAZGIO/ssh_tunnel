@@ -1,6 +1,8 @@
 package mesh
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"sync"
 )
@@ -17,6 +19,20 @@ import (
 type Caller struct {
 	IP   string // адрес в сети устройств, 198.19.x.y
 	Host string // имя без «.mesh»
+	// ID — постоянный id устройства (PeerID): адрес и имя могут смениться,
+	// он — нет. Пусто — не узнать (старый meshd и устройства нет в списке).
+	ID string
+}
+
+// PeerID — постоянный id устройства, который видят другие устройства
+// (ТЗ 18): хеш от id устройства (Config.DeviceID), а не он сам — тот служит
+// устройству паролем у meshd. Так же считает cmd/meshd (peerID).
+func PeerID(device string) string {
+	if device == "" {
+		return ""
+	}
+	h := sha256.Sum256([]byte("ssh_tunnel peer v1\x00" + device))
+	return hex.EncodeToString(h[:12])
 }
 
 // ServiceFunc обслуживает одно соединение и закрывает его.

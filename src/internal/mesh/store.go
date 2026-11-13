@@ -141,6 +141,7 @@ func certFor(priv ed25519.PrivateKey) (tls.Certificate, string, error) {
 
 // cachedPeer — что помним об устройстве сети.
 type cachedPeer struct {
+	ID       string `json:"id,omitempty"` // PeerID, от нового meshd (ТЗ 18)
 	IP       string `json:"ip"`
 	Host     string `json:"host"`
 	Name     string `json:"name,omitempty"`
