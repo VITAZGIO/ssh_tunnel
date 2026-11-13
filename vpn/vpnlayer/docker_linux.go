@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -28,9 +29,21 @@ import (
 //   - программа упала — правила остаются, а маршрут через исчезнувший
 //     адаптер ядро снимает само: в таблицах остаётся unreachable, мимо
 //     туннеля контейнеры «через сервер» не выходят;
-//   - следующий запуск — оставшееся не трогаем до первого apply (иначе
-//     открылось бы окно обхода, пока программа подключается); если адаптер
-//     так и не поднялся за staleGrace — снимаем, как было до программы.
+//   - следующий запуск — оставшееся не трогаем, пока плагин не сообщил
+//     адреса контейнеров (иначе открылось бы окно обхода, пока программа
+//     подключается); если адаптер так и не поднялся за staleGrace — снимаем
+//     обычные правила, как было до программы;
+//   - галочка «без VPN — без интернета» (приоритеты 9402/9403): правила
+//     этих контейнеров остаются и без адаптера, и после выхода программы —
+//     в таблицах тогда только throw локальных сетей и unreachable.
+//
+// Строгий «через сервер» (ТЗ 14): пакеты таких контейнеров идут в адаптер со
+// своим адресом источника — Docker не подменяет его (MASQUERADE) благодаря
+// нашей цепочке в таблице nat (natChain). По адресу стек узнаёт, что
+// соединение обязано идти только через сервер (core.Conn.Forced): к нему не
+// применяются «всегда напрямую», слив после «Выключить» и DNS настоящей
+// сети. Ответы стек шлёт на адрес контейнера; ядро пересылает их в мост
+// Docker (conntrack: это ответ на соединение, начатое из моста).
 
 // staleGrace — сколько ждать первого подъёма адаптера, прежде чем снять
 // правила, оставшиеся от упавшего запуска.
@@ -41,12 +54,26 @@ type dockerKernel struct {
 
 	mu      sync.Mutex
 	targets []docker.Target
+	known   bool // плагин уже сообщил адреса (SetTargets)
 	up      bool
 	full    bool
 	touched bool // после запуска уже был apply или close
 	rules   int
 	lastErr string
+
+	// forced — адреса контейнеров «через сервер», идущие в адаптер со своим
+	// адресом (Plan.Forced); читается стеком на каждое соединение.
+	forced atomic.Pointer[map[netip.Addr]bool]
 }
+
+// isForced — источник обязан идти только через сервер.
+func (k *dockerKernel) isForced(a netip.Addr) bool {
+	m := k.forced.Load()
+	return m != nil && (*m)[a.Unmap()]
+}
+
+// forcedSource — для стека (tunnel.Config.ForcedSource).
+func (s *sys) forcedSource(a netip.Addr) bool { return s.dk != nil && s.dk.isForced(a) }
 
 func newDockerKernel(s *sys) *dockerKernel {
 	k := &dockerKernel{s: s}
@@ -55,10 +82,15 @@ func newDockerKernel(s *sys) *dockerKernel {
 		time.AfterFunc(staleGrace, func() {
 			k.mu.Lock()
 			defer k.mu.Unlock()
-			if !k.touched {
-				k.clearLocked()
-				s.bus.Infof("Docker: VPN так и не поднялся — правила контейнеров от прошлого запуска сняты")
+			if k.up {
+				return
 			}
+			if k.known {
+				k.reconcileLocked()
+			} else if err := dropNonStrict(); err != nil {
+				s.bus.Warnf("Docker: снять правила прошлого запуска не вышло: %v", err)
+			}
+			s.bus.Infof("Docker: VPN так и не поднялся — правила контейнеров от прошлого запуска сняты (кроме «без VPN — без интернета»)")
 		})
 	}
 	return k
@@ -68,8 +100,8 @@ func newDockerKernel(s *sys) *dockerKernel {
 func (k *dockerKernel) SetTargets(ts []docker.Target) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.targets = ts
-	if k.up {
+	k.targets, k.known = ts, true
+	if k.touched {
 		k.reconcileLocked()
 	}
 }
@@ -86,15 +118,23 @@ func (k *dockerKernel) onApply(full bool) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.up, k.full, k.touched = true, full, true
-	k.reconcileLocked()
+	if k.known {
+		k.reconcileLocked()
+	}
 }
 
-// onClose — адаптер выключается: снять всё.
+// onClose — адаптер выключается: снять всё, кроме «без VPN — без
+// интернета».
 func (k *dockerKernel) onClose() {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.up, k.full, k.touched = false, false, true
-	k.clearLocked()
+	k.forced.Store(nil)
+	if k.known {
+		k.reconcileLocked()
+	} else {
+		k.clearLocked()
+	}
 }
 
 func (k *dockerKernel) net() docker.Net {
@@ -115,8 +155,19 @@ func (k *dockerKernel) net() docker.Net {
 }
 
 func (k *dockerKernel) reconcileLocked() {
-	p := docker.KernelPlan(k.targets, k.net())
-	err := applyDockerPlan(p)
+	n := k.net()
+	if !k.up {
+		n = docker.Net{}
+	}
+	p := docker.KernelPlan(k.targets, n)
+	// Сначала адреса для стека и исключение из подмены, потом маршруты:
+	// контейнер, пришедший в адаптер, уже узнаётся.
+	m := map[netip.Addr]bool{}
+	for _, a := range p.Forced {
+		m[a] = true
+	}
+	k.forced.Store(&m)
+	err := errors.Join(applyNAT(p.Forced, linuxIfName), applyDockerPlan(p))
 	k.rules = len(p.Rules)
 	msg := ""
 	if err != nil {
@@ -129,7 +180,8 @@ func (k *dockerKernel) reconcileLocked() {
 }
 
 func (k *dockerKernel) clearLocked() {
-	if err := applyDockerPlan(docker.Plan{}); err != nil {
+	k.forced.Store(nil)
+	if err := errors.Join(applyNAT(nil, linuxIfName), applyDockerPlan(docker.Plan{})); err != nil {
 		k.s.bus.Warnf("Docker: снять правила контейнеров не вышло: %v", err)
 	}
 	k.rules = 0
@@ -331,5 +383,34 @@ func applyDockerPlan(p docker.Plan) error {
 			errs = append(errs, fmt.Errorf("снять маршрут table %d %s: %w", r.Table, r.Dst, err))
 		}
 	}
+	return errors.Join(errs...)
+}
+
+// dropNonStrict — снять правила прошлого запуска, кроме «без VPN — без
+// интернета»; если таких не осталось — и маршруты наших таблиц.
+func dropNonStrict() error {
+	var errs []error
+	strict := 0
+	for _, fam := range []int{netlink.FAMILY_V4, netlink.FAMILY_V6} {
+		rs, _ := netlink.RuleList(fam)
+		for _, r := range rs {
+			if !ours(r.Table) {
+				continue
+			}
+			if docker.StrictPrio(r.Priority) {
+				strict++
+				continue
+			}
+			r := r
+			r.Family = fam
+			if err := netlink.RuleDel(&r); err != nil && !errors.Is(err, syscall.ENOENT) {
+				errs = append(errs, err)
+			}
+		}
+	}
+	if strict == 0 {
+		errs = append(errs, applyDockerPlan(docker.Plan{}))
+	}
+	errs = append(errs, applyNAT(nil, linuxIfName))
 	return errors.Join(errs...)
 }

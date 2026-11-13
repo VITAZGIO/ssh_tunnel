@@ -120,6 +120,11 @@ type Config struct {
 	// а на Windows программу-владельца видно по порту, как и у прокси.
 	TunProcessRules bool
 
+	// ForcedSource — соединения из стека с этого адреса источника обязаны
+	// идти только через сервер (контейнер Docker «через сервер», Linux):
+	// ядро получает их с core.Conn.Forced. nil — таких адресов нет.
+	ForcedSource func(src netip.Addr) bool
+
 	// OwnerOf — чьё соединение из стека (proto 6 — TCP, 17 — UDP; src —
 	// адрес приложения, dst — куда оно шло). Только для учёта трафика по
 	// программам на телефоне (ConnectivityManager.getConnectionOwnerUid);

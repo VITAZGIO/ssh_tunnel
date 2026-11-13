@@ -1,0 +1,81 @@
+# Стенд на настоящем ядре Linux (ТЗ 14): выход сервера через другой сервер
+# (ТЗ 10) и Docker (ТЗ 7) проверяются по-настоящему — сетевые пространства
+# имён и пары veth вместо машин, настоящие ip rule / nftables / iptables /
+# systemd, настоящий sshd и настоящий ssh_tunnel_vpn_linux. Наружу стенд не
+# ходит: «интернет» — пространство inet (test/netns/lab.sh).
+#
+# Матрица: rp_filter 0, 1 и 2 — у серверов и домашних машин бывает любой.
+name: netns-lab
+
+on:
+  push:
+    branches: ["claude/**"]
+    paths:
+      - "vpn/vpnlayer/**"
+      - "vpn/cmd/**"
+      - "src/internal/docker/**"
+      - "src/internal/panel/egress*"
+      - "src/internal/core/**"
+      - "src/internal/tunnel/**"
+      - "android/core/*.go"
+      - "test/netns/**"
+      - ".github/workflows/netns-lab.yml"
+  pull_request:
+    paths:
+      - "vpn/vpnlayer/**"
+      - "vpn/cmd/**"
+      - "src/internal/docker/**"
+      - "src/internal/panel/egress*"
+      - "src/internal/core/**"
+      - "src/internal/tunnel/**"
+      - "android/core/*.go"
+      - "test/netns/**"
+      - ".github/workflows/netns-lab.yml"
+  workflow_dispatch:
+
+jobs:
+  lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [egress, docker]
+        rp: [0, 1, 2]
+    name: ${{ matrix.suite }} (rp_filter=${{ matrix.rp }})
+    env:
+      LAB: /tmp/sshlab
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - name: Собрать клиент VPN, labd и тест панели
+        run: |
+          mkdir -p "$LAB"
+          ( cd vpn && CGO_ENABLED=0 go build -o "$LAB/ssh_tunnel_vpn_linux" ./cmd/ssh_tunnel_vpn_linux )
+          ( cd test/netns/labd && CGO_ENABLED=0 go build -o "$LAB/labd" . )
+          ( cd src && go test -c -tags netnslab -o "$LAB/panel.test" ./internal/panel )
+
+      - name: Пакеты
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq openssh-server nftables iptables jq curl >/dev/null
+          uname -a; nft --version; iptables --version; docker --version; systemctl --version | head -1
+
+      - name: Образ busybox
+        if: matrix.suite == 'docker'
+        run: docker pull -q busybox:1.36
+
+      - name: Стенд
+        run: sudo --preserve-env=LAB RP=${{ matrix.rp }} bash test/netns/${{ matrix.suite }}.sh
+
+      - name: Журналы стенда
+        if: always()
+        run: |
+          sudo tail -n 200 "$LAB"/*.log 2>/dev/null || true
+          sudo journalctl -u 'ssh_tunnel_egress*' --no-pager -n 200 2>/dev/null || true

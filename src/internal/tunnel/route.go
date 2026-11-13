@@ -50,13 +50,20 @@ func (t *Tunnel) Rules() core.Rules { return t.rules() }
 // Адрес, выданный нашим DNS «настоящим» под имя из «всегда напрямую»,
 // сверяется со списками по этому имени (см. LearnDirect).
 func (t *Tunnel) decide(process, target string) (core.Route, core.Conn) {
-	return t.decideNamed(process, target, "")
+	return t.decideNamed(process, target, "", false)
+}
+
+// forced — источник из стека обязан идти только через сервер
+// (Config.ForcedSource).
+func (t *Tunnel) forced(src netip.Addr) bool {
+	f := t.cfg.ForcedSource
+	return f != nil && src.IsValid() && f(src.Unmap())
 }
 
 // decideNamed — то же, но имя соединения уже известно (из его первых байтов,
 // см. sniff.go): оно точнее таблицы, где на один адрес CDN бывает много имён.
-func (t *Tunnel) decideNamed(process, target, name string) (core.Route, core.Conn) {
-	c := core.Conn{Process: process, Target: target, Name: name}
+func (t *Tunnel) decideNamed(process, target, name string, forced bool) (core.Route, core.Conn) {
+	c := core.Conn{Process: process, Target: target, Name: name, Forced: forced}
 	if c.Name == "" {
 		if learned, ok := t.learnedName(target); ok {
 			c.Name = learned
@@ -290,14 +297,15 @@ func (c *pinnedConn) CloseWrite() error {
 func (t *Tunnel) RouteUDP(src netip.AddrPort, target string, byIP bool, first []byte) func(app net.Conn) {
 	var proc string
 	var pid int
-	if t.cfg.TunProcessRules {
+	forced := t.forced(src.Addr())
+	if t.cfg.TunProcessRules && !forced {
 		proc, pid = procinfo.LookupUDP(src.Port())
 	}
 	var name string
 	if byIP && t.sniffWanted(target) {
 		name = core.SniffQUIC(first)
 	}
-	route, c := t.decideNamed(proc, target, name)
+	route, c := t.decideNamed(proc, target, name, forced)
 	switch route {
 	case core.RouteDirect:
 		return func(app net.Conn) { t.serveUDPDirect(app, c, proc, pid, byIP, t.udpOwner(proc, src)) }

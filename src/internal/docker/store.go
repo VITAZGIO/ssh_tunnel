@@ -10,17 +10,26 @@ import (
 
 // Store — выбор человека на диске (docker.json в папке настроек).
 type Store struct {
-	mu   sync.Mutex
-	path string
-	ch   Choices
+	mu     sync.Mutex
+	path   string
+	ch     Choices
+	strict map[string]bool // ключ контейнера → «без VPN — без интернета»
 }
 
 // OpenStore читает выбор из dir (пусто, если файла ещё нет).
 func OpenStore(dir string) *Store {
-	s := &Store{path: filepath.Join(dir, "docker.json"), ch: Choices{}}
+	s := &Store{path: filepath.Join(dir, "docker.json"), ch: Choices{}, strict: map[string]bool{}}
 	if b, err := os.ReadFile(s.path); err == nil {
 		var f struct {
-			Choices Choices `json:"choices"`
+			Choices Choices         `json:"choices"`
+			Strict  map[string]bool `json:"strict"`
+		}
+		if json.Unmarshal(b, &f) == nil {
+			for k, v := range f.Strict {
+				if v {
+					s.strict[k] = true
+				}
+			}
 		}
 		if json.Unmarshal(b, &f) == nil && f.Choices != nil {
 			for k, v := range f.Choices {
@@ -42,6 +51,29 @@ func (s *Store) Get() Choices {
 		out[k] = v
 	}
 	return out
+}
+
+// Strict — копия галочек «без VPN — без интернета».
+func (s *Store) Strict() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]bool, len(s.strict))
+	for k := range s.strict {
+		out[k] = true
+	}
+	return out
+}
+
+// SetStrict — галочка «без VPN — без интернета» для контейнера c.
+func (s *Store) SetStrict(c Container, on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if on {
+		s.strict[c.Key()] = true
+	} else {
+		delete(s.strict, c.Key())
+	}
+	return s.saveLocked()
 }
 
 // SetContainer — выбор для контейнера c. «Как сам компьютер» хранится явно,
@@ -88,8 +120,9 @@ func (s *Store) SetProject(project string, v Choice) error {
 
 func (s *Store) saveLocked() error {
 	b, _ := json.MarshalIndent(struct {
-		Choices Choices `json:"choices"`
-	}{s.ch}, "", "  ")
+		Choices Choices         `json:"choices"`
+		Strict  map[string]bool `json:"strict,omitempty"`
+	}{s.ch, s.strict}, "", "  ")
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return err
 	}

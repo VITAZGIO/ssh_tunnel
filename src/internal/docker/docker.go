@@ -67,6 +67,9 @@ type Container struct {
 	// Parent — чью сеть делит контейнер (NetMode "container"): ID или имя.
 	Parent   string    `json:"parent,omitempty"`
 	Networks []Network `json:"networks"`
+	// Published — у контейнера есть порты, опубликованные на компьютере
+	// (`-p`).
+	Published bool `json:"published,omitempty"`
 }
 
 // Network — сеть Docker, в которой стоит контейнер, и его адреса в ней.
@@ -111,6 +114,21 @@ type Row struct {
 	Why string `json:"why,omitempty"`
 	// WhyEn — то же по-английски.
 	WhyEn string `json:"whyEn,omitempty"`
+	// Strict — галочка «без VPN — без интернета» (действует только при
+	// «через сервер»): и при выключенном человеком VPN, и после выхода
+	// программы правила остаются, интернета у контейнера нет.
+	Strict bool `json:"strict"`
+	// StrictSet — галочка поставлена (даже если сейчас не «через сервер»).
+	StrictSet bool `json:"strictSet,omitempty"`
+}
+
+// ApplyStrict отмечает в строках галочку «без VPN — без интернета» по ключу
+// контейнера (Container.Key). Действует только у «через сервер».
+func ApplyStrict(rows []Row, strict map[string]bool) {
+	for i := range rows {
+		rows[i].StrictSet = strict[rows[i].Key()]
+		rows[i].Strict = rows[i].StrictSet && rows[i].Effective == ChoiceTunnel && rows[i].Switchable
+	}
 }
 
 // Resolve — что действует для каждого контейнера. Порядок: метка
@@ -210,7 +228,7 @@ func Targets(rows []Row) []Target {
 			for _, a := range []netip.Addr{n.IP, n.IP6} {
 				if a.IsValid() && !a.IsUnspecified() && !seen[a] {
 					seen[a] = true
-					out = append(out, Target{Addr: a, Route: r.Effective})
+					out = append(out, Target{Addr: a, Route: r.Effective, Strict: r.Strict && r.Effective == ChoiceTunnel})
 				}
 			}
 		}
