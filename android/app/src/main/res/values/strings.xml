@@ -16,6 +16,12 @@
     <string name="conn_err_refused">Порт закрыт или SSH на сервере не запущен.</string>
     <string name="conn_err_other_prefix">Ответ сервера: %1$s</string>
 
+    <!-- Уведомление, когда включена только сеть устройств (ТЗ 11): как она
+         живёт — те же слова, что на экране «Сеть устройств». -->
+    <string name="mesh_notice_online">Сеть устройств: в сети, через сервер</string>
+    <string name="mesh_notice_local">Без сервера, напрямую: %1$d</string>
+    <string name="mesh_notice_none">Нет связи, соседей не видно</string>
+
     <string name="stop">Выключить</string>
 
     <string name="need_settings">Заполните адрес сервера, пользователя и ключ</string>
