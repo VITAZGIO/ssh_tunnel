@@ -69,6 +69,13 @@ func startMeshdAdmin(t *testing.T) (string, string) {
 // годится: пока meshd стартует, порт успевает занять тест другого пакета.
 func runMeshd(t *testing.T, bin, state string, extra ...string) string {
 	t.Helper()
+	addr, _ := runMeshdCmd(t, bin, state, extra...)
+	return addr
+}
+
+// runMeshdCmd — то же, но отдаёт и сам процесс (чтобы его убить).
+func runMeshdCmd(t *testing.T, bin, state string, extra ...string) (string, *exec.Cmd) {
+	t.Helper()
 	cmd := exec.Command(bin, append([]string{"-listen", "127.0.0.1:0", "-state", state}, extra...)...)
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
@@ -89,10 +96,10 @@ func runMeshd(t *testing.T, bin, state string, extra ...string) string {
 	}()
 	select {
 	case addr := <-found:
-		return addr
+		return addr, cmd
 	case <-time.After(10 * time.Second):
 		t.Fatal("meshd не поднялся")
-		return ""
+		return "", nil
 	}
 }
 

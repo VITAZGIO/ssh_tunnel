@@ -157,6 +157,11 @@ type cachedPeer struct {
 	// LastSeen — когда устройство последний раз было на связи (unix, с):
 	// по серверу или по прямому соединению.
 	LastSeen int64 `json:"lastSeen,omitempty"`
+	// Только у самого устройства (Self): с какого времени оно держит адрес
+	// (unix) и имя из панели с его временем — ТЗ 12, см. cmd/meshd.
+	Since  int64  `json:"since,omitempty"`
+	Alias  string `json:"alias,omitempty"`
+	AliasT int64  `json:"aliasT,omitempty"`
 }
 
 type cacheFile struct {
@@ -238,6 +243,18 @@ func (pc *peerCache) setList(self cachedPeer, list []cachedPeer) (removed []stri
 	}
 	pc.data.Self, pc.data.Peers = self, next
 	return removed
+}
+
+// setSelf — адрес, имя и давность самого устройства.
+func (pc *peerCache) setSelf(self cachedPeer) {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if self.IP != pc.data.Self.IP {
+		self.LastSeen = time.Now().Unix()
+	} else {
+		self.LastSeen = pc.data.Self.LastSeen
+	}
+	pc.data.Self = self
 }
 
 // worked — прямой путь к устройству ip работает: запомнить отпечаток и

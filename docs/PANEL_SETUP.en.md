@@ -193,6 +193,20 @@ deny login without removing the key from the panel's storage), disconnect
 (kill current sessions without touching the key), and delete (erase the
 user and key for good).
 
+## Device network
+
+"Settings" → "Network server": installs the panel's own `meshd`. A network can
+have any number of servers and none is the main one: each runs its own
+`meshd`, devices stay connected to every server they have a profile for (same
+network key). "Networks" → "Servers of the network": this server, other
+servers of the network as reported by devices (and whether their access rules
+are the same), servers the panel suggests to devices. Access rules, the
+journal, names and removal apply to this server only — the panel says so. The
+old way — a "secondary" server forwarding to another one's `meshd` — still
+works and is marked "old way"; to move off it: "Settings" → "Switch to an own
+network service". Details and the upgrade order for several servers — in
+[MESH.md](MESH.md) (Russian).
+
 ## Server plugins
 
 The "Plugins" tab: the server itself joins the device network — mirrored

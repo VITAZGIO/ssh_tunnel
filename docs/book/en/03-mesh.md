@@ -29,6 +29,22 @@ forwarding on the router is needed.
 - Devices connect **directly** when possible (faster), otherwise via the
   server.
 
+## Several servers
+
+A network can have several servers and none of them is the main one. To make a
+server part of the network, add its profile on the device with the same network
+key and the device network on — the device then stays connected to all such
+servers at once (to the extra ones with a light connection, no internet
+traffic through them). If one server goes down, connections go through
+another server both devices share; direct connections notice nothing.
+
+- A device on two servers is listed once, with the same address and name on
+  both.
+- If there is no shared live server, the app says so: "no common server: it is
+  connected via …".
+- Access rules, the journal and removal are per server. If the servers have
+  different rules, the panel says so: make them the same.
+
 ## If the server is unreachable
 
 Home internet is down or the server is off — devices that have already
