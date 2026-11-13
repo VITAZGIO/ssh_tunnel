@@ -51,6 +51,9 @@ type Server struct {
 	settings *SettingsStore
 	mesh     *MeshManager
 	node     *NodeManager
+	// egress — выход этого сервера через другой сервер (ТЗ 10). Тоже может
+	// быть nil (тесты): тогда его ручки отвечают, что недоступны.
+	egress *EgressManager
 
 	// dataDir — папка данных панели: сюда скачивается обновление и
 	// сохраняются сессии на время перезапуска (selfupdate.go). Пусто —
@@ -121,6 +124,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/update/progress", s.requireAuth(s.handleUpdateProgress))
 	s.meshRoutes(mux)
 	s.nodeRoutes(mux)
+	s.egressRoutes(mux)
 	s.diagRoutes(mux)
 	return mux
 }

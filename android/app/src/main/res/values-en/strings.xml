@@ -16,6 +16,11 @@
     <string name="conn_err_refused">The port is closed, or SSH is not running on the server.</string>
     <string name="conn_err_other_prefix">Server response: %1$s</string>
 
+    <!-- Notification when only the device network is on (ТЗ 11). -->
+    <string name="mesh_notice_online">Device network: online, through the server</string>
+    <string name="mesh_notice_local">No server, direct: %1$d</string>
+    <string name="mesh_notice_none">No connection, no neighbours in sight</string>
+
     <string name="stop">Disconnect</string>
 
     <string name="need_settings">Fill in the server address, user and key</string>

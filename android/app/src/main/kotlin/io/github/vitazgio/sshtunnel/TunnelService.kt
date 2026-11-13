@@ -6,9 +6,14 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.VpnService
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
@@ -45,6 +50,18 @@ class TunnelService : VpnService(), Callbacks {
         /** Состояние и журнал для экрана: служба живёт отдельно от него. */
         @Volatile var state: String = "stopped"
         @Volatile var detail: String = ""
+
+        /**
+         * Туннель поднят без сервера ради сети устройств (ТЗ 11): почему
+         * сервер не ответил (текст как есть и код причины, см.
+         * mobile.ServerDownKind). Большая кнопка показывает это ошибкой, как
+         * на ПК; сеть устройств при этом работает. Пусто — сервер был на связи.
+         */
+        @Volatile var serverDown: String = ""
+        @Volatile var serverDownKind: String = ""
+
+        /** Сеть устройств одной строкой (mobile.MeshSummary). */
+        @Volatile var meshSummary: String = """{"state":"off"}"""
         @Volatile var statsJson: String = "{}"
         val log = ArrayDeque<String>()
 
@@ -159,6 +176,29 @@ class TunnelService : VpnService(), Callbacks {
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var lastNetwork: Network? = null
 
+    // ---------- Wi-Fi для сети устройств (ТЗ 11) ----------
+    //
+    // Отдельно от основной сети: дома без интернета Android уводит основную
+    // сеть на мобильную, а соседи по сети устройств — в Wi-Fi. Сокет прямых
+    // соединений привязывается к Wi-Fi (bindLAN), а при смене Wi-Fi клиент
+    // сети пересоздаётся (mobile.LANChanged).
+    @Volatile private var wifiNetwork: Network? = null
+    private var wifiCallback: ConnectivityManager.NetworkCallback? = null
+
+    /**
+     * Без MulticastLock Android отбрасывает широковещательные пакеты, пока
+     * экран выключен, — маяки соседей не доходят. Держим его только пока он
+     * нужен: сервера нет, кого-то из знакомых устройств не видно и телефон в
+     * Wi-Fi (см. updateMulticast).
+     */
+    private var multicastLock: WifiManager.MulticastLock? = null
+
+    /** Экран включился — сервер ищется сразу, а не по таймеру. */
+    private var screenReceiver: BroadcastReceiver? = null
+
+    /** Последний текст уведомления: обновляем, только когда он сменился. */
+    private var lastNotice = ""
+
     private fun accumulateBlockedTotal() {
         val s = activeSettings ?: return
         val blocked = try {
@@ -199,9 +239,111 @@ class TunnelService : VpnService(), Callbacks {
         // для исходящих соединений, а не появление любой сети в принципе
         // (второй Wi-Fi без интернета и подобное подняли бы лишний Kick).
         cm.registerDefaultNetworkCallback(cb)
+        registerWifiCallback(cm)
+        registerScreenReceiver()
+    }
+
+    private fun registerWifiCallback(cm: ConnectivityManager) {
+        if (wifiCallback != null) return
+        // Текущий Wi-Fi — сразу, до первого сокета: иначе первый вызов
+        // onAvailable выглядел бы сменой сети и зря пересоздал бы клиента.
+        @Suppress("DEPRECATION")
+        wifiNetwork = cm.allNetworks.firstOrNull {
+            cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        }
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                if (wifiNetwork == network) return
+                wifiNetwork = network
+                lanChanged("Wi-Fi появился")
+            }
+
+            override fun onLost(network: Network) {
+                if (wifiNetwork != network) return
+                wifiNetwork = null
+                lanChanged("Wi-Fi пропал")
+            }
+        }
+        wifiCallback = cb
+        // Без требования «интернет проверен» (VALIDATED): домашний Wi-Fi с
+        // вынутым кабелем нам как раз и нужен.
+        val req = NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build()
+        try {
+            cm.registerNetworkCallback(req, cb)
+        } catch (e: Exception) {
+            wifiCallback = null
+            Log.w(TAG, "Wi-Fi: ${e.message}")
+        }
+    }
+
+    private fun lanChanged(why: String) {
+        onLog("сеть устройств: $why — пересобираю прямые соединения")
+        // Остановка клиента ждёт его соединения — не в потоке системы.
+        Thread {
+            try {
+                tunnel.lanChanged()
+            } catch (e: Exception) {
+                Log.w(TAG, "lanChanged: ${e.message}")
+            }
+        }.start()
+        ticker.post { updateMulticast() }
+    }
+
+    private fun registerScreenReceiver() {
+        if (screenReceiver != null) return
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                // Сервер ищется в фоне с паузой до ~30 секунд; человек взял
+                // телефон — пробуем сразу. Живую связь не трогаем.
+                if (state != "reconnecting") return
+                Thread {
+                    try { tunnel.networkChanged() } catch (_: Exception) {}
+                }.start()
+            }
+        }
+        screenReceiver = r
+        try {
+            registerReceiver(r, IntentFilter(Intent.ACTION_SCREEN_ON))
+        } catch (e: Exception) {
+            screenReceiver = null
+        }
+    }
+
+    /** MulticastLock — только пока нужен (см. multicastLock). */
+    private fun updateMulticast() {
+        val beacons = try { JSONObject(meshSummary).optBoolean("beacons") } catch (_: Exception) { false }
+        val want = beacons && wifiNetwork != null && !stopping && !draining
+        var lock = multicastLock
+        if (want && lock == null) {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
+            lock = wm.createMulticastLock("ssh_tunnel-mesh").apply { setReferenceCounted(false) }
+            multicastLock = lock
+        }
+        try {
+            if (want && lock?.isHeld == false) {
+                lock.acquire()
+                onLog("сеть устройств: ищу соседей маяками, в том числе при выключенном экране")
+            } else if (!want && lock?.isHeld == true) {
+                lock.release()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "MulticastLock: ${e.message}")
+        }
     }
 
     private fun unregisterNetworkCallback() {
+        wifiCallback?.let {
+            wifiCallback = null
+            try { connectivityManager?.unregisterNetworkCallback(it) } catch (_: Exception) {}
+        }
+        wifiNetwork = null
+        screenReceiver?.let {
+            screenReceiver = null
+            try { unregisterReceiver(it) } catch (_: Exception) {}
+        }
+        try {
+            multicastLock?.let { if (it.isHeld) it.release() }
+        } catch (_: Exception) {}
         val cb = networkCallback ?: return
         networkCallback = null
         lastNetwork = null
@@ -230,7 +372,10 @@ class TunnelService : VpnService(), Callbacks {
                 report(now, detail)
             }
             statsJson = try { tunnel.statsJSON() } catch (e: Exception) { "{}" }
+            meshSummary = try { tunnel.meshSummary() } catch (e: Exception) { """{"state":"off"}""" }
             accumulateBlockedTotal()
+            updateMulticast()
+            refreshNotice()
             fireUpdate()
             ticker.postDelayed(this, 1500)
         }
@@ -261,15 +406,17 @@ class TunnelService : VpnService(), Callbacks {
             bypassOn = bypass
             meshOn = mesh
             if (running) {
-                tunnel.setModes(bypass, mesh)
-                onLog(
-                    when {
-                        bypass && mesh -> "обход блокировок и сеть устройств включены"
-                        bypass -> "сеть устройств выключена — обход блокировок работает"
-                        else -> "обход блокировок выключен — сайты идут напрямую, сеть устройств работает"
+                // В потоке: выключение сети устройств ждёт, пока её клиент
+                // закроет соединения.
+                Thread {
+                    val refused = try {
+                        tunnel.setModes(bypass, mesh)
+                        null
+                    } catch (e: Exception) {
+                        e.message ?: "нет связи с сервером"
                     }
-                )
-                fireUpdate()
+                    ticker.post { modesApplied(bypass, mesh, refused) }
+                }.start()
                 return START_STICKY
             }
             // Выключенный туннель — поднимаем с выбранными режимами, как и
@@ -291,11 +438,42 @@ class TunnelService : VpnService(), Callbacks {
         // восстановления связи система заново подтверждает выбор этого
         // приложения как always-on VPN. Такой повторный запуск не должен рвать
         // уже работающее (или ещё поднимающееся) подключение.
-        if (state == "connected" || state == "connecting") {
+        //
+        // «Переподключение» — тоже поднятый туннель: сервер ищется в фоне (в
+        // том числе когда туннель поднят без него ради сети устройств).
+        if (state == "connected" || state == "connecting" || state == "reconnecting") {
             return START_STICKY
         }
         startTunnel()
         return START_STICKY
+    }
+
+    /**
+     * Итог переключения кнопок. refused — обход не включился: туннель поднят
+     * без сервера, а сервер так и не ответил (как на ПК — кнопка гаснет с
+     * ошибкой, сеть устройств работает дальше).
+     */
+    private fun modesApplied(bypass: Boolean, mesh: Boolean, refused: String?) {
+        if (refused != null) {
+            bypassOn = false
+            serverDown = refused
+            serverDownKind = try { tunnel.serverDownKind() } catch (_: Exception) { "" }
+            onLog("обход блокировок не включён: сервер недоступен ($refused)")
+        } else {
+            if (bypass) {
+                serverDown = ""
+                serverDownKind = ""
+            }
+            onLog(
+                when {
+                    bypass && mesh -> "обход блокировок и сеть устройств включены"
+                    bypass -> "сеть устройств выключена — обход блокировок работает"
+                    else -> "обход блокировок выключен — сайты идут напрямую, сеть устройств работает"
+                }
+            )
+        }
+        refreshNotice()
+        fireUpdate()
     }
 
     private fun startTunnel() {
@@ -307,6 +485,8 @@ class TunnelService : VpnService(), Callbacks {
         }
 
         stopping = false
+        serverDown = ""
+        serverDownKind = ""
         activeSettings = settings
         blockedSoFarInSession = 0
         startForeground(NOTIFICATION_ID, notification("подключение…"))
@@ -333,7 +513,8 @@ class TunnelService : VpnService(), Callbacks {
                     settings.udpRelayEnabled,
                 )
                 tunnel.setTunnelHosts(settings.tunnelHosts)
-                tunnel.setModes(bypassOn, meshOn)
+                // До StartCore — только запоминает кнопки, ошибок не бывает.
+                try { tunnel.setModes(bypassOn, meshOn) } catch (_: Exception) {}
                 val prof = settings.active()
                 tunnel.configureMesh(
                     prof.meshEnabled && prof.meshKey.isNotBlank(),
@@ -344,6 +525,17 @@ class TunnelService : VpnService(), Callbacks {
                     !prof.meshDirectOff,
                 )
                 tunnel.startCore()
+                // Сервер не ответил, а сеть устройств нужна: ядро поднялось
+                // без него (ТЗ 11) — обход выключен с ошибкой сервера, сеть
+                // устройств работает, сервер ищется в фоне. Служба при этом
+                // не останавливается.
+                val down = tunnel.serverDownText()
+                if (down.isNotBlank()) {
+                    bypassOn = false
+                    serverDown = down
+                    serverDownKind = tunnel.serverDownKind()
+                    onLog("сервер недоступен ($down) — сеть устройств работает без него")
+                }
                 // «Выключить» нажали, пока подключались: дальше не идём —
                 // иначе интерфейс VPN поднимется уже после остановки и
                 // останется висеть без туннеля.
@@ -524,6 +716,10 @@ class TunnelService : VpnService(), Callbacks {
         ticker.removeCallbacks(poll)
         unregisterNetworkCallback()
         statsJson = "{}"
+        meshSummary = """{"state":"off"}"""
+        serverDown = ""
+        serverDownKind = ""
+        lastNotice = ""
         report(finalState, finalDetail)
         stopForeground(STOP_FOREGROUND_REMOVE)
 
@@ -597,7 +793,7 @@ class TunnelService : VpnService(), Callbacks {
             try {
                 tunnel.updateRouting(settings.directHosts, settings.localViaTunnel)
                 tunnel.setTunnelHosts(settings.tunnelHosts)
-                tunnel.setModes(bypassOn, meshOn)
+                try { tunnel.setModes(bypassOn, meshOn) } catch (_: Exception) { bypassOn = false }
                 tunnel.resume()
                 ticker.post(poll)
             } catch (e: Exception) {
@@ -671,6 +867,23 @@ class TunnelService : VpnService(), Callbacks {
      */
     override fun protect(fd: Long): Boolean = protect(fd.toInt())
 
+    /**
+     * Сокет сети устройств: мимо туннеля и к Wi-Fi, если он есть (см.
+     * wifiNetwork). Нет Wi-Fi — только мимо туннеля, основной сетью.
+     */
+    override fun bindLAN(fd: Long): Boolean {
+        val ok = protect(fd.toInt())
+        val wifi = wifiNetwork ?: return ok
+        try {
+            // fromFd делает копию дескриптора: привязка — свойство самого
+            // сокета, копию закрываем, сокет остаётся у Go.
+            ParcelFileDescriptor.fromFd(fd.toInt()).use { wifi.bindSocket(it.fileDescriptor) }
+        } catch (e: Exception) {
+            Log.w(TAG, "привязка к Wi-Fi: ${e.message}")
+        }
+        return ok
+    }
+
     override fun onState(state: String, detail: String, errorKind: String) {
         // После «Выключить» ядро ещё может прислать «переподключение» —
         // для человека туннель уже выключен, кнопку обратно не красим.
@@ -709,7 +922,33 @@ class TunnelService : VpnService(), Callbacks {
         detail = newDetail
         fireUpdate()
         if (newState != "stopped") {
-            notificationManager().notify(NOTIFICATION_ID, notification(describe(newState, newDetail)))
+            lastNotice = notice()
+            notificationManager().notify(NOTIFICATION_ID, notification(lastNotice))
+        }
+    }
+
+    /** Уведомление — заново, только если текст сменился (опрос раз в 1,5 с). */
+    private fun refreshNotice() {
+        if (state == "stopped" || stopping || draining) return
+        val text = notice()
+        if (text == lastNotice) return
+        lastNotice = text
+        notificationManager().notify(NOTIFICATION_ID, notification(text))
+    }
+
+    /**
+     * Текст уведомления. Обход включён — как раньше (состояние связи). Только
+     * сеть устройств — как она живёт: через сервер / без сервера, напрямую /
+     * нет связи и соседей не видно.
+     */
+    private fun notice(): String {
+        if (bypassOn || !meshOn) return describe(state, detail)
+        val m = try { JSONObject(meshSummary) } catch (_: Exception) { JSONObject() }
+        return when (m.optString("state")) {
+            "online" -> getString(R.string.mesh_notice_online)
+            "local" -> getString(R.string.mesh_notice_local, m.optInt("direct"))
+            "error" -> getString(R.string.mesh_notice_none)
+            else -> describe(state, if (state == "reconnecting") "" else detail)
         }
     }
 

@@ -222,6 +222,30 @@ Until the device network is installed, or its version is too old to answer
 - "Remove" stops and removes the service; data (folders, clipboard) stays
   unless "Also delete plugin data" is checked — that cannot be undone.
 
+## Server egress through another server
+
+**Settings → "Server egress → through server B"**: this server's own
+traffic (package updates, containers, tunnel users exiting here) leaves
+through another ssh_tunnel server. Inbound access (SSH to this server, this
+panel, devices, the device network) is not affected — it keeps answering
+the way it came in.
+
+To turn it on: create a regular client in server B's panel ("Devices →
+Add") and paste its `sshtunnel://…` link here (shown once, right after
+creation). The panel installs a Linux VPN client on this server, the same
+version as itself (from the same GitHub release, checksum verified), checks
+over SSH that server B isn't itself exiting through this server (a loop),
+and applies the routes.
+
+After applying there is a 60-second window to confirm, with a button, that
+the panel still answers (open it in a new tab or on your phone). Without
+confirmation, a separate `systemd` timer — independent of the panel and the
+network — reverts everything, including across a reboot or a crash mid-apply.
+
+If server B goes away, the card picks the behaviour: "no internet" (default
+— inbound still works, this server's own traffic goes nowhere) or "direct
+exit". Details on the client side are in [VPN.md](VPN.md).
+
 ## Removing the panel
 
 ```bash

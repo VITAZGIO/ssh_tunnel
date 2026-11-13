@@ -83,6 +83,12 @@
              overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
              height:16px;line-height:16px}
   .status .d:hover{color:var(--accent)}
+  /* Путь цепочки выхода — не кликабельна (своя подсказка, не проверка IP) и
+     краснеет, когда последний сервер недоступен: это и есть причина, по
+     которой нет интернета, а не общая ошибка связи. */
+  .status .d.exitPath{cursor:default}
+  .status .d.exitPath:hover{color:var(--dim)}
+  .status .d.exitPath.bad{color:var(--err)}
   /* Задержка: цветом, потому что важно не точное число, а «нормально это
      или нет». Зелёный до 100 мс, жёлтый до 250, дальше красный. */
   /* Высота задана всегда, даже когда замера ещё нет. Иначе строка появляется
@@ -219,6 +225,8 @@
   select{width:100%;background:var(--card);border:1px solid var(--line);
          border-radius:8px;padding:7px 9px;color:var(--text);font:inherit}
   select:focus{outline:none;border-color:var(--accent)}
+  .exitChainRow{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:3px}
+  .lbl-row > .lbl{font-size:13px}
   /* Строка настроек, открывающая отдельный экран. */
   .row-link{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
             background:var(--card);border:1px solid var(--line);border-radius:10px;
@@ -762,6 +770,9 @@
         <div class="s" id="stateText" data-i18n="state_stopped">Отключено</div>
         <div class="d" id="stateDetail" title="нажми, чтобы проверить настоящий внешний адрес"
              data-i18n-title="check_ip_hint"></div>
+        <!-- Цепочка выхода (ТЗ 8): путь серверов и, если выключен последний,
+             явное объяснение «интернет выключен цепочкой», а не общая ошибка. -->
+        <div class="d exitPath" id="exitStatus" hidden></div>
         <div class="ping" id="ping"></div>
       </div>
       </div><!-- /.under -->
@@ -1121,6 +1132,24 @@
         ретранслятор на сервере — ставится один раз, в мастере настройки VPS (кнопка «Настроить сервер по SSH»
         в этом же меню). Пока он не установлен, галочка ничего не меняет: UDP по-прежнему не проходит.</p>
     </div>
+
+    <!-- Цепочка выхода (ТЗ 8): подключаемся к этому серверу, а в интернет
+         выходим через один-два следующих. Пустые селекты — «без цепочки».
+         Список заполняется из cfg.profiles, кроме самого правленого сервера
+         (см. fillProfileForm/renderExitChain). -->
+    <div class="lbl-row">
+      <span class="lbl" data-i18n="exit_via">Выход через</span>
+      <span class="infoq" onclick="event.preventDefault();event.stopPropagation();toggleInfoq(this)"
+        >?<span class="tip" data-i18n="exit_via_hint">Подключаемся к этому серверу, а в интернет выходим
+        только через указанный здесь (до двух подряд). Он недоступен — интернета нет: в обход, через
+        этот сервер, трафик не идёт. Сеть устройств цепочку не использует.</span></span>
+    </div>
+    <div class="exitChainRow">
+      <select id="exitHop1"></select>
+      <select id="exitHop2"></select>
+    </div>
+    <span class="hint" id="exitChainStatus" style="display:block;margin:4px 0 0"></span>
+
       <div class="chk-row desk-only" id="autoPickRow" style="display:none">
         <label class="chk"><input type="checkbox" id="autoPickFastest">
           <span class="lbl" data-i18n="auto_pick_fastest">Подключаться к самому быстрому серверу</span>
@@ -2033,6 +2062,12 @@ const I18N = {
       '(быстрый HTTP/3) не проходят через туннель. Эта галочка включает проброс через отдельный '+
       'ретранслятор на сервере — ставится один раз, в мастере настройки VPS (кнопка «Настроить сервер по '+
       'SSH» в этом же меню). Пока он не установлен, галочка ничего не меняет: UDP по-прежнему не проходит.',
+    exit_via:'Выход через', exit_via_none:'— без цепочки —',
+    exit_via_hint:'Подключаемся к этому серверу, а в интернет выходим только через указанный здесь '+
+      '(до двух подряд). Он недоступен — интернета нет: в обход, через этот сервер, трафик не идёт. '+
+      'Сеть устройств цепочку не использует.',
+    exit_via_summary:'Выход:', exit_up_prefix:'Выход:', exit_connecting_prefix:'Выход (поднимается):',
+    exit_down_prefix:'Нет интернета — цепочка выхода:',
     direct_label:'Всегда напрямую', scan_net:'Проверить сеть',
     direct_ph:'intranet.example.com\n.corp.example\n10.8.0.0/16',
     direct_help_html:'<p>Сети и домены, которые не надо вести через сервер. Домашние и офисные '+
@@ -2351,6 +2386,12 @@ const I18N = {
       "don't get through the tunnel. This checkbox turns on forwarding through a separate relay on the "+
       'server — set up once, in the VPS setup wizard ("Set up the server over SSH" button in this same '+
       "menu). Until it's installed, this checkbox changes nothing: UDP still doesn't get through.",
+    exit_via:'Exit through', exit_via_none:'— no chain —',
+    exit_via_hint:'We connect to this server, but go out to the internet only through the one picked '+
+      'here (up to two in a row). It is unreachable — no internet: traffic is never sent out through '+
+      'this server instead. The device network does not use the chain.',
+    exit_via_summary:'Exit:', exit_up_prefix:'Exit:', exit_connecting_prefix:'Exit (coming up):',
+    exit_down_prefix:'No internet — exit chain:',
     direct_label:'Always direct', scan_net:'Scan network',
     direct_ph:'intranet.example.com\n.corp.example\n10.8.0.0/16',
     direct_help_html:'<p>Networks and domains that shouldn\'t go through the server. Home and office '+
@@ -3124,6 +3165,7 @@ function renderCore(st){
   const failed = t === 'error' ? st.tunnel : st.mesh.phase === 'error' ? st.mesh : null;
   showError(failed ? connErrorText(failed.errorKind, failed.error) : '');
   $('meddleOffer').hidden = t !== 'error';
+  renderExitMainStatus();
 }
 async function wantCore(body){
   showError('');
@@ -4609,6 +4651,7 @@ $('save').onclick = async () => {
   p.meshDirectOff = !$('meshDirect').checked;
   p.directHosts = splitEntries($('directHosts').value);
   p.tunnelHosts = splitEntries($('tunnelHosts').value);
+  p.exitVia = exitChainValue();
   p.filterMode = filterMode;
   p.filterApps = filterApps;
   Object.assign(p, pickedNameFlag());
@@ -4640,6 +4683,73 @@ $('save').onclick = async () => {
 
 };
 
+/* ---------- цепочка выхода (ТЗ 8) ---------- */
+// Два выпадающих списка: «через кого» (1–2 сервера после текущего). Второй
+// предлагает всех, кроме самого профиля и уже выбранного в первом, и
+// отключён, пока первый пуст — цепочка не бывает прерывистой.
+function exitHopOptions(sel, exclude, value){
+  sel.textContent = '';
+  const none = document.createElement('option');
+  none.value = ''; none.textContent = tr('exit_via_none');
+  sel.appendChild(none);
+  let hasValue = false;
+  (cfg.profiles || []).forEach(o => {
+    if(o.id === currentProfile().id || o.id === exclude) return;
+    const opt = document.createElement('option');
+    opt.value = o.id; opt.textContent = o.name;
+    sel.appendChild(opt);
+    if(o.id === value) hasValue = true;
+  });
+  sel.value = hasValue ? value : '';
+}
+function renderExitChainOptions(p){
+  const via = p.exitVia || [];
+  const h1 = $('exitHop1'), h2 = $('exitHop2');
+  exitHopOptions(h1, '', via[0] || '');
+  exitHopOptions(h2, h1.value, h1.value ? (via[1] || '') : '');
+  h2.disabled = !h1.value;
+  renderExitChainStatus();
+}
+$('exitHop1').addEventListener('change', () => {
+  exitHopOptions($('exitHop2'), $('exitHop1').value, $('exitHop2').value);
+  $('exitHop2').disabled = !$('exitHop1').value;
+  if(!$('exitHop1').value) $('exitHop2').value = '';
+  formDirty = true;
+  renderExitChainStatus();
+});
+$('exitHop2').addEventListener('change', () => { formDirty = true; renderExitChainStatus(); });
+function exitChainValue(){
+  const via = [$('exitHop1').value, $('exitHop2').value].filter(Boolean);
+  return via;
+}
+// renderExitChainStatus — и подсказка под выбором (куда ведёт цепочка прямо
+// сейчас), и строка на главном экране (core.exit, см. renderCore). Текущая
+// связь не обязательно у правленого сервера — путь экрана берётся из ядра.
+function renderExitChainStatus(){
+  const via = exitChainValue();
+  const names = {}; (cfg.profiles || []).forEach(o => names[o.id] = o.name);
+  const box = $('exitChainStatus');
+  box.textContent = via.length ? tr('exit_via_summary') + ' ' + [currentProfile().name, ...via.map(id => names[id] || id)].join(' → ') : '';
+}
+function renderExitMainStatus(){
+  const el = $('exitStatus');
+  const ex = core && core.exit;
+  if(!ex || !ex.path || !ex.path.length){ el.hidden = true; return; }
+  el.hidden = false;
+  el.classList.toggle('bad', ex.state === 'down');
+  const path = ex.path.join(' → ');
+  if(ex.state === 'down'){
+    el.textContent = tr('exit_down_prefix') + ' ' + path;
+    el.title = ex.error || '';
+  } else if(ex.state === 'connecting'){
+    el.textContent = tr('exit_connecting_prefix') + ' ' + path;
+    el.title = '';
+  } else {
+    el.textContent = tr('exit_up_prefix') + ' ' + path;
+    el.title = '';
+  }
+}
+
 function fillProfileForm(p){
   // Ноль в числовом поле тонкой настройки — «по умолчанию»: показываем пустое
   // поле с подсказкой, а не «0», который выглядел бы как настоящее значение.
@@ -4653,6 +4763,7 @@ function fillProfileForm(p){
   $('directHosts').value = (p.directHosts || []).join('\n');
   $('tunnelHosts').value = (p.tunnelHosts || []).join('\n');
   renderDomainsSummary();
+  renderExitChainOptions(p);
   if(!filterDirty){
     filterMode = p.filterMode || 'all';
     filterApps = (p.filterApps || []).map(normApp);

@@ -52,6 +52,12 @@ type MeshReporter interface {
 	MeshLink() (state string, direct int)
 }
 
+// ExitReporter — необязательная часть Driver: цепочка выхода (nil — её
+// нет). Есть — попадает в State.Exit, пока связь поднята.
+type ExitReporter interface {
+	Exit() *ExitPath
+}
+
 // Options — необязательные связи Machine с остальной программой.
 type Options struct {
 	// Save запоминает выбор человека (обе кнопки) — для восстановления после
@@ -306,6 +312,10 @@ func (m *Machine) State() State {
 	if r, ok := m.drv.(MeshReporter); ok {
 		meshLink, meshDirect = r.MeshLink()
 	}
+	var exit *ExitPath
+	if r, ok := m.drv.(ExitReporter); ok {
+		exit = r.Exit()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	st := State{MeshAvailable: avail, Detail: detail, Seq: m.seq, Mode: ModeOff}
@@ -325,6 +335,9 @@ func (m *Machine) State() State {
 	st.Mesh = button(m.want.Mesh, m.hasApplied && m.applied.Mesh, m.errM)
 	if st.Mesh.Phase == PhaseOn {
 		st.MeshLink, st.MeshDirect = meshLink, meshDirect
+	}
+	if m.linkUp && exit != nil {
+		st.Exit = exit
 	}
 	ids := make([]string, 0, len(m.modules))
 	for id := range m.modules {

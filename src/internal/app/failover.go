@@ -57,6 +57,13 @@ func (a *App) connectCandidates(cfg config.Config) []config.Profile {
 	if !cfg.AutoPickFastest || len(cfg.Profiles) < 2 {
 		return []config.Profile{active}
 	}
+	// С цепочкой выхода автовыбор и переход на запасной не действуют:
+	// цепочка — явный выбор пути, а запасной сервер без неё выпустил бы
+	// интернет не там. Упал любой сервер цепочки — интернета нет, пока он
+	// не вернётся (docs/VPN.md, «Цепочка выхода»).
+	if len(active.ExitVia) > 0 {
+		return []config.Profile{active}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), candidateLatencyBudget)
 	defer cancel()
@@ -253,6 +260,9 @@ func (a *App) tunnelConfig(cfg config.Config, p config.Profile) (_ tunnel.Config
 		UDPRelayEnabled: p.UDPRelayEnabled,
 		Mesh:            meshConfig(p, mode),
 		MeshHost:        a.meshHost,
+		Name:            p.Name,
+		Exit:            exitHops(cfg, p),
+		OnExitChange:    a.publishState,
 	}
 	a.mu.Lock()
 	netLayer := a.net

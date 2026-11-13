@@ -36,7 +36,8 @@ func (s *Server) handleProfileExport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"error": "не разобрал запрос: " + err.Error()})
 		return
 	}
-	p, ok := s.app.Config().ProfileByID(req.ID)
+	cfg := s.app.Config()
+	p, ok := cfg.ProfileByID(req.ID)
 	if !ok {
 		writeJSON(w, map[string]string{"error": "сервер не найден"})
 		return
@@ -50,6 +51,7 @@ func (s *Server) handleProfileExport(w http.ResponseWriter, r *http.Request) {
 		LocalViaTunnel: p.LocalViaTunnel,
 		Panel:          p.Panel, ClientID: p.ClientID, DeviceName: p.DeviceName,
 		MeshKey: exportMeshKey(p),
+		ExitVia: exportExitRefs(cfg, p),
 	}
 	// Нечитаемый ключ (его ещё не создали, путь указан неверно) больше не
 	// обрывает экспорт: настройки сервера сами по себе полезны, а про
@@ -117,6 +119,8 @@ func (s *Server) handleProfileImport(w http.ResponseWriter, r *http.Request) {
 	p.TunnelHosts, p.UDPRelayEnabled = doc.TunnelHosts, doc.UDPRelayEnabled
 	p.Panel, p.ClientID, p.DeviceName = doc.Panel, doc.ClientID, doc.DeviceName
 	importMeshKey(&p, doc.MeshKey)
+	var exitMissing []string
+	p.ExitVia, exitMissing = resolveExitRefs(s.app.Config().Profiles, p.ID, doc.ExitVia)
 
 	keyImported := false
 	if doc.KeyIncluded && strings.TrimSpace(doc.KeyContents) != "" {
@@ -140,6 +144,12 @@ func (s *Server) handleProfileImport(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, map[string]string{"error": err.Error()})
 		return
+	}
+	if n := exitImportNote(exitMissing); n != "" {
+		if note != "" {
+			note += ". "
+		}
+		note += n
 	}
 	writeJSON(w, map[string]any{
 		"ok": true, "profile": p, "keyImported": keyImported, "note": note, "config": s.app.Config(),

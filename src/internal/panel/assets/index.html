@@ -1136,6 +1136,55 @@
           </div>
         </div>
 
+        <!-- выход самого сервера через другой сервер (ТЗ 10) -->
+        <div class="card span2" id="egressCard" hidden>
+          <h1><span data-i18n="egress_title">Выход сервера → через сервер Б</span><button class="hint" data-hint="hint_egress">?</button></h1>
+          <p class="note" data-i18n="egress_note">Собственный трафик этого сервера (обновления, контейнеры, пользователи туннеля,
+            выходящие здесь) пойдёт через другой сервер ssh_tunnel. Вход снаружи (SSH, эта панель, устройства) не затрагивается.</p>
+
+          <div id="egressOffForm">
+            <div class="field">
+              <label for="egressLink" data-i18n="egress_link_label">Ссылка клиента с панели сервера Б</label>
+              <textarea id="egressLink" rows="3" placeholder="sshtunnel://import?..." data-i18n-ph="egress_link_ph"></textarea>
+              <p class="note" style="margin:6px 0 0" data-i18n="egress_link_note">Заведи обычного клиента в панели сервера Б («Устройства → Добавить») и вставь сюда его ссылку —
+                её показывают один раз сразу после создания.</p>
+            </div>
+            <div class="field">
+              <label data-i18n="egress_mode_label">Если сервер Б недоступен</label>
+              <select id="egressMode">
+                <option value="block" data-i18n="egress_mode_block">Сервер без интернета (по умолчанию)</option>
+                <option value="direct" data-i18n="egress_mode_direct">Выход напрямую</option>
+              </select>
+            </div>
+            <div id="egressMsg"></div>
+            <button class="btn" id="egressApplyBtn" data-i18n="egress_apply">Включить</button>
+          </div>
+
+          <div id="egressOnView" hidden>
+            <div class="kv"><span class="k" data-i18n="status_label">Статус</span><span class="v" id="egressPhase">—</span></div>
+            <div class="kv"><span class="k" data-i18n="egress_target">Сервер Б</span><span class="v" id="egressTargetName">—</span></div>
+            <div class="kv" id="egressExitRow" hidden><span class="k" data-i18n="egress_exit_ip">Снаружи виден как</span><span class="v" id="egressExitIp">—</span></div>
+            <div class="kv" id="egressRollbackRow" hidden><span class="k" data-i18n="egress_rolled_back">Последний откат</span><span class="v" id="egressRolledBack">—</span></div>
+            <div class="field" id="egressModeOnRow">
+              <label data-i18n="egress_mode_label">Если сервер Б недоступен</label>
+              <select id="egressModeOn">
+                <option value="block" data-i18n="egress_mode_block">Сервер без интернета (по умолчанию)</option>
+                <option value="direct" data-i18n="egress_mode_direct">Выход напрямую</option>
+              </select>
+            </div>
+
+            <div id="egressApplyingBox" hidden style="margin-top:12px">
+              <p class="note" id="egressApplyingNote"></p>
+              <button class="btn" id="egressConfirmBtn" data-i18n="egress_confirm">Подтвердить: панель доступна</button>
+            </div>
+            <div id="egressJobLog" class="console" hidden style="margin-top:12px"></div>
+            <div id="egressMsg2" style="margin-top:12px"></div>
+            <div class="row-inline" style="margin-top:12px">
+              <button class="btn danger" id="egressOffBtn" data-i18n="egress_off">Выключить</button>
+            </div>
+          </div>
+        </div>
+
         <div class="card">
           <h1 data-i18n="version_label">Версия панели</h1>
           <div class="kv"><span class="k" data-i18n="version_installed">Установлена</span>
@@ -1527,6 +1576,36 @@ const I18N = {
     confirm_mesh_off:'Выключить сеть устройств на этом сервере? Устройства перестанут видеть друг друга '+
       'через него. Их адреса и имена сохранятся — включишь снова, всё вернётся.',
     confirm_off_yes:'Выключить',
+    egress_title:'Выход сервера → через сервер Б',
+    egress_note:'Собственный трафик этого сервера (обновления, контейнеры, пользователи туннеля, '+
+      'выходящие здесь) пойдёт через другой сервер ssh_tunnel. Вход снаружи (SSH, эта панель, устройства) не затрагивается.',
+    egress_link_label:'Ссылка клиента с панели сервера Б',
+    egress_link_ph:'sshtunnel://import?...',
+    egress_link_note:'Заведи обычного клиента в панели сервера Б («Устройства → Добавить») и вставь сюда его ссылку — '+
+      'её показывают один раз сразу после создания.',
+    egress_mode_label:'Если сервер Б недоступен',
+    egress_mode_block:'Сервер без интернета (по умолчанию)',
+    egress_mode_direct:'Выход напрямую',
+    egress_apply:'Включить',
+    egress_target:'Сервер Б',
+    egress_exit_ip:'Снаружи виден как',
+    egress_rolled_back:'Последний откат',
+    egress_applying_note:'Применено. Открой панель в новой вкладке или с телефона — '+
+      'если она ответит, подтверди. Нет подтверждения — через {s} с всё вернётся как было.',
+    egress_confirm:'Подтвердить: панель доступна',
+    egress_off:'Выключить',
+    egress_off_confirm:'Выключить выход через другой сервер? Трафик сервера пойдёт как раньше — напрямую.',
+    egress_phase_off:'выключено',
+    egress_phase_installing:'проверяю и ставлю клиент…',
+    egress_phase_applying:'применено, жду подтверждения',
+    egress_phase_rollback:'подтверждения не было — возвращаю как было',
+    egress_phase_on:'работает через сервер Б',
+    egress_phase_down:'сервер Б недоступен',
+    hint_egress:'<p>Ставит на этом сервере Linux-клиент ssh_tunnel в режиме VPN, настроенный на сервер Б, '+
+      'и направляет туда собственный трафик сервера.</p><p>Вход снаружи (SSH, эта панель, пользователи туннеля, meshd) '+
+      'продолжает отвечать тем же путём, каким пришёл — отдельными правилами маршрутизации, в обход этого клиента.</p>'+
+      '<p>После включения есть 60 секунд, чтобы подтвердить, что панель всё ещё отвечает. Без подтверждения — '+
+      'отдельный таймер systemd, независимый от панели и от сети, возвращает всё как было (и после перезагрузки тоже).</p>',
     svc_active:'работает', svc_stopped:'остановлена', svc_missing:'не установлена',
     sec_title:'Связь с главным сервером', sec_since:'На связи с', sec_last_ping:'Последняя проверка',
     sec_uplink:'Служба проброса', sec_log:'Журнал проброса',
@@ -1832,6 +1911,36 @@ const I18N = {
     confirm_mesh_off:'Turn off the device network on this server? Devices will stop seeing each other '+
       'through it. Their addresses and names are kept — turn it back on and everything returns.',
     confirm_off_yes:'Turn off',
+    egress_title:'Server egress → through server B',
+    egress_note:'This server\'s own traffic (updates, containers, tunnel users exiting here) will leave '+
+      'through another ssh_tunnel server. Inbound access (SSH, this panel, devices) is not affected.',
+    egress_link_label:'Client link from server B\'s panel',
+    egress_link_ph:'sshtunnel://import?...',
+    egress_link_note:'Create a regular client in server B\'s panel ("Devices → Add") and paste its link here — '+
+      'it is shown once, right after creation.',
+    egress_mode_label:'If server B is unreachable',
+    egress_mode_block:'No internet (default)',
+    egress_mode_direct:'Direct exit',
+    egress_apply:'Turn on',
+    egress_target:'Server B',
+    egress_exit_ip:'Seen from outside as',
+    egress_rolled_back:'Last rollback',
+    egress_applying_note:'Applied. Open the panel in a new tab or on your phone — '+
+      'if it answers, confirm. No confirmation — in {s} s everything reverts.',
+    egress_confirm:'Confirm: the panel is reachable',
+    egress_off:'Turn off',
+    egress_off_confirm:'Turn off egress through another server? This server\'s traffic will exit directly again.',
+    egress_phase_off:'off',
+    egress_phase_installing:'checking and installing the client…',
+    egress_phase_applying:'applied, waiting for confirmation',
+    egress_phase_rollback:'no confirmation — reverting',
+    egress_phase_on:'running through server B',
+    egress_phase_down:'server B is unreachable',
+    hint_egress:'<p>Installs a Linux ssh_tunnel VPN client on this server, pointed at server B, and routes '+
+      'this server\'s own traffic there.</p><p>Inbound access (SSH, this panel, tunnel users, meshd) keeps '+
+      'answering the way it came in — separate routing rules bypass this client for it.</p>'+
+      '<p>After turning it on there are 60 seconds to confirm the panel still answers. Without confirmation, '+
+      'a systemd timer independent of the panel and the network reverts everything (across reboots too).</p>',
     svc_active:'running', svc_stopped:'stopped', svc_missing:'not installed',
     sec_title:'Link to the main server', sec_since:'Connected since', sec_last_ping:'Last check',
     sec_uplink:'Forwarding service', sec_log:'Forwarding log',
@@ -1997,7 +2106,7 @@ function showTab(name){
   });
   hidePop();
   if (changed) scrollTo(0, 0);
-  if (name === 'Settings'){ loadAutostart(); loadCapacity(); }
+  if (name === 'Settings'){ loadAutostart(); loadCapacity(); loadEgress(); }
   if (name === 'Plugins') loadNode();
   // Группы нужны и редактору правил, и форме прав клиента в «Устройствах».
   if (name === 'Devices' || name === 'Access') loadAccess();
@@ -2743,6 +2852,82 @@ async function loadAutostart(){
   $('autostartUnsupported').hidden = !!data.supported;
   $('autostartCheck').checked = !!data.enabled;
 }
+
+/* ---------- выход сервера через другой сервер (ТЗ 10) ---------- */
+let EGRESS_POLL = null, EGRESS_TOKEN = '';
+function stopEgressPoll(){ if (EGRESS_POLL){ clearInterval(EGRESS_POLL); EGRESS_POLL = null; } }
+
+async function loadEgress(){
+  const {status, ok, data} = await api('/api/egress');
+  if (status === 404){ $('egressCard').hidden = true; stopEgressPoll(); return; }
+  if (!ok) return;
+  $('egressCard').hidden = false;
+  renderEgress(data);
+  const live = data.phase === 'installing' || data.phase === 'applying' || data.phase === 'rollback';
+  if (live && !EGRESS_POLL) EGRESS_POLL = setInterval(loadEgress, 1500);
+  else if (!live) stopEgressPoll();
+}
+
+function renderEgress(d){
+  const off = d.phase === 'off';
+  $('egressOffForm').hidden = !off;
+  $('egressOnView').hidden = off;
+  if (off){
+    $('egressMode').value = d.mode || 'block';
+    showMsg($('egressMsg'), d.conflict || '', 'err');
+    return;
+  }
+  $('egressPhase').textContent = t('egress_phase_' + d.phase) || d.phase;
+  $('egressTargetName').textContent = d.target ? (d.target.name || d.target.host) + ' (' + d.target.host + ')' : '—';
+  $('egressExitRow').hidden = d.phase !== 'on' || !d.exitIp;
+  $('egressExitIp').textContent = d.exitIp || '—';
+  $('egressRollbackRow').hidden = !d.rolledBackAt;
+  if (d.rolledBackAt) $('egressRolledBack').textContent = fmtAgo(d.rolledBackAt);
+  $('egressModeOn').value = d.mode || 'block';
+  const busy = d.phase === 'installing' || d.phase === 'applying';
+  $('egressModeOnRow').hidden = busy;
+  $('egressApplyingBox').hidden = d.phase !== 'applying';
+  if (d.phase === 'applying'){
+    $('egressApplyingNote').textContent = t('egress_applying_note').replace('{s}', Math.max(0, d.remaining || 0));
+    if (d.token) EGRESS_TOKEN = d.token;
+  }
+  const job = d.job;
+  $('egressJobLog').hidden = !job || !(job.lines && job.lines.length);
+  if (job && job.lines) $('egressJobLog').textContent = job.lines.join('\n');
+  showMsg($('egressMsg2'), job && job.error ? job.error : '', 'err');
+  $('egressOffBtn').disabled = !!(job && job.running);
+}
+
+$('egressApplyBtn').addEventListener('click', async () => {
+  const btn = $('egressApplyBtn');
+  btn.disabled = true;
+  const {ok, data} = await api('/api/egress/apply', {link: $('egressLink').value, mode: $('egressMode').value});
+  btn.disabled = false;
+  if (!ok || data.error){ showMsg($('egressMsg'), data.error || t('err_internal'), 'err'); return; }
+  $('egressLink').value = '';
+  showMsg($('egressMsg'), '', '');
+  loadEgress();
+});
+$('egressConfirmBtn').addEventListener('click', async () => {
+  const btn = $('egressConfirmBtn');
+  btn.disabled = true;
+  const {ok, data} = await api('/api/egress/confirm', {token: EGRESS_TOKEN});
+  btn.disabled = false;
+  if (!ok || data.error){ showMsg($('egressMsg2'), data.error || t('err_internal'), 'err'); return; }
+  loadEgress();
+});
+$('egressOffBtn').addEventListener('click', async () => {
+  const yes = await appConfirm(t('egress_off_confirm'), t('egress_off'));
+  if (!yes) return;
+  const {ok, data} = await api('/api/egress/off', {});
+  if (!ok || data.error){ showMsg($('egressMsg2'), data.error || t('err_internal'), 'err'); return; }
+  loadEgress();
+});
+$('egressModeOn').addEventListener('change', async () => {
+  const {ok, data} = await api('/api/egress/mode', {mode: $('egressModeOn').value});
+  if (!ok || data.error) showMsg($('egressMsg2'), data.error || t('err_internal'), 'err');
+  loadEgress();
+});
 /* ---------- проверка обновлений ---------- */
 /* Ходит на GitHub сервер панели, а не браузер: панель может стоять там, куда
    у браузера администратора доступа нет, да и CORS чужого домена со страницы

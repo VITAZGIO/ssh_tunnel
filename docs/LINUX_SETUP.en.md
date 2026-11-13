@@ -266,6 +266,18 @@ ssh_tunnel_linux docker set project=media route=direct
 
 ---
 
+## This server exiting through another ssh_tunnel server
+
+If this machine is a panel server (`ssh_tunnel_panel`) and its own traffic
+(not just clients') should exit through another ssh_tunnel server, that's a
+separate panel feature, set up there: "Settings → Server egress → through
+server B", see
+[PANEL_SETUP.en.md](PANEL_SETUP.en.md#server-egress-through-another-server).
+No need to install `ssh_tunnel_vpn_linux` by hand for this — the panel does
+it itself (the same version as the panel, checksum verified) and makes sure
+inbound access (SSH, the panel itself, devices) isn't affected. How the
+client side works is in [VPN.md](VPN.md#выход-сервера-через-другой-сервер-режим-панели-сервера).
+
 ## Web interface
 
 The very same one the Windows build shows in its window, served on the fixed

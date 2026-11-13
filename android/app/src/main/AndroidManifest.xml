@@ -18,6 +18,10 @@
          точной геолокации Android сетей не отдаёт (их адреса выдают место). -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- Сеть устройств без сервера: маяки соседей в Wi-Fi (UDP-широковещание)
+         при выключенном экране Android отбрасывает, пока не взят
+         MulticastLock. Берётся только пока соседей ищут (TunnelService). -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- «Связь с телефоном» → «Найти телефон»: вибрация вместе со звонком. -->
