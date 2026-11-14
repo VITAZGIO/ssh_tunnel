@@ -182,6 +182,7 @@ expect "контейнер ↔ контейнер" ok D exec tun wget -qO- -T 5 
 expect "контейнер → компьютер" "$(ip_of tun)" D exec tun wget -qO- -T 5 http://172.17.0.1:9090/
 expect "опубликованный порт из домашней сети" ok ns lan curl -fsS -m 5 http://192.168.50.2:8080/
 check "исключение из MASQUERADE стоит" sh -c "ip netns exec c iptables -t nat -S SSH_TUNNEL_DOCKER | grep -q -- '-s $(ip_of tun)/32 -j ACCEPT'"
+check "исключение из DROP Docker в raw стоит первым" sh -c "ip netns exec c iptables -t raw -S PREROUTING | grep -m1 -- '^-A PREROUTING' | grep -q SSH_TUNNEL_DOCKER_RAW"
 
 section "туннель выключен (сеть устройств включена)"
 api /api/state '{"tunnel":false}' >/dev/null
@@ -225,6 +226,7 @@ echo "-- правила после остановки:"; our_rules
 expect "после остановки остались только правила строгого (3)" 3 count_rules '^940[23]:'
 expect "обычных правил контейнеров нет" 0 count_rules '^940[01]:'
 refute "цепочки исключения NAT нет" ns c iptables -t nat -S SSH_TUNNEL_DOCKER
+refute "цепочки исключения raw нет" ns c iptables -t raw -S SSH_TUNNEL_DOCKER_RAW
 check "resolv.conf машины c снова ссылка, как была" test "$(readlink "$ETC_C/resolv.conf")" = /etc/resolv-lab.conf
 check "resolv.conf машины сборки не тронут и после всего" host_resolv_same
 expect "«через сервер» без программы — как компьютер" 192.168.50.2 cecho tun
