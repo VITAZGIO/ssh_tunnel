@@ -21,6 +21,7 @@ type adminDev struct {
 	Alias       string   `json:"alias"`
 	Display     string   `json:"display"`
 	Host        string   `json:"host"`
+	IP          string   `json:"ip"`
 	Online      bool     `json:"online"`
 	Platform    string   `json:"platform"`
 	App         string   `json:"app"`

@@ -381,6 +381,10 @@ func (fakeDownAdmin) SetSelf(context.Context, string, bool, string) error {
 	return meshsvc.ErrNotRunning
 }
 func (fakeDownAdmin) ForgetServer(context.Context, string) error { return meshsvc.ErrNotRunning }
+func (fakeDownAdmin) SetKnown(context.Context, []meshsvc.KnownServer) error {
+	return meshsvc.ErrNotRunning
+}
+func (fakeDownAdmin) SetSelfIP(context.Context, string) error { return meshsvc.ErrNotRunning }
 func (fakeDownAdmin) SetPolicy(context.Context, meshsvc.Policy) error {
 	return meshsvc.ErrNotRunning
 }
@@ -469,5 +473,35 @@ func TestLinkBlockНастоящийSSHD(t *testing.T) {
 		if !strings.Contains(string(out), "\n"+want+"\n") {
 			t.Errorf("для meshlink не действует %q", want)
 		}
+	}
+}
+
+// ТЗ 12: побочный сервер (проброс) переходит на свой meshd — проброс
+// снимается (он занимает тот же порт), прежний адрес сервера в сети
+// переносится в новый meshd.
+func TestПобочныйПереходитНаСвойMeshd(t *testing.T) {
+	_, sock := startTestMeshd(t)
+	sys := newFakeMeshSystem()
+	sys.units[meshsvc.UplinkUnitName] = UnitState{Installed: true, Active: true, Enabled: true}
+	admin := meshsvc.NewAdmin(sock)
+	m := newTestMesh(t, sys, admin, "de.example", 22)
+	if err := m.SetMain("Лондон"); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "установка не закончилась", func() bool {
+		j := m.jobSnapshot()
+		return j != nil && !j.Running
+	})
+	if j := m.jobSnapshot(); j.Error != "" {
+		t.Fatalf("установка: %+v", j)
+	}
+	if sys.UnitState(meshsvc.UplinkUnitName).Active {
+		t.Fatal("проброс к другому серверу не снят")
+	}
+	var lines []string
+	m.keepSelfIP("198.19.255.253", func(s string) { lines = append(lines, s) })
+	st, err := admin.State(context.Background())
+	if err != nil || st.Self.IP != "198.19.255.253" {
+		t.Fatalf("адрес сервера %q (%v), журнал %v", st.Self.IP, err, lines)
 	}
 }

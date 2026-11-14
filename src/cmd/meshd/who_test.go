@@ -84,7 +84,7 @@ func TestКтоЗвонитСлужбеСервера(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer call.Close()
-	writeMsg(call, msg{Op: "dial", Net: "ключ", Device: "pc", To: selfIP, Port: port})
+	writeMsg(call, msg{Op: "dial", Net: "ключ", Device: "pc", To: s.self.IP, Port: port})
 	select {
 	case m := <-got:
 		if !m.OK || m.Op != "whois" || m.Net != netID("ключ") || m.Device != "pc" || m.User != "tun_pc" || m.IP == "" || m.Name != "Рабочий ПК" {

@@ -11,6 +11,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -91,6 +92,9 @@ type Profile struct {
 	// MeshDirectOff — не пробовать прямые соединения между устройствами
 	// (см. internal/mesh/p2p.go): всё только через сервер.
 	MeshDirectOff bool `json:"meshDirectOff,omitempty"`
+	// MeshOnlyThis — сеть устройств только через этот сервер: не держать
+	// связь с другими серверами той же сети (см. MeshServers).
+	MeshOnlyThis bool `json:"meshOnlyThis,omitempty"`
 
 	// Тонкая настройка соединения (экран «Дополнительно»). Ноль и пустая
 	// строка — значения по умолчанию, поэтому старые конфиги не меняются.
@@ -332,6 +336,29 @@ func (c Config) Active() Profile {
 		return c.Profiles[0]
 	}
 	return defaultProfile(1)
+}
+
+// MeshServers — другие серверы сети устройств профиля p (ТЗ 12): профили
+// с тем же ключом сети и включённой сетью, кроме самого p и профилей с тем
+// же адресом. Список серверов сети — это и есть профили: чтобы добавить
+// сервер в сеть, на устройстве заводят (или импортируют) его профиль с тем
+// же ключом. Вход на каждый — свой: ключ, пользователь, проверка ключа
+// сервера — как у обычного профиля. У p с MeshOnlyThis — пусто.
+func (c Config) MeshServers(p Profile) []Profile {
+	if !p.MeshEnabled || p.MeshKey == "" || p.MeshOnlyThis {
+		return nil
+	}
+	seen := map[string]bool{strings.ToLower(p.Host) + ":" + strconv.Itoa(p.SSHPort): true}
+	var out []Profile
+	for _, q := range c.Profiles {
+		addr := strings.ToLower(q.Host) + ":" + strconv.Itoa(q.SSHPort)
+		if q.ID == p.ID || !q.MeshEnabled || q.MeshKey != p.MeshKey || q.Host == "" || seen[addr] {
+			continue
+		}
+		seen[addr] = true
+		out = append(out, q)
+	}
+	return out
 }
 
 // ProfileByID ищет профиль по id.

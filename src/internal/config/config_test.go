@@ -194,3 +194,23 @@ func TestMeshStartFollowsTunnelByDefault(t *testing.T) {
 		t.Fatal("сеть не включилась вместе с туннелем")
 	}
 }
+
+// ТЗ 12: серверы сети устройства — другие профили с тем же ключом сети.
+func TestMeshServers(t *testing.T) {
+	c := Config{Profiles: []Profile{
+		{ID: "fra", Host: "fra.example", SSHPort: 22, MeshEnabled: true, MeshKey: "k"},
+		{ID: "lon", Host: "lon.example", SSHPort: 22, MeshEnabled: true, MeshKey: "k"},
+		{ID: "dup", Host: "FRA.example", SSHPort: 22, MeshEnabled: true, MeshKey: "k"}, // тот же сервер
+		{ID: "off", Host: "off.example", SSHPort: 22, MeshEnabled: false, MeshKey: "k"},
+		{ID: "oth", Host: "oth.example", SSHPort: 22, MeshEnabled: true, MeshKey: "другой"},
+	}}
+	got := c.MeshServers(c.Profiles[0])
+	if len(got) != 1 || got[0].ID != "lon" {
+		t.Fatalf("серверы сети: %+v", got)
+	}
+	p := c.Profiles[0]
+	p.MeshOnlyThis = true
+	if len(c.MeshServers(p)) != 0 {
+		t.Fatal("MeshOnlyThis не действует")
+	}
+}

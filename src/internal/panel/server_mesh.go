@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+
+	"sshtunnel/internal/meshsvc"
 )
 
 // WithSettings подключает настройки панели (ёмкость сервера и прочее).
@@ -38,6 +40,7 @@ func (s *Server) meshRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/mesh/links/delete", s.requireAuth(s.withMesh(s.handleMeshLinkDelete)))
 	mux.HandleFunc("/api/mesh/join", s.requireAuth(s.withMesh(s.handleMeshJoin)))
 	mux.HandleFunc("/api/mesh/serveraccess", s.requireAuth(s.withMesh(s.handleMeshServerAccess)))
+	mux.HandleFunc("/api/mesh/known", s.requireAuth(s.withMesh(s.handleMeshKnown)))
 }
 
 func (s *Server) withMesh(next http.HandlerFunc) http.HandlerFunc {
@@ -254,6 +257,18 @@ func (s *Server) handleMeshJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	replyErr(w, s.mesh.Join(req.Code, req.Host), map[string]bool{"ok": true})
+}
+
+// handleMeshKnown — какие серверы сети советовать устройствам (ТЗ 12):
+// {"servers":[{"name","host","port"}]} — список целиком.
+func (s *Server) handleMeshKnown(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Servers []meshsvc.KnownServer `json:"servers"`
+	}
+	if !decodePost(w, r, &req) {
+		return
+	}
+	replyErr(w, s.mesh.SetKnown(r.Context(), req.Servers), map[string]bool{"ok": true})
 }
 
 // handleMeshServerAccess — пускать ли устройства сети к самому серверу и на

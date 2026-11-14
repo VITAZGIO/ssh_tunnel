@@ -86,6 +86,8 @@ type meshAdmin interface {
 	Forget(ctx context.Context, netID, device string) error
 	SetSelf(ctx context.Context, name string, enabled bool, ports string) error
 	ForgetServer(ctx context.Context, id string) error
+	SetKnown(ctx context.Context, list []meshsvc.KnownServer) error
+	SetSelfIP(ctx context.Context, ip string) error
 	SetPolicy(ctx context.Context, p meshsvc.Policy) error
 	RenameNetwork(ctx context.Context, netID, name string) error
 	DeleteNetwork(ctx context.Context, netID string) error
@@ -227,10 +229,45 @@ func (m *MeshManager) SetMain(name string) error {
 	}); err != nil {
 		return err
 	}
+	// Был побочным (проброс к другому серверу, ТЗ 12: переход на свой
+	// meshd): адрес этого сервера в сети, который знают устройства, —
+	// переносим в свой meshd.
 	m.mu.Lock()
+	oldIP := ""
+	if m.link != nil {
+		oldIP = m.link.State().MeshIP
+	}
 	m.stopLinkLocked()
 	m.mu.Unlock()
-	return m.runJob("install", m.installMain)
+	return m.runJob("install", func(onLine func(string)) error {
+		if err := m.installMain(onLine); err != nil {
+			return err
+		}
+		if oldIP != "" {
+			m.keepSelfIP(oldIP, onLine)
+		}
+		return nil
+	})
+}
+
+// keepSelfIP отдаёт новому meshd прежний адрес этого сервера в сети (meshd
+// только что запущен — ждём его до 10 секунд).
+func (m *MeshManager) keepSelfIP(ip string, onLine func(string)) {
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err := m.admin.SetSelfIP(ctx, ip)
+		cancel()
+		if err == nil {
+			onLine("Адрес сервера в сети устройств остался прежним: " + ip)
+			return
+		}
+		if time.Now().After(deadline) {
+			onLine("Прежний адрес сервера в сети (" + ip + ") не перенёсся: " + err.Error())
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 // Reinstall — обновить meshd до версии из релиза.
@@ -256,6 +293,13 @@ func (m *MeshManager) InstallUDPRelay() error {
 }
 
 func (m *MeshManager) installMain(onLine func(string)) error {
+	// Проброс к другому серверу занимает тот же порт, что и свой meshd.
+	if m.sys.UnitState(meshsvc.UplinkUnitName).Installed {
+		onLine("Снимаю проброс к другому серверу (" + meshsvc.UplinkUnitName + ")")
+		if err := m.sys.DisableUnit(meshsvc.UplinkUnitName); err != nil {
+			return err
+		}
+	}
 	onLine("Ставлю meshd — службу сети устройств")
 	if err := m.sys.RunScript(meshsvc.InstallScript(m.version), onLine); err != nil {
 		return err
@@ -650,9 +694,9 @@ type MeshState struct {
 	Uplink        UnitState `json:"uplink"`
 	// UDPRelay — ретранслятор UDP (ставится кнопкой, см. InstallUDPRelay).
 	UDPRelay UnitState `json:"udprelay"`
-	Job           *meshJob  `json:"job,omitempty"`
-	SSHHost       string    `json:"sshHost,omitempty"`
-	SSHPort       int       `json:"sshPort,omitempty"`
+	Job      *meshJob  `json:"job,omitempty"`
+	SSHHost  string    `json:"sshHost,omitempty"`
+	SSHPort  int       `json:"sshPort,omitempty"`
 
 	// Сам сервер в сети устройств: пускать ли к нему и его адрес там.
 	ServerAccess bool          `json:"serverAccess"`
@@ -666,6 +710,14 @@ type MeshState struct {
 	Networks  []MeshNetwork `json:"networks"`
 	AdminErr  string        `json:"adminError,omitempty"`
 
+	// Несколько серверов без главного (ТЗ 12). Peers — другие серверы
+	// сети, о которых рассказали устройства (с правилами доступа: такие же
+	// или нет); Known — серверы, которые эта панель советует устройствам.
+	// Правила доступа, журнал, имена и удаление сетей и устройств — свои у
+	// каждого сервера: эта панель показывает и меняет только свои.
+	Peers []meshsvc.SeenServer  `json:"peers"`
+	Known []meshsvc.KnownServer `json:"known"`
+
 	// Побочный.
 	MainHost string             `json:"mainHost,omitempty"`
 	MainPort int                `json:"mainPort,omitempty"`
@@ -678,18 +730,20 @@ type MeshState struct {
 func (m *MeshManager) State(ctx context.Context) MeshState {
 	s := m.settings.Get().Mesh
 	st := MeshState{
-		Role:    s.Role,
-		Name:    s.Name,
-		Meshd:   m.sys.UnitState(meshdUnit),
-		Uplink:  m.sys.UnitState(meshsvc.UplinkUnitName),
-		Job:     m.jobSnapshot(),
+		Role:   s.Role,
+		Name:   s.Name,
+		Meshd:  m.sys.UnitState(meshdUnit),
+		Uplink: m.sys.UnitState(meshsvc.UplinkUnitName),
+		Job:    m.jobSnapshot(),
 
 		UDPRelay: m.sys.UnitState(meshsvc.UDPRelayUnitName),
-		SSHHost: m.sshHost,
-		SSHPort: m.sshPort,
+		SSHHost:  m.sshHost,
+		SSHPort:  m.sshPort,
 
 		Servers:  []MeshServer{},
 		Networks: []MeshNetwork{},
+		Peers:    []meshsvc.SeenServer{},
+		Known:    []meshsvc.KnownServer{},
 	}
 	st.ServerAccess, st.ServerPorts = !s.ServerAccessOff, s.ServerPorts
 	st.EffectiveRole = s.Role
@@ -741,6 +795,12 @@ func (m *MeshManager) fillMain(ctx context.Context, st *MeshState, s MeshSetting
 		st.Servers[0].MeshIP, st.Servers[0].MeshHost = self.IP, self.Host
 	}
 	st.Version, st.StartedAt = ms.Version, ms.StartedAt
+	if ms.Peers != nil {
+		st.Peers = ms.Peers
+	}
+	if ms.Known != nil {
+		st.Known = ms.Known
+	}
 
 	connected := map[string]meshsvc.Server{}
 	for _, r := range ms.Servers {
@@ -852,6 +912,26 @@ func (m *MeshManager) resolve(ctx context.Context, host string) []string {
 	m.resolved[host] = resolvedHost{addrs: addrs, until: time.Now().Add(10 * time.Minute)}
 	m.mu.Unlock()
 	return addrs
+}
+
+// SetKnown — какие серверы сети советовать устройствам этого сервера.
+// Совет — только подсказка: устройство подключится к серверу, лишь если у
+// него есть свой вход туда (профиль с тем же ключом сети).
+func (m *MeshManager) SetKnown(ctx context.Context, list []meshsvc.KnownServer) error {
+	for i := range list {
+		list[i].Host = strings.TrimSpace(list[i].Host)
+		list[i].Name = cleanName(list[i].Name)
+		if err := validHost(list[i].Host); err != nil {
+			return err
+		}
+		if list[i].Port == 0 {
+			list[i].Port = 22
+		}
+		if list[i].Port < 1 || list[i].Port > 65535 {
+			return errors.New("неверный порт")
+		}
+	}
+	return m.admin.SetKnown(ctx, list)
 }
 
 // Rename переименовывает устройство (пустое имя — вернуть его собственное).
