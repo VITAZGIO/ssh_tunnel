@@ -264,6 +264,9 @@ func (a *App) tunnelConfig(cfg config.Config, p config.Profile) (_ tunnel.Config
 		Exit:            exitHops(cfg, p),
 		OnExitChange:    a.publishState,
 	}
+	if c.Mesh != nil {
+		c.Mesh.OnExit = a.onMeshExit // цепочка выхода из панели сервера (ТЗ 16)
+	}
 	a.mu.Lock()
 	netLayer := a.net
 	a.mu.Unlock()

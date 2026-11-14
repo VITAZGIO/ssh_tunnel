@@ -1,5 +1,6 @@
 # Хост плагинов сервера ssh_tunnel_node (зеркальные папки, файлы
-# устройства, общий буфер, резервные копии). Обычно его ставит панель: «Плагины» →
+# устройства, общий буфер, резервные копии, история машин, общий список
+# блокировки рекламы, проверка сайта с сервера). Обычно его ставит панель: «Плагины» →
 # «Поставить хост плагинов» (тот же текст — meshsvc.NodeUnit()).
 # Руками — положить бинарь в /usr/local/bin/ssh_tunnel_node, этот файл —
 # в /etc/systemd/system/, затем:
@@ -10,7 +11,7 @@
 # /run/ssh_tunnel_node/control.sock.
 
 [Unit]
-Description=ssh_tunnel - плагины сервера (зеркальные папки, файлы, общий буфер, резервные копии)
+Description=ssh_tunnel - плагины сервера (зеркальные папки, файлы, буфер, копии, машины, блокировка, проверка сайта)
 After=network.target meshd.service
 Wants=meshd.service
 
@@ -32,8 +33,9 @@ ProcSubset=pid
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-IPAddressDeny=any
-IPAddressAllow=localhost
+# Наружу ходят два плагина ТЗ 15: «Блокировка рекламы» качает источники
+# списка, «Проверить сайт» проверяет сайты из сети сервера. Поэтому сеть не
+# ограничена адресами; порты плагинов всё равно слушают только 127.0.0.1.
 PrivateTmp=yes
 PrivateDevices=yes
 

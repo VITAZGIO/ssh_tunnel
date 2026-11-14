@@ -86,7 +86,11 @@
 /* Карта сети: только просмотр. Данные — /api/netmap (сеть устройств этого
    устройства). Схема живая, как в панели главного сервера: узлы
    расталкиваются, их можно таскать, колесо — масштаб, фон тащится. */
-const MAIN_IP = '198.19.255.254';
+// Сервер сети узнаётся по platform === 'server' (с ТЗ 12 у каждого сервера
+// свой адрес в сети — никакого «главного» адреса нет). Ни одного сервера в
+// списке (старый meshd, сервера нет на связи) — рисуется заглушка с этим
+// ключом.
+const NO_SERVER = 'srv:none';
 const NS = 'http://www.w3.org/2000/svg';
 const MI = {windows: 'computer', linux: 'dns', android: 'smartphone', server: 'hub'};
 const SYS = {windows: 'Windows', linux: 'Linux', android: 'Android', server: L('Сервер', 'Server')};
@@ -389,7 +393,7 @@ function simTick(sim){
       });
     }
   }
-  // 6. Главный сервер тянется к центру, остальные — чуть-чуть.
+  // 6. Первый сервер тянется к центру, остальные — чуть-чуть.
   N.forEach(n => {
     const g = n.main ? 0.12 : 0.012;
     n.vx += (sim.W / 2 - n.x) * g * al;
@@ -629,29 +633,41 @@ function qColor(online, q){
 
 /* ---------- схема этого устройства ---------- */
 // ring — устройства карты: это, онлайн, офлайн (сервер отдельно).
+const isServerNode = n => !!n && (n.server || n.platform === 'server');
+const keyOf = n => n.ip || NO_SERVER;
 function ring(){
-  const others = (DATA.nodes || []).filter(n => n.ip !== MAIN_IP);
+  const others = (DATA.nodes || []).filter(n => !isServerNode(n));
   const byName = (a, b) => (a.name || '').localeCompare(b.name || '');
   return [Object.assign({}, DATA.self, {self: true, online: true})]
     .concat(others.filter(n => n.online).sort(byName), others.filter(n => !n.online).sort(byName));
 }
-function mainNode(){
-  return (DATA.nodes || []).find(n => n.ip === MAIN_IP) ||
-    {name: L('Сервер', 'Server'), host: 'server', ip: MAIN_IP, platform: 'server', online: true, server: true};
+// serverNodes — все серверы сети (несколько — рисуются все), онлайн первыми.
+function serverNodes(){
+  const list = (DATA.nodes || []).filter(isServerNode)
+    .sort((a, b) => (b.online ? 1 : 0) - (a.online ? 1 : 0) || (a.name || '').localeCompare(b.name || ''));
+  return list.length ? list
+    : [{name: L('Сервер', 'Server'), host: 'server', ip: '', platform: 'server', online: !!DATA.self && DATA.state === 'online', server: true}];
+}
+// hubOf — к какому серверу тянуть линию устройства: первый из его
+// d.servers (имена), который есть на карте; иначе — первый сервер.
+function hubOf(d, servers){
+  const names = d.servers || [];
+  return servers.find(s => names.includes(s.name)) || servers[0];
 }
 
 function renderMap(){
   const svg = $('meshMap');
   if(!DATA || !DATA.self){ svg.innerHTML = ''; MAP_SIG = ''; MAP_SIM = null; return; }
   const W = Math.round(svg.clientWidth) || 720, H = Math.round(svg.clientHeight) || 420;
-  const list = ring(), main = mainNode();
+  const list = ring(), servers = serverNodes();
   // Раскладка меняется только от состава сети; задержки и «в сети»
   // обновляются на месте — иначе схема мигала бы при каждом опросе.
-  const sig = [W, H, LANG, list.map(n => n.ip + '/' + n.name + '/' + n.platform).join(',')].join('|');
+  const sig = [W, H, LANG, servers.map(n => keyOf(n) + '/' + n.name).join(','),
+    list.map(n => n.ip + '/' + n.name + '/' + n.platform + '/' + keyOf(hubOf(n, servers)) + '/' + (n.servers || []).join('+')).join(',')].join('|');
   if(sig !== MAP_SIG){
     const first = !MAP_SIG;
     MAP_SIG = sig;
-    buildMap(svg, W, H, main, list, first);
+    buildMap(svg, W, H, servers, list, first);
   }
   const sim = MAP_SIM, self = list[0];
   list.forEach(n => {
@@ -666,6 +682,7 @@ function renderMap(){
     // Через сервер — цифры на линии к серверу; напрямую — на прямой линии.
     r.edge.g.setAttribute('class', 'edge ' + qClass(n.online, n.direct || n.self ? 'good' : q));
     setEdgeText(r.edge, n.online && !n.direct && !n.self ? edgeMs(n.rttMs) : '', qColor(n.online, q));
+    (r.extra || []).forEach(e => e.g.setAttribute('class', 'edge ' + qClass(n.online, 'good')));
     // Прямое соединение с этим устройством, мимо сервера.
     const want = n.online && n.direct && !n.self;
     if(want && !r.p2p){
@@ -701,15 +718,18 @@ function renderMap(){
     }
     setEdgeText(e, edgeMs(w.l.rttMs), 'var(--accent)');
   });
-  const m = MAP_REFS[MAIN_IP];
-  m.data = main;
-  m.node.classList.toggle('offline', main.online === false);
-  m.node.classList.toggle('sel', !!SEL && SEL.ip === MAIN_IP);
-  m.halo.style.display = main.online === false ? 'none' : '';
+  servers.forEach(s => {
+    const m = MAP_REFS[keyOf(s)];
+    if(!m) return;
+    m.data = s;
+    m.node.classList.toggle('offline', s.online === false);
+    m.node.classList.toggle('sel', !!SEL && keyOf(SEL) === keyOf(s));
+    m.halo.style.display = s.online === false ? 'none' : '';
+  });
   if(!sim.raf) simDraw(sim);
 }
 
-function buildMap(svg, W, H, main, list, animate){
+function buildMap(svg, W, H, servers, list, animate){
   if (MAP_SIM && MAP_SIM.raf) cancelAnimationFrame(MAP_SIM.raf);
   svg.innerHTML = '';
   svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
@@ -765,15 +785,27 @@ function buildMap(svg, W, H, main, list, animate){
     });
     return ref;
   };
-  const sp = node(MAIN_IP, {x: cx, y: cy}, 23, GLYPH.main, main.name || main.host,
-    main.host ? main.host + '.mesh' : '', main, true).n;
+  // Первый сервер — в центре, остальные — вокруг него.
+  const hubs = {};
+  servers.forEach((s, i) => {
+    const a = i * (2 * Math.PI / Math.max(1, servers.length - 1)) - Math.PI / 2;
+    const rs = i ? (narrow ? 0.22 : 0.26) * S : 0;
+    hubs[keyOf(s)] = node(keyOf(s), {x: cx + rs * Math.cos(a), y: cy + rs * 0.8 * Math.sin(a)}, i ? 19 : 23,
+      GLYPH.main, s.name || s.host, s.host ? s.host + '.mesh' : '', s, true).n;
+    hubs[keyOf(s)].main = i === 0; // к центру тянется только первый
+  });
   list.forEach((d, j) => {
+    const sp = hubs[keyOf(hubOf(d, servers))];
     const a = j * 2.4 + 0.7; // золотой угол — соседи не друг на друге
     const rr = narrow ? 80 : 115;
     const sub = !d.online ? ago(d.lastSeen) : d.self ? L('это устройство', 'this device') : d.host + '.mesh';
     const r = node(d.ip, {x: sp.x + rr * Math.cos(a), y: sp.y + rr * 0.8 * Math.sin(a)}, narrow ? 10.5 : 12.5,
       glyphOf(d.platform), d.name || d.host, sub, d, false);
     r.edge = mapEdge(sim, r.n, sp, 'dev', !many);
+    // Устройство на связи и через другие серверы (одна сеть на нескольких
+    // серверах) — к ним тоже линия, без цифр.
+    r.extra = servers.filter(s => sp !== hubs[keyOf(s)] && (d.servers || []).includes(s.name))
+      .map(s => mapEdge(sim, r.n, hubs[keyOf(s)], 'dev', false));
   });
   // Новые узлы сначала «досчитываются» без показа, дальше — анимацией.
   sim.alpha = fresh ? 1 : 0.3;
@@ -789,7 +821,7 @@ addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(r
 function select(n){
   SEL = n;
   const sh = $('sheet');
-  const isDev = !n.server && n.platform !== 'server' && n.ip !== MAIN_IP;
+  const isDev = !isServerNode(n);
   const how = n.online === false ? L('не в сети, был ', 'offline, seen ') + ago(n.lastSeen)
     : n.self ? L('это устройство', 'this device')
     : n.direct ? L('напрямую', 'direct') : L('через сервер', 'via server');
@@ -846,7 +878,7 @@ async function refresh(){
       (DATA.links ? '' : L(' Соединения между другими устройствами видны, если в панели сервера этому клиенту дано право создавать пользователей.',
         ' Links between other devices are shown if this client may create users (set in the server panel).'));
   if(SEL && DATA.self){
-    const n = ring().concat([mainNode()]).find(x => x.ip === SEL.ip);
+    const n = ring().concat(serverNodes()).find(x => keyOf(x) === keyOf(SEL));
     if(n) SEL = n;
   }
   renderMap();

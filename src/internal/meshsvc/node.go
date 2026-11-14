@@ -19,11 +19,12 @@ const NodeUnitName = nodeapi.Unit
 // пользователь системы по имени юнита (ssh_tunnel_node) без входа и домашней
 // папки; данные — только в StateDirectory, управляющий сокет для панели —
 // в RuntimeDirectory. Запускается после meshd: без сети устройств плагины
-// никого не опознают. Сеть — только localhost (порты плагинов и meshd),
-// системные вызовы — набор обычной службы (ТЗ 13).
+// никого не опознают. Порты — только на localhost; наружу — только
+// источники списка блокировки и проверка сайтов (ТЗ 15); системные вызовы
+// — набор обычной службы (ТЗ 13).
 func NodeUnit() string {
 	return `[Unit]
-Description=ssh_tunnel - плагины сервера (зеркальные папки, файлы, общий буфер, резервные копии)
+Description=ssh_tunnel - плагины сервера (зеркальные папки, файлы, буфер, копии, машины, блокировка, проверка сайта)
 After=network.target meshd.service
 Wants=meshd.service
 
@@ -45,8 +46,9 @@ ProcSubset=pid
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-IPAddressDeny=any
-IPAddressAllow=localhost
+# Наружу ходят два плагина ТЗ 15: «Блокировка рекламы» качает источники
+# списка, «Проверить сайт» проверяет сайты из сети сервера. Поэтому сеть не
+# ограничена адресами; порты плагинов всё равно слушают только 127.0.0.1.
 PrivateTmp=yes
 PrivateDevices=yes
 

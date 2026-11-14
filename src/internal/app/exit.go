@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"sshtunnel/internal/config"
 	"sshtunnel/internal/core"
@@ -19,9 +20,13 @@ import (
 func exitHops(cfg config.Config, p config.Profile) []tunnel.Hop {
 	var out []tunnel.Hop
 	for _, h := range cfg.ExitChain(p) {
+		need, found := strings.CutPrefix(h.ID, config.ExitNeedPrefix)
+		if !found {
+			need = ""
+		}
 		out = append(out, tunnel.Hop{
 			Name: h.Name, Host: h.Host, SSHPort: h.SSHPort, User: h.User,
-			KeyPath: h.KeyPath, Cipher: h.Cipher, UDPRelay: h.UDPRelayEnabled,
+			KeyPath: h.KeyPath, Cipher: h.Cipher, UDPRelay: h.UDPRelayEnabled, Need: need,
 		})
 	}
 	return out
@@ -31,7 +36,7 @@ func exitHops(cfg config.Config, p config.Profile) []tunnel.Hop {
 func exitChainKey(cfg config.Config, p config.Profile) string {
 	var b strings.Builder
 	for _, h := range exitHops(cfg, p) {
-		fmt.Fprintf(&b, "%s|%s|%d|%s|%s|%s|%v;", h.Name, h.Host, h.SSHPort, h.User, h.KeyPath, h.Cipher, h.UDPRelay)
+		fmt.Fprintf(&b, "%s|%s|%d|%s|%s|%s|%v|%s;", h.Name, h.Host, h.SSHPort, h.User, h.KeyPath, h.Cipher, h.UDPRelay, h.Need)
 	}
 	return b.String()
 }
@@ -67,8 +72,12 @@ func (d *driver) Exit() *core.ExitPath {
 
 // SetExitVia задаёт «Выход через» у сервера id: via — id других серверов по
 // порядку (пусто — без цепочки). Подключённое переподключается, если это
-// активный сервер.
+// активный сервер. Это правка человека на устройстве: она новее цепочки из
+// панели, если та была (ТЗ 16), и панели серверов её увидят. Звено из
+// панели без профиля ("need:адрес:порт") можно оставить как есть.
 func (a *App) SetExitVia(id string, via []string) (string, error) {
+	a.exitMu.Lock()
+	defer a.exitMu.Unlock()
 	cfg := a.Config()
 	p, ok := cfg.ProfileByID(id)
 	if !ok {
@@ -86,6 +95,9 @@ func (a *App) SetExitVia(id string, via []string) (string, error) {
 			return "", errors.New("один сервер дважды в цепочке")
 		}
 		seen[v] = true
+		if strings.HasPrefix(v, config.ExitNeedPrefix) {
+			continue
+		}
 		hop, ok := cfg.ProfileByID(v)
 		if !ok {
 			return "", fmt.Errorf("сервер %q не найден", v)
@@ -95,6 +107,7 @@ func (a *App) SetExitVia(id string, via []string) (string, error) {
 		}
 	}
 	p.ExitVia = append([]string(nil), via...)
+	config.TouchExit(&p, time.Now().Unix())
 	cfg.SetProfile(p)
 	return a.SetConfig(cfg)
 }

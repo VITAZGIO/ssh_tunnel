@@ -33,6 +33,12 @@ const (
 	WarnSecondary = "secondary"
 	// WarnNoMesh — сети устройств на этом сервере нет.
 	WarnNoMesh = "no_mesh"
+	// WarnAdblockNoSources — общий список блокировки включён, а источников
+	// нет: устройствам раздавать нечего (ТЗ 15).
+	WarnAdblockNoSources = "adblock_no_sources"
+	// WarnAdblockFailed — последнее обновление списка не удалось (Detail —
+	// почему); раздаётся прежний.
+	WarnAdblockFailed = "adblock_failed"
 )
 
 // NodeWarning — что мешает плагинам.
@@ -41,23 +47,34 @@ type NodeWarning struct {
 	Ports string   `json:"ports,omitempty"` // какие порты плагинов закрыты
 	Users []string `json:"users,omitempty"` // у кого нет прав на эти порты
 	Fix   bool     `json:"fix,omitempty"`   // есть безопасное исправление
+	// Detail — подробность (текст ошибки плагина).
+	Detail string `json:"detail,omitempty"`
 }
 
-// pluginPorts — порты включённых плагинов.
+// stateWarnings — что мешает самим плагинам по их состоянию (ТЗ 15).
+func stateWarnings(st *nodeapi.State) []NodeWarning {
+	var out []NodeWarning
+	if st == nil || !st.Config.Adblock || st.Adblock == nil {
+		return out
+	}
+	switch {
+	case len(st.Adblock.Sources) == 0 && len(st.Adblock.Deny) == 0:
+		out = append(out, NodeWarning{Code: WarnAdblockNoSources})
+	case st.Adblock.Error != "" && !st.Adblock.Updating:
+		out = append(out, NodeWarning{Code: WarnAdblockFailed, Detail: st.Adblock.Error})
+	}
+	return out
+}
+
+// pluginPorts — порты включённых плагинов (по возрастанию).
 func pluginPorts(c nodeapi.Config) []int {
 	var out []int
-	if c.Files {
-		out = append(out, nodeapi.PortFiles)
+	for _, p := range nodeapi.Plugins {
+		if c.On(p) {
+			out = append(out, nodeapi.PortOf(p))
+		}
 	}
-	if c.Mirror {
-		out = append(out, nodeapi.PortMirror)
-	}
-	if c.Clipboard {
-		out = append(out, nodeapi.PortClipboard)
-	}
-	if c.Backup {
-		out = append(out, nodeapi.PortBackup)
-	}
+	sort.Ints(out)
 	return out
 }
 
@@ -198,7 +215,8 @@ func (s *Server) nodeWarnings(ctx context.Context, st *nodeapi.State) []NodeWarn
 	if role == MeshRoleOff && s.mesh.sys.UnitState(meshdUnit).Active {
 		role = MeshRoleMain
 	}
-	return pluginWarnings(role, !ms.ServerAccessOff, ms.ServerPorts, s.settings.Get().Access, s.clients.List(), st.Config)
+	return append(pluginWarnings(role, !ms.ServerAccessOff, ms.ServerPorts, s.settings.Get().Access, s.clients.List(), st.Config),
+		stateWarnings(st)...)
 }
 
 // fixNode — безопасное исправление по коду предупреждения.

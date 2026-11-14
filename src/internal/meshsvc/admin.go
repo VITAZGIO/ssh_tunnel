@@ -44,6 +44,35 @@ type Device struct {
 	// Direct — с какими устройствами у этого сейчас прямое соединение
 	// (минуя сервер), по отчёту самого устройства.
 	Direct []DirectLink `json:"direct,omitempty"`
+	// Профиль устройства в панели (meshd 5+, ТЗ 16): ждёт одобрения,
+	// заморожено, серверы устройства с их цепочками выхода и цепочка,
+	// которую последней задала панель этого сервера.
+	Pending  bool         `json:"pending,omitempty"`
+	Frozen   bool         `json:"frozen,omitempty"`
+	Profiles []ProfileRef `json:"profiles,omitempty"`
+	ExitSet  *ExitOrder   `json:"exitSet,omitempty"`
+}
+
+// ProfileRef — сервер, для которого у устройства есть профиль (ключ
+// «адрес:порт»), и цепочка выхода этого профиля: Via — ключи звеньев ("" —
+// звено, которого на устройстве уже нет), T — когда её задали, By — какая
+// панель (пусто — человек на самом устройстве).
+type ProfileRef struct {
+	Key    string   `json:"k"`
+	Name   string   `json:"n,omitempty"`
+	Active bool     `json:"a,omitempty"`
+	Via    []string `json:"v,omitempty"`
+	T      int64    `json:"t,omitempty"`
+	By     string   `json:"b,omitempty"`
+}
+
+// ExitOrder — цепочка выхода, которую задала панель.
+type ExitOrder struct {
+	Entry string   `json:"entry"`
+	Via   []string `json:"via,omitempty"`
+	T     int64    `json:"t"`
+	By    string   `json:"by,omitempty"`
+	ByID  string   `json:"byId,omitempty"`
 }
 
 // DirectLink — прямое соединение с другим устройством сети.
@@ -70,10 +99,12 @@ type Network struct {
 	// Name — имя сети из панели; Created — когда сеть появилась (unix);
 	// EmptySince — с какого момента в ней нет устройств (0 — есть).
 	// Старый meshd этих полей не присылает — они нулевые.
-	Name       string   `json:"name"`
-	Created    int64    `json:"created"`
-	EmptySince int64    `json:"emptySince"`
-	Devices    []Device `json:"devices"`
+	Name       string `json:"name"`
+	Created    int64  `json:"created"`
+	EmptySince int64  `json:"emptySince"`
+	// Approval — «Новые устройства — после одобрения» (meshd 5+).
+	Approval bool     `json:"approval,omitempty"`
+	Devices  []Device `json:"devices"`
 }
 
 // Server — подключённый побочный сервер.
@@ -248,7 +279,8 @@ type Events struct {
 
 // CheckResult — ответ /v1/check: можно ли устройству From открыть соединение
 // к To на порт. Rule — индекс правила или -1; Reason — «rule», «policy off»,
-// «no rule», «unknown device», «server cannot initiate».
+// «no rule», «unknown device», «server cannot initiate», а с meshd 5 ещё
+// «pending» и «frozen» (одно из двух ждёт одобрения или заморожено).
 type CheckResult struct {
 	Allowed bool   `json:"allowed"`
 	Rule    int    `json:"rule"`
@@ -307,6 +339,37 @@ func (a *Admin) SetKnown(ctx context.Context, list []KnownServer) error {
 		list = []KnownServer{}
 	}
 	return a.do(ctx, http.MethodPost, "/v1/known", map[string]any{"servers": list}, nil)
+}
+
+// SetApproval включает «Новые устройства — после одобрения» (meshd 5+).
+func (a *Admin) SetApproval(ctx context.Context, netID string, on bool) error {
+	return a.do(ctx, http.MethodPost, "/v1/net/approval", map[string]any{"net": netID, "on": on}, nil)
+}
+
+// Approve пускает в сеть устройство, которое ждёт одобрения (meshd 5+).
+func (a *Admin) Approve(ctx context.Context, netID, device string) error {
+	return a.do(ctx, http.MethodPost, "/v1/approve", deviceReq{Net: netID, Device: device}, nil)
+}
+
+// Freeze замораживает (on) или размораживает устройство (meshd 5+).
+func (a *Admin) Freeze(ctx context.Context, netID, device string, on bool) error {
+	return a.do(ctx, http.MethodPost, "/v1/freeze", map[string]any{"net": netID, "device": device, "on": on}, nil)
+}
+
+// SetExit задаёт устройству цепочку выхода: вход через entry, выход через
+// via (ключи «адрес:порт»; пусто — без цепочки). meshd 5+.
+func (a *Admin) SetExit(ctx context.Context, netID, device, entry string, via []string) (ExitOrder, error) {
+	if via == nil {
+		via = []string{}
+	}
+	var out struct {
+		Exit *ExitOrder `json:"exit"`
+	}
+	err := a.do(ctx, http.MethodPost, "/v1/exit", map[string]any{"net": netID, "device": device, "entry": entry, "via": via}, &out)
+	if err == nil && out.Exit != nil {
+		return *out.Exit, nil
+	}
+	return ExitOrder{}, err
 }
 
 // ForgetServer забывает адрес отключённого побочного сервера.

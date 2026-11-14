@@ -2,6 +2,7 @@ package panel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -130,6 +131,20 @@ func (a *fakeNodeAPI) ClearClipboard(_ context.Context, netID string) error {
 }
 
 func (a *fakeNodeAPI) DeleteBackup(context.Context, nodeapi.BackupReq) error { return nil }
+
+func (a *fakeNodeAPI) SetAdblock(_ context.Context, c nodeapi.AdblockConf) (nodeapi.AdblockState, error) {
+	return nodeapi.AdblockState{AdblockConf: c}, nil
+}
+
+func (a *fakeNodeAPI) UpdateAdblock(context.Context) (nodeapi.AdblockState, error) {
+	return nodeapi.AdblockState{Updating: true}, nil
+}
+
+func (a *fakeNodeAPI) CheckSite(_ context.Context, r nodeapi.SiteReq) (json.RawMessage, error) {
+	return json.RawMessage(`{"site":"` + r.Site + `","verdict":"server_ok"}`), nil
+}
+
+func (a *fakeNodeAPI) ClearMachines(context.Context, string) error { return nil }
 
 func (a *fakeNodeAPI) SetFolderAccess(_ context.Context, r nodeapi.AccessReq) error {
 	a.mu.Lock()

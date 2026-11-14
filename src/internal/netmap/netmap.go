@@ -108,6 +108,9 @@ func Build() Map {
 	m.Self = &self
 	for _, p := range st.Peers {
 		if p.Self {
+			// Через какие серверы на связи само устройство (ТЗ 20: карта
+			// рисует линию к каждому, а в st.Self этого списка нет).
+			self.Servers = p.Servers
 			continue
 		}
 		n := Node{Peer: p, Server: p.Platform == "server"}

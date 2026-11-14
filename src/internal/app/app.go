@@ -99,6 +99,9 @@ type App struct {
 	// meshLinks — лёгкие соединения с другими серверами той же сети
 	// устройств (ТЗ 12): живут вместе с клиентом сети.
 	meshLinks *tunnel.MeshLinks
+	// exitMu — цепочку выхода меняют по одному: человек на устройстве и
+	// панель сервера (ТЗ 16) не должны затереть правку друг друга.
+	exitMu sync.Mutex
 }
 
 // NetLayer заворачивает в туннель весь трафик системы — вместо системного
@@ -121,7 +124,7 @@ func (a *App) SetNetLayer(n NetLayer) {
 	cfg := a.cfg
 	a.mu.Unlock()
 	if ab, ok := n.(AdBlocker); ok {
-		ab.SetAdBlock(cfg)
+		a.attachAdBlock(ab, cfg)
 	}
 	if cl, ok := n.(ConfigLayer); ok {
 		cl.ApplyConfig(cfg)
@@ -273,6 +276,7 @@ func (a *App) SetConfig(cfg config.Config) (string, error) {
 	if a.meshHost.Running() {
 		tc, _, _ := a.tunnelConfig(cfg, active)
 		a.meshLinks.Set(meshServers(cfg, active, tc))
+		a.pushMeshProfiles(cfg)
 	}
 	if running && connectionSettingsChanged(old, cfg) {
 		return "часть настроек вступит в силу после переподключения", nil

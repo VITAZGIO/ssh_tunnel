@@ -226,7 +226,7 @@ func TestБезСервераПерезапускПоМаяку(t *testing.T) {
 func TestМаякПодписьИСвежесть(t *testing.T) {
 	key := beaconKeyFor(NewKey())
 	now := time.Now()
-	b := beacon{V: 1, Net: "n", Dev: "d", IP: "198.19.0.5", Port: 1, FP: "f", T: now.UnixMilli()}
+	b := beacon{V: 1, Net: "n", ID: "d", IP: "198.19.0.5", Port: 1, FP: "f", T: now.UnixMilli()}
 	if _, err := decodeBeacon(key, encodeBeacon(key, b), now); err != nil {
 		t.Fatalf("свой маяк отвергнут: %v", err)
 	}

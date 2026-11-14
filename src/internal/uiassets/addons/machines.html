@@ -25,6 +25,10 @@
   .meter i{display:block;height:100%;border-radius:4px;background:var(--ok);transition:width .4s}
   .meter i.w{background:var(--warn)}.meter i.e{background:var(--err)}
   .spark{width:100%;height:26px;display:block}
+  .hist{width:100%;height:46px;display:block}
+  .hist .own{stroke:var(--ok)}
+  .hist .join{stroke:var(--dim);stroke-dasharray:2 3}
+  .hl{display:flex;justify-content:space-between;gap:8px;color:var(--dim);font-size:11px;margin-top:-2px}
   .gs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;text-align:center}
   .g{display:flex;flex-direction:column;align-items:center;min-width:0}
   .g svg{width:100%;max-width:84px;display:block}
@@ -69,6 +73,9 @@
     <div class="tip" id="tipShare" hidden></div>
     <label class="ck" id="rowOff"><input type="checkbox" id="allowOff"><span id="lOff"></span><span class="q" data-tip="tipOff">?</span></label>
     <div class="tip" id="tipOff" hidden></div>
+    <label class="ck"><input type="checkbox" id="toSrv"><span id="lSrv"></span><span class="q" data-tip="tipSrv">?</span></label>
+    <div class="tip" id="tipSrv" hidden></div>
+    <div class="hint" id="srvSt"></div>
   </div>
 </div>
 
@@ -119,8 +126,34 @@ function spark(h){
   const pts = h.map((v, i) => `${(i * W / (h.length - 1)).toFixed(1)},${(H - 2 - (H - 4) * Math.min(v, max) / max).toFixed(1)}`).join(' ');
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg>`;
 }
+// График процессора: история сервера сети (сутки) и свои последние
+// показания с того места, где они начинаются (зелёным). Сервера с плагином
+// «Машины» нет — только свои ~30 минут. Пропуски в истории — разрывы.
+function hist(sr){
+  if(!sr || !sr.t || sr.t.length < 2) return '';
+  const W = 300, H = 44, t0 = sr.t[0], t1 = sr.t[sr.t.length - 1], span = Math.max(1, t1 - t0);
+  const gap = sr.src === 'server' ? Math.max(600, span / 60) : 120;
+  const x = t => ((t - t0) * W / span).toFixed(1), y = v => (H - 2 - (H - 4) * Math.min(Math.max(v, 0), 100) / 100).toFixed(1);
+  let srvPath = '', ownPath = '', prev = null;
+  sr.t.forEach((t, i) => {
+    const own = sr.src === 'local' || (sr.join && t >= sr.join);
+    const cmd = prev === null || t - prev > gap ? 'M' : 'L';
+    const seg = `${cmd}${x(t)},${y(sr.cpu[i])} `;
+    if(own){ ownPath += (ownPath ? (t - prev > gap ? 'M' : 'L') : 'M') + `${x(t)},${y(sr.cpu[i])} `; }
+    else srvPath += seg;
+    prev = t;
+  });
+  const join = sr.join ? `<line class="join" x1="${x(sr.join)}" x2="${x(sr.join)}" y1="0" y2="${H}"/>` : '';
+  const hours = Math.round(span / 3600);
+  const from = sr.src === 'server'
+    ? L(`проц. за ${hours || '<1'} ч · история с сервера «${sr.server}»`, `CPU, ${hours || '<1'} h · history from server «${sr.server}»`)
+    : L('проц. · свои показания (на сервере истории нет)', 'CPU · own readings (no history on the server)');
+  return `<svg class="hist" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${join}<path d="${srvPath}" fill="none" stroke="var(--accent)" stroke-width="1.4"/>${ownPath ? `<path class="own" d="${ownPath}" fill="none" stroke-width="1.6"/>` : ''}</svg>
+    <div class="hl"><span>${esc(from)}</span>${sr.join ? `<span>${esc(L('зелёным — с этого устройства', 'green — from this device'))}</span>` : ''}</div>`;
+}
 // group — в какой список карточка (для стрелок порядка); n — сколько в нём.
-function card(m, own, group, n){
+// sr — её график (series).
+function card(m, own, group, n, sr){
   const r = m.reading, alive = r && r.online;
   const peerUp = own && m.peer && ST.online[m.peer];
   let body = r ? `<div class="hint ${alive ? 'ok' : ''}">${alive ? '● ' + esc(L('в сети', 'online')) + (r.ping ? ` · ${r.ping < 10 ? r.ping.toFixed(1) : r.ping.toFixed(0)} ${L('мс', 'ms')}` : '') : '○ ' + esc(L('не отвечает — выключена или не в сети', 'not answering — off or offline'))}</div>` : '';
@@ -133,7 +166,7 @@ function card(m, own, group, n){
     if(r.memTotal) gs.push(gauge(L('память', 'memory'), r.memUsed * 100 / r.memTotal, `${gb(r.memUsed)} / ${gb(r.memTotal)}`));
     if(r.diskTotal) gs.push(gauge(L('диск', 'disk'), r.diskUsed * 100 / r.diskTotal, `${gb(r.diskUsed)} / ${gb(r.diskTotal)}`));
     if(gs.length) body += `<div class="gs">${gs.join('')}</div>`;
-    body += spark(r.hist);
+    body += sr && sr.t && sr.t.length > 1 ? hist(sr) : spark(r.hist);
     const ch = [];
     if(r.temp) ch.push(`🌡 <b>${r.temp.toFixed(0)}°C</b>`);
     if(r.load) ch.push(`${esc(L('нагрузка', 'load'))} <b>${r.load.toFixed(2)}</b>`);
@@ -192,20 +225,24 @@ async function load(){
   if(!r) return;
   ST = r; ST.machines = ST.machines || []; ST.peers = ST.peers || []; ST.online = ST.online || {};
   draw();
-  $('share').checked = ST.settings.share; $('allowOff').checked = ST.settings.allowShutdown;
+  $('share').checked = ST.settings.share; $('allowOff').checked = ST.settings.allowShutdown; $('toSrv').checked = !ST.settings.noServer;
+  const ss = (ST.servers || []);
+  $('srvSt').className = 'hint' + (ss.some(x => x.on) ? ' ok' : '');
+  $('srvSt').textContent = ST.settings.noServer ? '' : !ss.length ? L('Серверов сети нет на связи — история только своя.', 'No network server online — own history only.')
+    : ss.map(x => x.on ? L(`«${x.name}»: принимает показания`, `«${x.name}»: takes readings`) : `«${x.name}»: ${x.error}`).join(' · ');
   $('rowOff').hidden = !ST.canShutdown;
 }
 function draw(){
   const n = ST.machines.length;
-  $('mine').innerHTML = n ? ST.machines.map(m => card(m, true, '', n)).join('')
+  $('mine').innerHTML = n ? ST.machines.map(m => card(m, true, '', n, m.series)).join('')
     : `<div class="card hint">${esc(L('Машин пока нет — «Добавить машину».', 'No machines yet.'))}</div>`;
   bindCards($('mine'));
   const net = ST.network || [];
-  $('net').innerHTML = net.map(d => `<h3>${icon('hub')}${esc(L('Из сети: ', 'From the network: ') + d.device)}</h3><div class="grid">${sorted(d.machines, netOrder(d.device)).map(m => card(m, false, d.device, d.machines.length)).join('')}</div>`).join('');
+  $('net').innerHTML = net.map(d => `<h3>${icon('hub')}${esc(L('Из сети: ', 'From the network: ') + d.device)}</h3><div class="grid">${sorted(d.machines, netOrder(d.device)).map(m => card(m, false, d.device, d.machines.length, (d.series || {})[m.id])).join('')}</div>`).join('');
   bindCards($('net'));
 }
-const saveSet = () => api('/api/machines', {op: 'settings', settings: {share: $('share').checked, allowShutdown: $('allowOff').checked}});
-$('share').onchange = saveSet; $('allowOff').onchange = saveSet;
+const saveSet = () => api('/api/machines', {op: 'settings', settings: {share: $('share').checked, allowShutdown: $('allowOff').checked, noServer: !$('toSrv').checked}});
+$('share').onchange = saveSet; $('allowOff').onchange = saveSet; $('toSrv').onchange = saveSet;
 
 function showFields(){
   const s = $('fSrc').value || 'none';
@@ -251,6 +288,9 @@ $('lShare').textContent = L('Показывать мои машины всем �
 $('tipShare').textContent = L('Настрой машины один раз на домашнем сервере, поставь эту галку — и с телефона (даже на работе) в разделе «Из сети» видно всё. Пароли и токены не уходят — только показания.', 'Set up once on a home server and tick this — your phone sees everything under «From the network». Only readings are shared.');
 $('lOff').textContent = L('Разрешить своим устройствам выключать это', 'Let my devices shut this one down');
 $('tipOff').textContent = L('Чтобы выключать машину кнопкой: на ней тоже стоит ssh_tunnel с этим плагином и эта галка; в карточке машины — «Изменить» → «Включение и выключение» → «Выключать как» → её имя в сети устройств.', 'To shut a machine down: it runs ssh_tunnel with this plugin and this box ticked; then pick it in «Shut down as».');
+$('lSrv').textContent = L('Хранить историю на сервере сети', 'Keep history on the network server');
+$('tipSrv').textContent = L('Показания раз в 30 секунд уходят на сервер сети, где в панели включён плагин «Машины». Он хранит их неделями — график не рвётся, пока это устройство выключено. На сервер уходят только показания и имена машин; адреса, пароли и токены остаются здесь. Другие устройства видят эту историю, только если включено «Показывать мои машины всем своим устройствам».',
+  'Every 30 s readings go to the network server with the «Machines» plugin on. It keeps them for weeks, so the graph has no holes while this device is off. Only readings and machine names are sent. Other devices see this history only with «Show my machines to all my devices».');
 $('lPick').textContent = L('Из сети устройств', 'From the device network');
 // Выбрал своё устройство — адрес, имя и «выключать как» подставятся.
 $('fPick').onchange = () => { const o = $('fPick').selectedOptions[0]; if(!o || !o.value) return;
