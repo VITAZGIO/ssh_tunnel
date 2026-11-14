@@ -36,7 +36,7 @@ on:
 jobs:
   lab:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -72,7 +72,9 @@ jobs:
         run: docker pull -q busybox:1.36
 
       - name: Стенд
-        run: sudo --preserve-env=LAB RP=${{ matrix.rp }} bash test/netns/${{ matrix.suite }}.sh
+        # Свой предел раньше предела задания: снятое по тайм-ауту задание
+        # GitHub остаётся без журнала.
+        run: sudo --preserve-env=LAB RP=${{ matrix.rp }} timeout -k 20 1500 bash test/netns/${{ matrix.suite }}.sh
 
       - name: Журналы стенда
         if: always()

@@ -11,7 +11,8 @@ CFG="$LAB/cfg-c"
 SOCK=/run/docker-lab.sock
 IMG=busybox:1.36
 TOK=""
-D() { docker -H "unix://$SOCK" "$@"; }
+# Каждая команда docker — не дольше минуты: повиснет — увидим где.
+D() { timeout 60 docker -H "unix://$SOCK" "$@"; }
 
 cleanup() {
   set +e
@@ -61,6 +62,9 @@ count_rules() { ip -n c rule | grep -E 'lookup 709[4-6]' | grep -cE "$1" || true
 t_is_b() { [ "$(cecho tun 2>/dev/null)" = 203.0.113.20 ]; }
 
 echo "== стенд: rp_filter=$RP"
+# Где мы: каждая строка сценария с временем — чтобы найти, что повисло.
+export PS4='+ $(date +%T) docker.sh:${LINENO}: '
+set -x
 lab_down
 lab_inet
 lab_b
