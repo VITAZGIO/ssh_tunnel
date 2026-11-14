@@ -91,11 +91,14 @@ func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
 
 // apiContainer — ответ GET /containers/json (нужные поля).
 type apiContainer struct {
-	ID         string            `json:"Id"`
-	Names      []string          `json:"Names"`
-	Image      string            `json:"Image"`
-	State      string            `json:"State"`
-	Labels     map[string]string `json:"Labels"`
+	ID     string            `json:"Id"`
+	Names  []string          `json:"Names"`
+	Image  string            `json:"Image"`
+	State  string            `json:"State"`
+	Labels map[string]string `json:"Labels"`
+	Ports  []struct {
+		PublicPort uint16 `json:"PublicPort"`
+	} `json:"Ports"`
 	HostConfig struct {
 		NetworkMode string `json:"NetworkMode"`
 	} `json:"HostConfig"`
@@ -129,6 +132,11 @@ func convert(raw []apiContainer) []Container {
 			c.Name = strings.TrimPrefix(r.Names[0], "/")
 		}
 		c.Project, c.Service = r.Labels[labelProject], r.Labels[labelService]
+		for _, p := range r.Ports {
+			if p.PublicPort != 0 {
+				c.Published = true
+			}
+		}
 		mode := r.HostConfig.NetworkMode
 		switch {
 		case mode == "host" || mode == "none":

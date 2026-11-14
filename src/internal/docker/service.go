@@ -85,7 +85,7 @@ func init() {
 	addons.Register(AppID, func() addons.Module { return &Service{} })
 	addons.RegisterRoutes(AppID,
 		addons.Route{Path: "/api/docker", Methods: "GET", Desc: "Docker (Linux, VPN-версия): контейнеры (имя, проект compose, образ, сети, состояние), выбор для каждого (host — как компьютер, tunnel — через сервер, direct — напрямую), что действует и почему, проекты, состояние слоя VPN.", H: handleList},
-		addons.Route{Path: "/api/docker/set", Methods: "POST", Desc: "Выбор Docker: {\"container\":\"<имя или ID>\",\"route\":\"host|tunnel|direct\"} или {\"project\":\"<проект compose>\",\"route\":…} — весь проект разом. Метка ssh_tunnel.route у контейнера сильнее.", H: handleSet},
+		addons.Route{Path: "/api/docker/set", Methods: "POST", Desc: "Выбор Docker: {\"container\":\"<имя или ID>\",\"route\":\"host|tunnel|direct\"} или {\"project\":\"<проект compose>\",\"route\":…} — весь проект разом. Метка ssh_tunnel.route у контейнера сильнее. {\"container\":…,\"strict\":true|false} — галочка «без VPN — без интернета» (действует при «через сервер»: и при выключенном VPN, и без программы у контейнера нет интернета).", H: handleSet},
 	)
 }
 
@@ -108,8 +108,9 @@ func (s *Service) Start() error {
 	return nil
 }
 
-// Stop — плагин выключен: правил для контейнеров больше нет, все идут как
-// компьютер.
+// Stop — плагин выключен (или программа выходит): правил для контейнеров
+// больше нет, все идут как компьютер. Кроме «через сервер» с галочкой «без
+// VPN — без интернета»: их правила остаются (снять — галочкой).
 func (s *Service) Stop() {
 	if s.cancel != nil {
 		s.cancel()
@@ -120,8 +121,17 @@ func (s *Service) Stop() {
 		cur = nil
 	}
 	curMu.Unlock()
+	s.mu.Lock()
+	rows := s.rows
+	s.mu.Unlock()
+	var keep []Target
+	for _, t := range Targets(rows) {
+		if t.Strict {
+			keep = append(keep, t)
+		}
+	}
 	if k := getKernel(); k != nil {
-		k.SetTargets(nil)
+		k.SetTargets(keep)
 	}
 }
 
@@ -187,6 +197,7 @@ func (s *Service) refresh(ctx context.Context) {
 	var rows []Row
 	if err == nil {
 		rows = Resolve(cs, s.st.Get())
+		ApplyStrict(rows, s.st.Strict())
 	}
 	s.mu.Lock()
 	if err == nil {
@@ -256,17 +267,41 @@ func handleSet(w http.ResponseWriter, r *http.Request) {
 		Container string `json:"container"`
 		Project   string `json:"project"`
 		Route     string `json:"route"`
+		Strict    *bool  `json:"strict"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "плохой запрос: "+err.Error())
 		return
+	}
+	var err error
+	if req.Strict != nil {
+		if req.Container == "" {
+			writeErr(w, http.StatusBadRequest, "strict — только для контейнера (container)")
+			return
+		}
+		var row *Row
+		row, err = s.find(r.Context(), req.Container)
+		if err == nil && !row.Switchable {
+			err = errors.New("контейнер «" + row.Name + "» не отделить: " + row.Why)
+		}
+		if err == nil {
+			err = s.st.SetStrict(row.Container, *req.Strict)
+		}
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if req.Route == "" {
+			s.refresh(r.Context())
+			writeJSON(w, map[string]bool{"ok": true})
+			return
+		}
 	}
 	v, ok := ParseChoice(req.Route)
 	if !ok || req.Route == "" {
 		writeErr(w, http.StatusBadRequest, "route: host, tunnel или direct")
 		return
 	}
-	var err error
 	switch {
 	case req.Project != "":
 		err = s.st.SetProject(req.Project, v)

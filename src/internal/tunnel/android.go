@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"io"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -31,7 +32,15 @@ func (t *Tunnel) ServeConn(conn net.Conn, target string, byIP bool) {
 
 	var proc string
 	var pid int
-	if t.cfg.TunProcessRules {
+	// Источник «только через сервер» (контейнер Docker) — не программа этого
+	// компьютера: правила по программам к нему не относятся.
+	var forced bool
+	if ra, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+		if a, ok := netip.AddrFromSlice(ra.IP); ok {
+			forced = t.forced(a)
+		}
+	}
+	if t.cfg.TunProcessRules && !forced {
 		// Адрес приложения у соединения из стека — его собственный сокет,
 		// поэтому владелец находится по порту так же, как у прокси.
 		proc, pid = lookupProcess(conn)
@@ -53,7 +62,7 @@ func (t *Tunnel) ServeConn(conn net.Conn, target string, byIP bool) {
 		sniffed, head = sniffConn(conn, sniffTime(target))
 		src = io.MultiReader(bytes.NewReader(head), conn)
 	}
-	route, c := t.decideNamed(proc, target, sniffed)
+	route, c := t.decideNamed(proc, target, sniffed, forced)
 	direct := route == core.RouteDirect
 
 	// Адрес с известным именем в журнал пишем именем: адрес человеку ничего

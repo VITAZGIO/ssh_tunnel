@@ -243,6 +243,16 @@ func (systemEgress) Download(ctx context.Context, version, dst string) error {
 	return checkELF(dst)
 }
 
+func (systemEgress) Reachable(ctx context.Context, ip string, port int) bool {
+	var d net.Dialer
+	c, err := d.DialContext(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
+}
+
 func (systemEgress) Resolve(ctx context.Context, host string) ([]netip.Addr, error) {
 	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 }

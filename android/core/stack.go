@@ -425,7 +425,17 @@ func (h *Handler) serveDNS(conn net.Conn) {
 	}
 	h.Stats.dns()
 
-	reply, err := h.DNS.Answer(buf[:n])
+	d := h.DNS
+	if d.ForSource != nil {
+		if ua, ok := conn.RemoteAddr().(*net.UDPAddr); ok {
+			if a, ok := netip.AddrFromSlice(ua.IP); ok {
+				if x := d.ForSource(a.Unmap()); x != nil {
+					d = x
+				}
+			}
+		}
+	}
+	reply, err := d.Answer(buf[:n])
 	if err != nil {
 		return
 	}

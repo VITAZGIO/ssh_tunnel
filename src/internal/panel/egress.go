@@ -104,6 +104,9 @@ type egressSystem interface {
 	// сверяет контрольную сумму.
 	Download(ctx context.Context, version, dst string) error
 	Resolve(ctx context.Context, host string) ([]netip.Addr, error)
+	// Reachable — отвечает ли B на порт SSH с этого сервера (мимо туннеля:
+	// правило «to B lookup main»).
+	Reachable(ctx context.Context, ip string, port int) bool
 }
 
 // EgressTarget — сервер B.
@@ -162,7 +165,20 @@ type EgressManager struct {
 	downAt  time.Time
 	restart time.Time
 	backoff time.Duration
+
+	// Доступность B по надзору (tick). Клиент VPN, потеряв B, держит свои
+	// маршруты, пока переподключается (так на ПК нет утечки мимо туннеля), —
+	// по маршрутам падение B не видно. bFails — проверок подряд без ответа.
+	bFails int
+	bDown  bool
+	// catchAllOff — снято правило «всё остальное — в туннель» (режим
+	// «выход напрямую» при недоступном B).
+	catchAllOff bool
 }
+
+// egressDownAfter — сколько проверок подряд без ответа B считать его
+// недоступным (проверка раз в 15 с).
+const egressDownAfter = 2
 
 // NewEgressManager — dir: папка данных панели/egress.
 func NewEgressManager(sys egressSystem, dir, version string, direct func() []string) *EgressManager {
@@ -202,6 +218,9 @@ func (m *EgressManager) Status() EgressStatus {
 		if j.Running {
 			out.Phase = EgressInstalling
 		}
+	}
+	if out.Phase == EgressOn && m.bDown {
+		out.Phase = EgressDown
 	}
 	switch out.Phase {
 	case EgressApplying:
@@ -480,6 +499,7 @@ func (m *EgressManager) Off() error {
 		return errors.New("идёт включение — дождись конца")
 	}
 	m.token, m.exitIP = "", ""
+	m.bFails, m.bDown, m.catchAllOff = 0, false, false
 	m.mu.Unlock()
 	return m.sys.RunScript(egressOffNowScript(), func(string) {})
 }
@@ -499,6 +519,9 @@ func (m *EgressManager) SetMode(mode string) error {
 	m.cfg.Mode = mode
 	err := m.saveLocked()
 	target := m.cfg.Target
+	// rules-up.sh ставит правила целиком, с «всё остальное — в туннель»; при
+	// недоступном B в режиме «напрямую» надзор снимет его снова.
+	m.catchAllOff = false
 	m.mu.Unlock()
 	if err != nil || egressPhase(st, m.now()) == EgressOff || target == nil {
 		return err
@@ -526,6 +549,34 @@ func (m *EgressManager) SetMode(mode string) error {
 		return err
 	}
 	return m.sys.RunScript(egressModeScript(plan), func(string) {})
+}
+
+// watchB — проверить, жив ли B, и в режиме «выход напрямую» снять или
+// вернуть правило «всё остальное — в туннель». Клиент VPN при упавшем B
+// маршруты в свою таблицу не снимает (переподключается), поэтому без этого
+// «напрямую» не наступило бы вовсе (нашёл стенд test/netns, ТЗ 14).
+func (m *EgressManager) watchB(ctx context.Context, t EgressTarget, mode string) {
+	c, cancel := context.WithTimeout(ctx, 5*time.Second)
+	up := m.sys.Reachable(c, t.IP, t.Port)
+	cancel()
+	m.mu.Lock()
+	if up {
+		m.bFails = 0
+	} else {
+		m.bFails++
+	}
+	m.bDown = m.bFails >= egressDownAfter
+	var script string
+	switch {
+	case mode == EgressModeDirect && m.bDown && !m.catchAllOff:
+		script, m.catchAllOff = egressCatchAllScript(false), true
+	case m.catchAllOff && (!m.bDown || mode != EgressModeDirect):
+		script, m.catchAllOff = egressCatchAllScript(true), false
+	}
+	m.mu.Unlock()
+	if script != "" {
+		m.sys.RunScript(script, func(string) {})
+	}
 }
 
 // Start — надзор: адрес снаружи и перезапуск клиента, если B пропал.
@@ -580,9 +631,17 @@ func (m *EgressManager) tick(ctx context.Context) {
 		m.downAt, m.backoff, m.exitIP = time.Time{}, 0, ""
 		wantIP = m.selfIP == "" || now.Sub(m.exitAt) > 30*time.Minute
 	}
+	target, mode := m.cfg.Target, m.cfg.Mode
 	m.mu.Unlock()
 	if doRestart {
 		m.sys.Restart(egressUnit)
+	}
+	if (phase == EgressOn || phase == EgressDown) && target != nil {
+		m.watchB(ctx, *target, mode)
+	} else {
+		m.mu.Lock()
+		m.bFails, m.bDown, m.catchAllOff = 0, false, false
+		m.mu.Unlock()
 	}
 	if wantIP {
 		c, cancel := context.WithTimeout(ctx, 10*time.Second)

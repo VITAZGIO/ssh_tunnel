@@ -3,7 +3,7 @@ package panel
 // Выход сервера через другой сервер: скрипты и службы systemd.
 //
 // Откат не зависит ни от процесса панели, ни от сети: это таймер systemd
-// (OnActiveSec и OnBootSec — 60 с) и простой скрипт sh. Пока лежит файл
+// (OnActiveSec — 60 с) и простой скрипт sh. Пока лежит файл
 // pending, таймер через минуту снимает всё (off.sh). Подтверждение (новый
 // запрос к панели из браузера) убирает pending, гасит таймер и только тогда
 // включает службы в автозапуск. До подтверждения службы запущены, но не
@@ -76,6 +76,12 @@ ExecStart=/bin/sh ` + egressVarDir + `/rollback.sh
 `
 }
 
+// egressRollbackTimerText — только OnActiveSec. OnBootSec здесь нельзя
+// (нашёл стенд test/netns, ТЗ 14): на сервере, загруженном больше минуты
+// назад, срок OnBootSec уже в прошлом, и systemd запускает откат сразу при
+// включении таймера — выход откатывался бы в ту же секунду. Перезагрузку
+// посреди окна покрывает и так: таймер включён (timers.target), при загрузке
+// он активируется заново и срабатывает через OnActiveSec после неё.
 func egressRollbackTimerText() string {
 	return fmt.Sprintf(`# ssh_tunnel: окно подтверждения выхода сервера. Создано панелью.
 [Unit]
@@ -83,7 +89,6 @@ Description=ssh_tunnel - окно подтверждения выхода сер
 
 [Timer]
 OnActiveSec=%[1]d
-OnBootSec=%[1]d
 AccuracySec=1s
 
 [Install]
@@ -205,6 +210,22 @@ func egressModeScript(p egressPlan) string {
 	return "set -eu\nD=" + egressVarDir + "\n[ -d \"$D\" ] || exit 0\n" +
 		heredoc("\"$D/rules-up.sh\"", p.upScript(), "EOF_UP_7097") +
 		"if systemctl is-active --quiet " + egressRulesUnit + "; then /bin/sh \"$D/rules-up.sh\"; fi\n"
+}
+
+// egressCatchAllScript — снять (on=false) или вернуть правило «всё
+// остальное — в туннель» (pref 9501). Вернуть — заново поставить правила
+// целиком (rules-up.sh), если служба правил работает.
+func egressCatchAllScript(on bool) string {
+	if on {
+		return "D=" + egressVarDir + "\n" +
+			"if systemctl is-active --quiet " + egressRulesUnit + " && [ -f \"$D/rules-up.sh\" ]; then /bin/sh \"$D/rules-up.sh\"; fi\n" +
+			"echo \"сервер Б снова отвечает — выход опять через него\"\n"
+	}
+	return fmt.Sprintf(`for fam in -4 -6; do
+  while ip $fam rule del pref %d 2>/dev/null; do :; done
+done
+echo "сервер Б не отвечает — выход напрямую, пока он не вернётся"
+`, prefEgressTunnel)
 }
 
 // egressOffNowScript — кнопка «Выключить»: тот же off.sh, а если его нет

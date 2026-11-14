@@ -23,6 +23,7 @@
   .state{font-size:12px;padding:1px 7px;border-radius:8px;background:var(--card2);color:var(--dim)}
   .bad{color:var(--err)}.ok{color:var(--ok)}
   h3{margin:0 0 4px;font-size:14px}
+  .strict{display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--dim);cursor:pointer}
 </style>
 </head>
 <body>
@@ -54,7 +55,9 @@ function status(c, d){
   const k = d.kernel;
   if(c.effective === 'tunnel'){
     if(!k) return `<span class="bad">${esc(L('выбор сохранён, но правил нет: нужна VPN-версия', 'choice saved, but no rules: needs the VPN version'))}</span>`;
-    if(!k.up) return `<span>${esc(L('VPN выключен — идёт как компьютер', 'VPN is off — goes like the computer'))}</span>`;
+    if(!k.up) return c.strict
+      ? `<span class="bad">${esc(L('VPN выключен — интернета нет (без VPN — без интернета)', 'VPN is off — no internet (no VPN — no internet)'))}</span>`
+      : `<span>${esc(L('VPN выключен — идёт как компьютер', 'VPN is off — goes like the computer'))}</span>`;
     if(!k.full) return `<span class="bad">${esc(L('туннель выключен — интернета нет', 'tunnel is off — no internet'))}</span>`;
     return `<span class="ok">${esc(L('через сервер', 'via the server'))}</span>`;
   }
@@ -93,14 +96,28 @@ function render(d){
     const meta = [c.project ? c.project + (c.service ? '/' + c.service : '') : '', c.image, nets].filter(Boolean).join(' · ');
     const why = c.switchable ? from(c) : (LANG === 'en' ? c.whyEn : c.why);
     const st = status(c, d);
+    // Ответы на соединения из интернета к опубликованному порту уходят в
+    // туннель, а не тем путём, каким пришли: из домашней сети порт открыт,
+    // из интернета (проброс на роутере) — нет.
+    const pub = c.published && c.effective === 'tunnel'
+      ? `<div class="meta bad">${esc(L('Опубликованный порт (-p) доступен из домашней сети, но не из интернета: ответ ушёл бы через сервер. Для проброса с роутера выбери «Напрямую» или «Как компьютер».',
+          'The published port (-p) is reachable from the home network, not from the internet: the reply would go via the server. For router port forwarding pick "Direct" or "Like the computer".'))}</div>` : '';
+    const strict = c.switchable && (c.effective === 'tunnel' || c.strictSet)
+      ? `<label class="strict"><input type="checkbox" data-strict="${esc(c.name)}" ${c.strictSet ? 'checked' : ''}>${esc(L('без VPN — без интернета', 'no VPN — no internet'))}</label>` : '';
     return `<div class="ctr"><div class="grow">
         <div class="name">${esc(c.name)} <span class="state">${esc(c.state)}</span></div>
         <div class="meta">${esc(meta)}</div>
-        <div class="meta">${why ? esc(why) + (st ? ' · ' : '') : ''}${st}</div></div>
+        <div class="meta">${why ? esc(why) + (st ? ' · ' : '') : ''}${st}</div>${pub}${strict}</div>
       ${c.switchable ? seg(c.label || c.choice, `data-ctr="${esc(c.name)}"`, !!c.label)
         : `<span class="hint">${esc(word(c.effective))}</span>`}</div>`;
   }).join('') : `<div class="hint">${esc(d.error ? '' : L('Контейнеров нет.', 'No containers.'))}</div>`;
 
+  document.querySelectorAll('[data-strict]').forEach(b => b.onchange = async () => {
+    b.disabled = true;
+    const r = await api('/api/docker/set', {container: b.dataset.strict, strict: b.checked}).catch(e => ({error: String(e)}));
+    if(r.error) alert(r.error);
+    load();
+  });
   document.querySelectorAll('[data-route]').forEach(b => b.onclick = async () => {
     const body = {route: b.dataset.route};
     if(b.dataset.project !== undefined) body.project = b.dataset.project; else body.container = b.dataset.ctr;

@@ -31,6 +31,12 @@ const (
 	PrioDNS  = 9400 // порт 53 контейнеров «через сервер» — раньше всего
 	PrioMain = 9401 // весь остальной трафик контейнера
 
+	// То же для «через сервер» с галочкой «без VPN — без интернета»: свои
+	// приоритеты, чтобы следующий запуск отличил их правила от обычных
+	// (обычные после аварии снимаются через 2 минуты, эти — никогда).
+	PrioStrictDNS  = 9402
+	PrioStrictMain = 9403
+
 	// metricUnreachable — запасной «нет маршрута»: хуже любого настоящего.
 	metricUnreachable = 0xFFFFFF00
 )
@@ -38,10 +44,16 @@ const (
 // OurTables — все наши таблицы.
 var OurTables = []int{TableTunnel, TableTunnelDNS, TableDirect}
 
+// StrictPrio — приоритет правила контейнера с галочкой «без VPN — без
+// интернета».
+func StrictPrio(p int) bool { return p == PrioStrictDNS || p == PrioStrictMain }
+
 // Target — адрес контейнера и как ему ходить (tunnel или direct).
 type Target struct {
 	Addr  netip.Addr `json:"addr"`
 	Route Choice     `json:"route"`
+	// Strict — «без VPN — без интернета» (только у tunnel).
+	Strict bool `json:"strict,omitempty"`
 }
 
 // Net — состояние слоя VPN, от которого зависит план.
@@ -123,10 +135,15 @@ func (r Route) String() string {
 type Plan struct {
 	Rules  []Rule
 	Routes []Route
+	// Forced — адреса контейнеров «через сервер», которые идут в адаптер
+	// со своим адресом источника, без подмены Docker (MASQUERADE): по нему
+	// стек узнаёт, что соединение обязано идти только через сервер
+	// (core.Conn.Forced), и чужие правила «напрямую» к нему не применяет.
+	Forced []netip.Addr
 }
 
 // Empty — нечего ставить: ядро такое же, как без плагина.
-func (p Plan) Empty() bool { return len(p.Rules) == 0 && len(p.Routes) == 0 }
+func (p Plan) Empty() bool { return len(p.Rules) == 0 && len(p.Routes) == 0 && len(p.Forced) == 0 }
 
 // Локальные адреса: к ним контейнер ходит как обычно (через main) при любом
 // выборе — сам компьютер, соседние контейнеры и сети Docker, домашняя сеть
@@ -174,10 +191,29 @@ func prefixes(ss ...string) []netip.Prefix {
 //
 // Таблица 7096: throw локальных сетей и подсети адаптера, default через
 // роутер настоящей сети.
+//
+// Адаптер выключен (VPN выключил человек, программа вышла) — правила
+// остаются только у «через сервер» с галочкой «без VPN — без интернета»
+// (приоритеты 9402/9403), в таблицах — лишь throw локальных сетей и
+// unreachable: в домашнюю сеть и к соседним контейнерам можно, в интернет —
+// нет.
 func KernelPlan(ts []Target, n Net) Plan {
 	var p Plan
-	if !n.Up || len(ts) == 0 {
+	if len(ts) == 0 {
 		return p
+	}
+	if !n.Up {
+		// Без адаптера — только строгие, и никакой дороги в адаптер.
+		var strict []Target
+		for _, t := range ts {
+			if t.Route == ChoiceTunnel && t.Strict {
+				strict = append(strict, t)
+			}
+		}
+		if len(strict) == 0 {
+			return p
+		}
+		ts, n = strict, Net{}
 	}
 	need := map[[2]int]bool{} // {семейство, таблица}
 	for _, t := range ts {
@@ -188,13 +224,20 @@ func KernelPlan(ts []Target, n Net) Plan {
 		src := netip.PrefixFrom(t.Addr.Unmap(), bits)
 		switch t.Route {
 		case ChoiceTunnel:
+			pd, pm := PrioDNS, PrioMain
+			if t.Strict {
+				pd, pm = PrioStrictDNS, PrioStrictMain
+			}
 			p.Rules = append(p.Rules,
-				Rule{Family: fam, Priority: PrioDNS, Src: src, IPProto: 17, DPort: 53, Table: TableTunnelDNS},
-				Rule{Family: fam, Priority: PrioDNS, Src: src, IPProto: 6, DPort: 53, Table: TableTunnelDNS},
-				Rule{Family: fam, Priority: PrioMain, Src: src, Table: TableTunnel},
+				Rule{Family: fam, Priority: pd, Src: src, IPProto: 17, DPort: 53, Table: TableTunnelDNS},
+				Rule{Family: fam, Priority: pd, Src: src, IPProto: 6, DPort: 53, Table: TableTunnelDNS},
+				Rule{Family: fam, Priority: pm, Src: src, Table: TableTunnel},
 			)
 			need[[2]int{fam, TableTunnel}] = true
 			need[[2]int{fam, TableTunnelDNS}] = true
+			if n.Tun != "" {
+				p.Forced = append(p.Forced, t.Addr.Unmap())
+			}
 		case ChoiceDirect:
 			p.Rules = append(p.Rules, Rule{Family: fam, Priority: PrioMain, Src: src, Table: TableDirect})
 			need[[2]int{fam, TableDirect}] = true
@@ -251,5 +294,6 @@ func KernelPlan(ts []Target, n Net) Plan {
 		}
 	}
 	sort.SliceStable(p.Rules, func(i, j int) bool { return p.Rules[i].String() < p.Rules[j].String() })
+	sort.Slice(p.Forced, func(i, j int) bool { return p.Forced[i].Less(p.Forced[j]) })
 	return p
 }

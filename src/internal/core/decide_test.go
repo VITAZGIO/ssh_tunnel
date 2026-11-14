@@ -118,3 +118,61 @@ func TestPlanVPN(t *testing.T) {
 		t.Error("DNS и подставные адреса должны лежать в подсети адаптера")
 	}
 }
+
+// Источник «только через сервер» (контейнер Docker «через сервер», ТЗ 14):
+// списки и правила мимо сервера к нему не применяются, без сервера — отказ.
+func TestDecideForced(t *testing.T) {
+	direct := routing.NewDirectList([]string{"example.org", "25.*"})
+	except := routing.New(routing.ModeExcept, []string{"curl"})
+	on := Rules{Bypass: true, Mesh: true, Direct: direct, Policy: except}
+	cases := []struct {
+		name string
+		r    Rules
+		c    Conn
+		want Route
+	}{
+		{"сайт — через сервер", on, Conn{Target: "youtube.com:443", Forced: true}, RouteServer},
+		{"«всегда напрямую» не действует", on, Conn{Target: "example.org:443", Forced: true}, RouteServer},
+		{"«всегда напрямую» по выученному имени не действует", on, Conn{Target: "93.184.216.34:443", Name: "example.org", Forced: true}, RouteServer},
+		{"«всегда напрямую» по адресу не действует", on, Conn{Target: "25.1.2.3:80", Forced: true}, RouteServer},
+		{"исключённая программа не действует", on, Conn{Process: "curl", Target: "1.2.3.4:443", Forced: true}, RouteServer},
+		{"локальный адрес — тоже через сервер", on, Conn{Target: "192.168.1.1:80", Forced: true}, RouteServer},
+		{"кнопка выключена — отказ, не напрямую", Rules{Mesh: true, Direct: direct}, Conn{Target: "youtube.com:443", Forced: true}, RouteBlock},
+		{"слив после «Выключить» — отказ", Rules{Bypass: true, Draining: true}, Conn{Target: "youtube.com:443", Forced: true}, RouteBlock},
+		{"сеть устройств — как обычно", on, Conn{Target: "198.19.0.5:22", Forced: true}, RouteMesh},
+		{"сеть устройств выключена — отказ", Rules{Bypass: true}, Conn{Target: "pc.mesh:22", Forced: true}, RouteBlock},
+		{"без Forced — как прежде", on, Conn{Target: "example.org:443"}, RouteDirect},
+	}
+	for _, c := range cases {
+		if got := Decide(c.r, c.c); got != c.want {
+			t.Errorf("%s: %s, ожидалось %s", c.name, got, c.want)
+		}
+	}
+}
+
+func TestDecideDNSForced(t *testing.T) {
+	on := Rules{Bypass: true, Direct: routing.NewDirectList([]string{".netbird.io"})}
+	for name, want := range map[string]DNSAnswer{
+		"youtube.com":    DNSServer,
+		"api.netbird.io": DNSServer, // «всегда напрямую» не действует
+		"nas":            DNSServer, // и «локальное имя» тоже: провайдер не спрашивается
+		"printer.local":  DNSServer,
+		"pc.mesh":        DNSMesh,
+	} {
+		if got := DecideDNSForced(on, name); got != want {
+			t.Errorf("%s: %v, ожидалось %v", name, got, want)
+		}
+	}
+	fake := Rules{Bypass: true, FakeIP: true}
+	if got := DecideDNSForced(fake, "youtube.com"); got != DNSFake {
+		t.Errorf("с подставными адресами: %v", got)
+	}
+	for _, r := range []Rules{{}, {Bypass: true, Draining: true}} {
+		if got := DecideDNSForced(r, "youtube.com"); got != DNSRefuse {
+			t.Errorf("без сервера (%+v): %v, ожидался отказ", r, got)
+		}
+		if got := DecideDNSForced(r, "pc.mesh"); got != DNSMesh {
+			t.Errorf("имя сети устройств без сервера: %v", got)
+		}
+	}
+}

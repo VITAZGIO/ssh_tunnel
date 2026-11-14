@@ -109,6 +109,9 @@ func (l *Layer) Prepare(cfg *tunnel.Config) {
 	cfg.PinDirect = l.sys.pinner()
 	cfg.Resolver = l.resolver()
 	cfg.TunProcessRules = true
+	// Контейнеры Docker «через сервер» (Linux): стек узнаёт их по адресу
+	// источника, ядро ведёт их только через сервер (core.Conn.Forced).
+	cfg.ForcedSource = l.sys.forcedSource
 
 	l.mu.Lock()
 	l.direct = cfg.Direct
@@ -330,6 +333,30 @@ func (l *Layer) startStack(dev core.Device) error {
 			}
 			return addrs, nil
 		},
+	}
+
+	// Запросы контейнеров Docker «через сервер» — строже (core.DecideDNSForced):
+	// никогда DNS настоящей сети, без сервера — отказ.
+	forcedDNS := &core.DNS{
+		Pool:   pool,
+		Stats:  stats,
+		Block:  l.block,
+		Static: dns.Static,
+		Remote: func(name string) bool {
+			t := l.current.Load()
+			return t != nil && core2.DecideDNSForced(t.Rules(), name) == core2.DNSServer
+		},
+		RemoteResolve: dns.RemoteResolve,
+		Refuse: func(name string) bool {
+			t := l.current.Load()
+			return t == nil || core2.DecideDNSForced(t.Rules(), name) == core2.DNSRefuse
+		},
+	}
+	dns.ForSource = func(src netip.Addr) *core.DNS {
+		if l.sys.forcedSource(src) {
+			return forcedDNS
+		}
+		return nil
 	}
 
 	engine, err := core.StartDevice(dev, &core.Handler{

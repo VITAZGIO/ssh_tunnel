@@ -20,6 +20,7 @@ package core
 import (
 	"errors"
 	"net"
+	"net/netip"
 	"strings"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -59,6 +60,16 @@ type DNS struct {
 	// ни настоящего, ни подставного. nil или пустой список — блокировка
 	// выключена, ничего не меняется.
 	Block *BlockList
+
+	// Refuse — имя, на которое сейчас не отвечать адресом вовсе (отказ
+	// REFUSED): у источника, обязанного идти через сервер, сервера нет. nil —
+	// таких имён нет.
+	Refuse func(name string) bool
+
+	// ForSource — свой ответчик для запросов с адреса источника src
+	// (контейнер Docker «через сервер» на Linux: его имена решаются строже,
+	// см. core.DecideDNSForced). nil или вернул nil — отвечает этот же.
+	ForSource func(src netip.Addr) *DNS
 
 	// Stats считает заблокированные запросы, если задан. Тот же счётчик, что
 	// и для остального DNS/UDP-трафика — см. stack.go.
@@ -116,6 +127,10 @@ func (d *DNS) Answer(query []byte) ([]byte, error) {
 		if isStatic && len(static) == 0 {
 			return refuse(h, q, dnsmessage.RCodeNameError)
 		}
+	}
+
+	if !isStatic && d.Refuse != nil && d.Refuse(name) {
+		return refuse(h, q, dnsmessage.RCodeRefused)
 	}
 
 	reply := dnsmessage.NewBuilder(nil, dnsmessage.Header{

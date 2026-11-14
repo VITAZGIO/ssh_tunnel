@@ -40,7 +40,7 @@ func TestLookupViaServerLearnsNames(t *testing.T) {
 		t.Errorf("незнакомый адрес: %s", route)
 	}
 	// Имя из самого соединения сильнее таблицы.
-	if route, _ := tun.decideNamed("", "93.184.216.34:443", "other.example"); route != core.RouteServer {
+	if route, _ := tun.decideNamed("", "93.184.216.34:443", "other.example", false); route != core.RouteServer {
 		t.Errorf("SNI другого сайта на том же адресе: %s", route)
 	}
 

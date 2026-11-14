@@ -2,6 +2,7 @@ package core
 
 import (
 	"net"
+	"strings"
 
 	"sshtunnel/internal/mesh"
 	"sshtunnel/internal/routing"
@@ -73,6 +74,12 @@ type Conn struct {
 	// как Target: правило по имени работает и тогда, когда приложение пришло
 	// с адресом.
 	Name string
+	// Forced — источник соединения обязан идти только через сервер: адрес
+	// контейнера Docker «через сервер» (стек узнаёт его по адресу источника
+	// пакета). Для него не действуют ни «всегда напрямую», ни правила по
+	// программам, ни «локальная сеть — напрямую», а без сервера (кнопка
+	// выключена, слив после «Выключить») — отказ, а не «напрямую».
+	Forced bool
 }
 
 // named — Target с именем вместо адреса (порт тот же); пусто, если имени нет.
@@ -101,6 +108,10 @@ func (c Conn) named() string {
 //  6. Программа, которой по правилам положено мимо сервера, — напрямую.
 //  7. Остальное — через сервер. Неопознанная программа тоже: неожиданная
 //     утечка мимо туннеля хуже лишнего приложения внутри него.
+//
+// Источник, обязанный идти через сервер (Conn.Forced, контейнер Docker
+// «через сервер»), после сети устройств идёт только через сервер, а без
+// сервера — отказ: пункты 2–6 к нему не применяются.
 func Decide(r Rules, c Conn) Route {
 	named := c.named()
 	if IsMeshTarget(c.Target) || (named != "" && IsMeshTarget(named)) {
@@ -108,6 +119,12 @@ func Decide(r Rules, c Conn) Route {
 			return RouteMesh
 		}
 		return RouteBlock
+	}
+	if c.Forced {
+		if !r.Bypass || r.Draining {
+			return RouteBlock
+		}
+		return RouteServer
 	}
 	if !r.Bypass || r.Draining {
 		return RouteDirect
@@ -125,6 +142,25 @@ func Decide(r Rules, c Conn) Route {
 		return RouteDirect
 	}
 	return RouteServer
+}
+
+// DNSRefuse — не отвечать на имя адресом (отказ): у источника, обязанного
+// идти через сервер, сервера сейчас нет (см. DecideDNSForced).
+const DNSRefuse DNSAnswer = 100
+
+// DecideDNSForced — DecideDNS для запроса с источника, обязанного идти через
+// сервер (контейнер Docker «через сервер», см. Conn.Forced). Его имена
+// никогда не разрешаются DNS настоящей сети (провайдер их не видит): только
+// через сервер, а без сервера — отказ. Имена сети устройств — как обычно.
+func DecideDNSForced(r Rules, name string) DNSAnswer {
+	n := strings.TrimSuffix(strings.ToLower(name), ".")
+	if strings.HasSuffix(n, mesh.Suffix) {
+		return DNSMesh
+	}
+	if !r.Bypass || r.Draining {
+		return DNSRefuse
+	}
+	return viaServer(r, n)
 }
 
 func matches(d *routing.DirectList, target, named string) bool {
