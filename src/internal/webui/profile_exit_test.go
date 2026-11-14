@@ -31,7 +31,18 @@ func TestСохранениеСтавитВремяПравкиЦепочки(t 
 
 	save := func(c config.Config) config.Config {
 		t.Helper()
-		body, _ := json.Marshal(c)
+		// Как окно программы: цепочка шлётся всегда, пустая — как []. Ключ,
+		// которого в запросе нет, означает «не трогай» (см. handleConfig), а
+		// Go при пустой цепочке ключ опускает (omitempty).
+		raw, _ := json.Marshal(c)
+		var m map[string]any
+		json.Unmarshal(raw, &m)
+		for _, x := range m["profiles"].([]any) {
+			if pm := x.(map[string]any); pm["exitVia"] == nil {
+				pm["exitVia"] = []any{}
+			}
+		}
+		body, _ := json.Marshal(m)
 		rec := httptest.NewRecorder()
 		s.handleConfig(rec, httptest.NewRequest(http.MethodPost, "/api/config", strings.NewReader(string(body))))
 		var resp struct {
