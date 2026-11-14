@@ -1,8 +1,11 @@
 // bookcopy копирует Книгу из docs/book/<язык>/ в src/internal/book/text/,
 // откуда её встраивает сборка. Запуск: cd src && go generate ./internal/book.
+// С флагом -panel — Книгу панели сервера: docs/book-panel/<язык>/ →
+// src/internal/panel/booktext/ (go generate ./internal/panel).
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,9 +13,16 @@ import (
 )
 
 func main() {
-	// go generate запускает из папки пакета (src/internal/book).
+	panel := flag.Bool("panel", false, "копировать Книгу панели (docs/book-panel → internal/panel/booktext)")
+	flag.Parse()
+	// go generate запускает из папки пакета (src/internal/book или
+	// src/internal/panel).
 	src := filepath.Join("..", "..", "..", "docs", "book")
 	dst := "text"
+	if *panel {
+		src = filepath.Join("..", "..", "..", "docs", "book-panel")
+		dst = "booktext"
+	}
 	for _, lang := range []string{"ru", "en"} {
 		out := filepath.Join(dst, lang)
 		if err := os.RemoveAll(out); err != nil {

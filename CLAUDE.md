@@ -24,6 +24,10 @@
   `manifest.go`, страница — `uiassets/addons/<id>.html`, глава Книги —
   `docs/book/<язык>/app-<id>.md`). **Книга** — `docs/book/`, копия для сборки
   в `src/internal/book/text/` (`go generate ./internal/book`).
+  **Книга панели сервера** — `docs/book-panel/<язык>/NN-имя.md`, копия в
+  `src/internal/panel/booktext/` (`cd src/internal/panel && go generate`),
+  ручка `GET /api/book` и блок «Настройки» → «Книга» в `panel/assets/index.html`;
+  таблица «? → глава» — `BOOK_HELP` там же.
 
 ## Нельзя
 - Логику «куда» (через сервер / напрямую / в сеть устройств / отказ) писать

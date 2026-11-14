@@ -102,6 +102,16 @@ stored anywhere else, and if it's lost, the only way out is to delete
 (`systemctl restart ssh_tunnel_panel`): the panel will create a fresh
 one-time account, same as on first launch.
 
+## The Book
+
+The panel has its own help inside: “Settings” → “Book”, a list of chapters and
+a search across all the text. It is built into the program and works offline;
+the language follows the panel language. Next to section titles, the “?” mark
+(click it) has a “More in the Book” link when the section has a chapter. The
+chapters live in the repository, `docs/book-panel/<ru|en>/NN-name.md`; the
+build copies them with `cd src/internal/panel && go generate`, and a test fails
+if the copy drifts from the source. Endpoint: `GET /api/book?lang=ru|en`.
+
 ## Domain and TLS
 
 Two paths, both supported without reinstalling — just different flags:
