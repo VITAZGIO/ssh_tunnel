@@ -1601,6 +1601,7 @@
     <div class="k" style="margin:4px 0 6px;color:var(--dim);font-size:12px" data-i18n="mesh_devices">Устройства</div>
     <div class="hint" id="meshState" style="margin:0 0 8px"></div>
     <div id="meshPeers"></div>
+    <div id="meshAds"></div>
   </div>
 
   <div class="view" id="viewAdvanced">
@@ -4046,8 +4047,13 @@ function renderMesh(st){
   const srvs = (st.servers || []).filter(s => s.state !== 'duplicate');
   if(srvs.length > 1) state += '\n' + tr('mesh_servers') + ': ' +
     srvs.map(s => (s.name || s.key) + ' — ' + (tr('mesh_srv_' + s.state) || s.state)).join(', ');
+  // Одобрение и заморозка (ТЗ 16): у каждого сервера свои.
+  (st.servers || []).filter(s => s.hold).forEach(s => {
+    state += '\n' + fillTr(s.hold === 'frozen' ? 'mesh_hold_frozen' : 'mesh_hold_pending', {s: s.name || s.key});
+  });
   $('meshState').textContent = state;
   $('meshState').style.whiteSpace = 'pre-line';
+  renderMeshAds(st.advertised || []);
   const box = $('meshPeers');
   box.innerHTML = '';
   peers.forEach(p => {
@@ -4710,6 +4716,14 @@ function exitHopOptions(sel, exclude, value){
     sel.appendChild(opt);
     if(o.id === value) hasValue = true;
   });
+  // Звено из панели сервера, для которого здесь нет профиля (ТЗ 16): его
+  // нельзя молча потерять при сохранении — показываем как есть.
+  if(value && value.startsWith(EXIT_NEED) && value !== exclude){
+    const opt = document.createElement('option');
+    opt.value = value; opt.textContent = tr('exit_need') + ' ' + value.slice(EXIT_NEED.length);
+    sel.appendChild(opt);
+    hasValue = true;
+  }
   sel.value = hasValue ? value : '';
 }
 function renderExitChainOptions(p){
@@ -4739,7 +4753,15 @@ function renderExitChainStatus(){
   const via = exitChainValue();
   const names = {}; (cfg.profiles || []).forEach(o => names[o.id] = o.name);
   const box = $('exitChainStatus');
-  box.textContent = via.length ? tr('exit_via_summary') + ' ' + [currentProfile().name, ...via.map(id => names[id] || id)].join(' → ') : '';
+  const label = id => names[id] || (id.startsWith(EXIT_NEED) ? tr('exit_need') + ' ' + id.slice(EXIT_NEED.length) : id);
+  let text = via.length ? tr('exit_via_summary') + ' ' + [currentProfile().name, ...via.map(label)].join(' → ') : '';
+  // Откуда цепочка (ТЗ 16): из панели сервера или правка на этом устройстве.
+  const p = currentProfile();
+  if(p.exitBy && sameIds(p.exitVia, via)) text += (text ? '\n' : '') + fillTr('exit_set_by', {s: p.exitBy, t: fmtUnix(p.exitT)});
+  const need = via.filter(id => id.startsWith(EXIT_NEED)).map(id => id.slice(EXIT_NEED.length));
+  if(need.length) text += (text ? '\n' : '') + tr('exit_need_note') + ' ' + need.join(', ');
+  box.textContent = text;
+  box.style.whiteSpace = 'pre-line';
 }
 function renderExitMainStatus(){
   const el = $('exitStatus');
@@ -5551,6 +5573,88 @@ renderCityBtn();
 connectEvents();
 refresh();
 setInterval(() => { if(!running) refresh(); }, 5000);
+/* ---------- профиль устройства в панели (ТЗ 16) ---------- */
+Object.assign(I18N.ru, {
+  exit_need:'нужен профиль сервера',
+  exit_need_note:'Интернета через эту цепочку не будет, пока здесь нет профиля сервера:',
+  exit_set_by:'задано в панели сервера {s}, {t} — можно поменять, панель увидит',
+  mesh_hold_pending:'Сервер {s}: устройство ждёт одобрения в его панели — через него других устройств не видно',
+  mesh_hold_frozen:'Сервер {s}: устройство заморожено в его панели — через него соединения с другими устройствами закрыты',
+  mesh_ads:'Советуют панели серверов', mesh_ad_add:'Добавить профиль',
+  mesh_ad_from:'советует {s}',
+  mesh_ad_note:'Новый сервер открыт ниже: впиши пользователя и ключ и сохрани. Ключ сервера проверится при первом подключении, как обычно.',
+});
+Object.assign(I18N.en, {
+  exit_need:'needs a profile for server',
+  exit_need_note:'No internet through this chain until there is a profile here for server:',
+  exit_set_by:'set in the panel of {s}, {t} — you can change it, the panel will see it',
+  mesh_hold_pending:'Server {s}: this device awaits approval in its panel — no other devices are visible through it',
+  mesh_hold_frozen:'Server {s}: this device is frozen in its panel — connections to other devices through it are closed',
+  mesh_ads:'Suggested by server panels', mesh_ad_add:'Add profile',
+  mesh_ad_from:'suggested by {s}',
+  mesh_ad_note:'The new server is open below: enter the user and key and save. The server key is checked on the first connection, as usual.',
+});
+const EXIT_NEED = 'need:'; // звено цепочки из панели без профиля (config.ExitNeedPrefix)
+function fillTr(key, vals){
+  let s = tr(key);
+  Object.keys(vals).forEach(k => { s = s.split('{' + k + '}').join(vals[k]); });
+  return s;
+}
+function sameIds(a, b){ return (a || []).join('|') === (b || []).join('|'); }
+function fmtUnix(t){
+  if(!t) return '';
+  return new Date(t * 1000).toLocaleString(LANG === 'ru' ? 'ru-RU' : 'en-US', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
+}
+
+// renderMeshAds — серверы, которые советуют панели (Status.Advertised), с
+// кнопкой «Добавить профиль»: новый профиль открывается с адресом и ключом
+// сети, вход и ключ человек вписывает сам, ключ сервера проверяется как
+// всегда — сам по совету устройство никуда не входит.
+function renderMeshAds(ads){
+  const box = $('meshAds');
+  box.textContent = '';
+  if(!ads.length) return;
+  const h = document.createElement('div');
+  h.className = 'k';
+  h.style.cssText = 'margin:12px 0 6px;color:var(--dim);font-size:12px';
+  h.textContent = tr('mesh_ads');
+  box.appendChild(h);
+  ads.forEach(a => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0';
+    const nm = document.createElement('span');
+    nm.style.cssText = 'flex:1;min-width:150px';
+    nm.textContent = (a.name ? a.name + ' — ' : '') + a.host + (a.port && a.port !== 22 ? ':' + a.port : '') +
+      (a.from ? ' · ' + fillTr('mesh_ad_from', {s: a.from}) : '');
+    const b = document.createElement('button');
+    b.className = 'btn';
+    b.textContent = tr('mesh_ad_add');
+    b.onclick = () => addAdvertised(a);
+    row.appendChild(nm);
+    row.appendChild(b);
+    box.appendChild(row);
+  });
+}
+
+async function addAdvertised(a){
+  const key = (cfg.profiles || []).map(p => p.meshKey).find(Boolean) || '';
+  const active = (cfg.profiles || []).find(p => p.id === cfg.activeProfile) || {};
+  const r = await api('/api/profile/add', { name: a.name || a.host, flag: '' });
+  if(r.error){ $('meshNote').textContent = r.error; return; }
+  cfg = r.config;
+  editingProfileId = r.profile.id;
+  srvOpen = true;
+  show('viewServers');
+  const p = Object.assign({}, currentProfile(), { host: a.host, sshPort: a.port || 22,
+    meshEnabled: true, meshKey: active.meshKey || key });
+  fillProfileForm(p);
+  formDirty = true;
+  renderTabs();
+  renderSelectServerBtn();
+  renderHomePicker();
+  $('savedNote').textContent = tr('mesh_ad_note');
+  setTimeout(() => $('savedNote').textContent = '', 10000);
+}
 </script>
 </body>
 </html>

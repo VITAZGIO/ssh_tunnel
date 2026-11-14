@@ -508,6 +508,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	// «не трогай», а не «выключи». Пустая структура молча гасила системный
 	// прокси и переменные среды — туннель работал, но трафик шёл мимо него.
 	cfg := s.app.Config()
+	// Свой срез профилей: Config() отдаёт тот же, что живёт в приложении, и
+	// разбор JSON прямо в него менял настройки ещё до SetConfig — сравнение
+	// «было/стало» (переподключение, правка цепочки выхода) ничего не видело.
+	cfg.Profiles = append([]config.Profile(nil), cfg.Profiles...)
 	last, lastMesh := cfg.LastRunning, cfg.LastMesh
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		writeJSON(w, map[string]string{"error": "не разобрал настройки: " + err.Error()})
@@ -518,7 +522,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	cfg.LastRunning, cfg.LastMesh = last, lastMesh
 	// Пароль входа меняется только через /api/uipass.
 	cfg.UIPassHash = s.app.Config().UIPassHash
-	note, err := s.app.SetConfig(cfg)
+	// Правка цепочки выхода — с временем, чтобы панели серверов знали, что
+	// она новее их цепочки (ТЗ 16).
+	note, err := s.app.SetConfigEdited(cfg)
 	if err != nil {
 		writeJSON(w, map[string]string{"error": err.Error()})
 		return

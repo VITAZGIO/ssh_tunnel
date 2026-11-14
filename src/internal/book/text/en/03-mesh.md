@@ -45,6 +45,24 @@ another server both devices share; direct connections notice nothing.
 - Access rules, the journal and removal are per server. If the servers have
   different rules, the panel says so: make them the same.
 
+## What the server panel can do
+
+- **Approval.** If "New devices — after approval" is on in the panel, a new
+  device waits first: the app says "awaits approval in the panel of server
+  …", and no other devices are visible until it is approved.
+- **Freezing.** A frozen device stays in the network with its address and
+  name, but connects to nobody and nobody connects to it. The app says so.
+  Both are per server.
+- **Exit chain.** The panel can send an "Exit through" setting for a server.
+  It is applied as if you set it yourself, with "set in the panel of server
+  …" next to it. You can change it as usual: the newer change wins, and the
+  panel sees your value. If the chain names a server you have no profile
+  for, the app says "needs a profile for server …" and no internet goes
+  through that chain until you add it.
+- **Panel suggestions.** Servers suggested by panels are shown below the
+  device list with an "Add profile" button: the address and network key are
+  filled in, you enter the user and key yourself.
+
 ## If the server is unreachable
 
 Home internet is down or the server is off — devices that have already

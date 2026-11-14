@@ -93,6 +93,10 @@ type meshAdmin interface {
 	DeleteNetwork(ctx context.Context, netID string) error
 	Events(ctx context.Context, after int64, limit int) (meshsvc.Events, error)
 	Check(ctx context.Context, netID, from, to string, port int) (meshsvc.CheckResult, error)
+	SetApproval(ctx context.Context, netID string, on bool) error
+	Approve(ctx context.Context, netID, device string) error
+	Freeze(ctx context.Context, netID, device string, on bool) error
+	SetExit(ctx context.Context, netID, device, entry string, via []string) (meshsvc.ExitOrder, error)
 }
 
 const meshdUnit = "meshd.service"
@@ -663,11 +667,13 @@ type MeshDevice struct {
 
 // MeshNetwork — сеть с устройствами.
 type MeshNetwork struct {
-	ID         string       `json:"id"`
-	Name       string       `json:"name"`
-	Created    int64        `json:"created"`
-	EmptySince int64        `json:"emptySince"`
-	Devices    []MeshDevice `json:"devices"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Created    int64  `json:"created"`
+	EmptySince int64  `json:"emptySince"`
+	// Approval — «Новые устройства — после одобрения» (meshd 5+, ТЗ 16).
+	Approval bool         `json:"approval,omitempty"`
+	Devices  []MeshDevice `json:"devices"`
 }
 
 // MeshServer — сервер на схеме сети.
@@ -826,7 +832,7 @@ func (m *MeshManager) fillMain(ctx context.Context, st *MeshState, s MeshSetting
 
 	matcher := m.serverMatcher(ctx, st.Servers)
 	for _, n := range ms.Networks {
-		mn := MeshNetwork{ID: n.ID, Name: n.Name, Created: n.Created, EmptySince: n.EmptySince,
+		mn := MeshNetwork{ID: n.ID, Name: n.Name, Created: n.Created, EmptySince: n.EmptySince, Approval: n.Approval,
 			Devices: make([]MeshDevice, 0, len(n.Devices))}
 		for _, d := range n.Devices {
 			mn.Devices = append(mn.Devices, MeshDevice{Device: d, Server: matcher(d.Via)})
@@ -957,6 +963,30 @@ func (m *MeshManager) DeleteNetwork(ctx context.Context, netID string) error {
 // Events — журнал событий сети устройств.
 func (m *MeshManager) Events(ctx context.Context, after int64, limit int) (meshsvc.Events, error) {
 	return m.admin.Events(ctx, after, limit)
+}
+
+// SetApproval — «Новые устройства — после одобрения» у сети (ТЗ 16).
+func (m *MeshManager) SetApproval(ctx context.Context, netID string, on bool) error {
+	return m.admin.SetApproval(ctx, netID, on)
+}
+
+// Approve пускает в сеть устройство, которое ждёт одобрения.
+func (m *MeshManager) Approve(ctx context.Context, netID, device string) error {
+	return m.admin.Approve(ctx, netID, device)
+}
+
+// Freeze замораживает (on) или размораживает устройство.
+func (m *MeshManager) Freeze(ctx context.Context, netID, device string, on bool) error {
+	return m.admin.Freeze(ctx, netID, device, on)
+}
+
+// SetExit задаёт устройству цепочку выхода (ключи «адрес:порт»). Проверяет
+// meshd; здесь — только длина, чтобы не гонять мусор по сокету.
+func (m *MeshManager) SetExit(ctx context.Context, netID, device, entry string, via []string) (meshsvc.ExitOrder, error) {
+	if len(entry) > 80 || len(via) > 2 {
+		return meshsvc.ExitOrder{}, errors.New("неверная цепочка выхода")
+	}
+	return m.admin.SetExit(ctx, netID, device, entry, via)
 }
 
 // Check — пустят ли устройство from к устройству to на порт.

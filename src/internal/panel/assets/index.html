@@ -259,6 +259,17 @@
   .dpart{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
   .dpart > h2{display:flex;align-items:center;gap:8px}
   .dacts{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+  /* Цепочка выхода в карточке устройства (ТЗ 16). */
+  .dexit{margin-top:14px}
+  .dexit h3{font-size:13px;margin:0 0 6px}
+  .dexit .ex-now{font:12px var(--mono);overflow-wrap:anywhere;margin-bottom:4px}
+  .dexit .note{color:var(--dim);font-size:12px;margin:2px 0 8px}
+  .dexit .msg{margin:8px 0}
+  .ex-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .ex-f{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1 1 180px}
+  .ex-f .k{color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px}
+  .ex-f select{width:100%;min-width:0}
+  .chk .note{color:var(--dim);font-size:12px;margin-top:2px;line-height:1.4}
   .help{color:var(--dim);font-size:13px;line-height:1.55;max-width:80ch}
   .help p{margin:0 0 10px}
   .help b{color:var(--text)}
@@ -2602,8 +2613,12 @@ function renderDevList(){
     const n = el('div', 'n', itemName(it));
     if (it.client && it.client.state !== 'active') n.appendChild(stateBadge(it.client.state));
     nm.appendChild(n);
-    nm.appendChild(el('div', 'h', it.mesh ? it.mesh.host + '.mesh'
-      : t('device_' + it.client.deviceType) + ' · ' + onlineText(it.client)));
+    const sub = el('div', 'h', it.mesh ? it.mesh.host + '.mesh'
+      : t('device_' + it.client.deviceType) + ' · ' + onlineText(it.client));
+    // «Ждёт одобрения» / «заморожено» — под именем: длинное имя его не спрячет.
+    const hb = holdBadge(it.mesh);
+    if (hb){ hb.style.margin = '0 6px 0 0'; sub.prepend(hb); }
+    nm.appendChild(sub);
     row.appendChild(nm);
     row.appendChild(el('span', 'c-ip', (it.mesh && it.mesh.ip) || '—'));
     row.appendChild(el('span', 'c-sys', itemSystem(it) || '—'));
@@ -2649,6 +2664,8 @@ function fact(box, k, v, node){
 
 function renderDetail(){
   if (MESH_EDIT) return; // идёт переименование — не смахиваем поле ввода
+  // Открыт список цепочки выхода — опрос не должен его закрыть.
+  if (document.activeElement && document.activeElement.closest && document.activeElement.closest('#devInfo .dexit select')) return;
   const box = $('devInfo');
   box.innerHTML = '';
   const it = devItems().find(i => i.key === DEV_SEL);
@@ -2663,7 +2680,10 @@ function renderDetail(){
   pic.appendChild(glyphSVG(glyphOf(itemPlatform(it))));
   top.appendChild(pic);
   const nm = el('div', 'nm');
-  nm.appendChild(el('div', 'n', itemName(it)));
+  const nn = el('div', 'n', itemName(it));
+  const hb = holdBadge(d);
+  if (hb){ hb.style.marginLeft = '8px'; nn.appendChild(hb); }
+  nm.appendChild(nn);
   nm.appendChild(el('div', 'h', d ? d.host + '.mesh' : (c.username || '')));
   top.appendChild(nm);
   if (d){
@@ -2700,6 +2720,7 @@ function renderDetail(){
     if (d.app) fact(facts, t('dev_app'), d.app);
     fact(facts, t('dev_sessions'), String(d.sessions || 0));
     part.appendChild(facts);
+    renderDevHold(part, d);
     const acts = el('div', 'dacts');
     if (d.alias){
       const reset = el('button', 'btn ghost small', t('dev_reset_name').replace('{n}', d.name));
@@ -2716,7 +2737,9 @@ function renderDetail(){
       loadMesh();
     });
     acts.appendChild(forget);
+    acts.appendChild(freezeButton(d));
     part.appendChild(acts);
+    renderDevExit(part, d);
     box.appendChild(part);
   } else if (MESH && MESH.effectiveRole === 'main'){
     const part = el('div', 'dpart');
@@ -5527,6 +5550,7 @@ function renderNets(){
     if (!devs.length && n.emptySince) kv(t('net_autoremove'), fmtDay(n.emptySince + NET_TTL));
     kv(t('net_id'), n.id.length > 16 ? n.id.slice(0, 16) + '…' : n.id);
     if (!devs.length) card.appendChild(el('p', 'note net-note', t(n.emptySince ? 'net_empty_note' : 'net_empty_note_old')));
+    renderNetApproval(card, n);
 
     const acts = el('div', 'dacts');
     if (nets.length > 1 && n.id !== MESH_NET){
@@ -5599,7 +5623,7 @@ async function deleteNet(n, i){
 const JR_MAX = 200;
 const JR = {seq: 0, epoch: 0, items: [], keys: new Set(), filter: localStorage.getItem('panelJr') || 'all',
             timer: null, busy: false, started: 0, old: false, err: ''};
-const JR_CONN = ['connect', 'disconnect', 'new-device', 'server-up', 'server-down'];
+const JR_CONN = ['connect', 'disconnect', 'new-device', 'pending', 'approve', 'server-up', 'server-down'];
 
 function jrRestart(){
   JR.seq = 0;
@@ -5667,6 +5691,8 @@ function portText(p){
 }
 function evText(e){
   const d = evName(e.net, e.device), p = evName(e.net, e.peer);
+  const own = evText16(e, d);
+  if (own) return own;
   switch (e.type){
     case 'connect': return fill('ev_connect', {d});
     case 'disconnect': return fill('ev_disconnect', {d});
@@ -5905,34 +5931,21 @@ function smEncode(M, roles, hand){
   return {groups, rules, clientGroups, own: own.length};
 }
 
-// Сохранение: группы сначала добавляются (правила и членство на них
-// ссылаются), потом меняется членство, потом лишние группы убираются —
-// сервер не даёт убрать группу, в которой ещё кто-то есть.
+// Сохранение — одним запросом (ТЗ 16): права и группы всех клиентов сразу,
+// сервер проверяет всё до первой записи. Раньше было несколько запросов, и
+// закрытая на середине вкладка оставляла доступ уже, чем задумано.
 async function smSaveNow(M, roles, hand){
   const enc = smEncode(M, roles, hand);
   if (enc.error){ smMsg(enc.error, 'err'); toast(enc.error, 'err'); return false; }
-  const union = [...new Set((ACCESS_RAW.groups || []).concat(enc.groups))].sort();
-  if (union.length > SM_MAX_GROUPS){
-    const e = fill('sm_err_groups', {n: union.length, max: SM_MAX_GROUPS});
-    smMsg(e, 'err'); toast(e, 'err'); return false;
+  const by = smClients(), clients = {};
+  Object.keys(enc.clientGroups).forEach(u => { if (by[u]) clients[by[u].id] = enc.clientGroups[u]; });
+  const r = await api('/api/access/simple', {enabled: !!ACCESS_RAW.enabled, groups: enc.groups, rules: enc.rules, clients});
+  if (!r.ok){
+    const e = errOf(r.data); smMsg(e, 'err'); toast(e, 'err');
+    await smReload();
+    return false;
   }
-  const fail = data => { const e = errOf(data); smMsg(e, 'err'); toast(e, 'err'); return false; };
-  let r = await api('/api/access', {enabled: !!ACCESS_RAW.enabled, groups: union, rules: enc.rules});
-  if (!r.ok) return fail(r.data);
-  let warn = r.data.warning || '';
-  const by = smClients();
-  for (const u of Object.keys(enc.clientGroups)){
-    const before = [...new Set(by[u].groups || [])].sort().join('|');
-    if (before === enc.clientGroups[u].join('|')) continue;
-    r = await api('/api/clients/groups', {id: by[u].id, groups: enc.clientGroups[u]});
-    if (!r.ok){ await smReload(); return fail(r.data); }
-    warn = r.data.warning || warn;
-  }
-  if (union.length !== enc.groups.length){
-    r = await api('/api/access', {enabled: !!ACCESS_RAW.enabled, groups: enc.groups, rules: enc.rules});
-    if (!r.ok){ await smReload(); return fail(r.data); }
-    warn = r.data.warning || warn;
-  }
+  const warn = r.data.warning || '';
   await smReload();
   smMsg(warn || t('acc_saved'), warn ? 'err' : 'ok');
   return true;
@@ -6294,6 +6307,235 @@ setInterval(() => {
   loadClients();
   loadTraffic();
 }, 15000);
+/* ---------- профиль устройства в панели (ТЗ 16) ----------
+   Одобрение новых устройств и заморозка (meshd 5+, у каждого сервера
+   свои), цепочка выхода, которую панель советует устройству (оно может её
+   поменять — показываем значение устройства и что оно другое), и записи
+   журнала об этом. */
+Object.assign(I18N.ru, {
+  hold_pending:'ждёт одобрения', hold_frozen:'заморожено',
+  hold_pending_note:'Устройство подключилось впервые и ждёт одобрения: пока его не одобрят, оно никого в сети не видит и к нему никто не подключится.',
+  hold_frozen_note:'Устройство заморожено: адрес и имя остались, но оно никуда не подключается и к нему никто — прямые соединения с ним разорваны.',
+  hold_scope_note:'Действует только на этом сервере, как и правила доступа. Если устройство на связи и через другой сервер сети, там его надо одобрить или заморозить отдельно. Без сервера правила не проверяет никто: устройство, которое пропустило этот список (было вне связи), пустит его напрямую в одной локальной сети, пока само не свяжется с сервером. Новое устройство без сервера не найдёт никого — знакомство всегда через сервер.',
+  dev_approve:'Одобрить', dev_reject:'Отклонить', dev_freeze:'Заморозить в сети', dev_unfreeze:'Разморозить',
+  confirm_freeze:'Заморозить «{n}» в сети устройств? Его прямые и идущие через сервер соединения разорвутся, адрес и имя останутся. Вход на сервер (SSH) это не трогает.',
+  approved:'Устройство одобрено', frozen_ok:'Устройство заморожено', unfrozen_ok:'Устройство разморожено',
+  net_approval:'Новые устройства — после одобрения',
+  net_approval_note:'Устройство, которое подключится к сети впервые, будет ждать, пока его не одобрят в «Устройствах». Уже знакомых это не касается.',
+  net_approval_on:'Новые устройства теперь ждут одобрения', net_approval_off:'Новые устройства входят сразу',
+  net_pending:'Ждут одобрения',
+  ex_title:'Выход в интернет (цепочка)',
+  ex_no_profiles:'Устройство не рассказало, какие серверы у него есть, — нужна новая версия программы на нём.',
+  ex_now:'На устройстве: {path}', ex_direct:'без цепочки — выход через {s}',
+  ex_by_panel:'задано в панели сервера {s}, {t}', ex_by_device:'задано на самом устройстве, {t}',
+  ex_pending:'Отправлено {t}, устройство ещё не применило: получит, как только будет на связи.',
+  ex_changed:'На устройстве поменяли после панели — показано значение устройства. Панель задавала: {path}.',
+  ex_entry:'Вход', ex_hop:'Затем через', ex_none:'— никуда —', ex_send:'Отправить на устройство',
+  ex_sent:'Цепочка отправлена на устройство', ex_deleted:'удалённый сервер',
+  ex_hint:'Устройство применит её как свою настройку «Выход через» у этого сервера, если она новее. Человек на устройстве может её поменять — здесь будет видно.',
+  ev_pending:'{d} ждёт одобрения', ev_approve:'{d} одобрено', ev_freeze:'{d} заморожено', ev_unfreeze:'{d} разморожено',
+  ev_approval_on:'Сеть {n}: новые устройства — после одобрения', ev_approval_off:'Сеть {n}: новые устройства входят сразу',
+  ev_exit:'Цепочка для {d}: {t}',
+});
+Object.assign(I18N.en, {
+  hold_pending:'awaiting approval', hold_frozen:'frozen',
+  hold_pending_note:'The device connected for the first time and awaits approval: until approved it sees nobody in the network and nobody can connect to it.',
+  hold_frozen_note:'The device is frozen: it keeps its address and name, but connects nowhere and nobody connects to it — its direct connections are closed.',
+  hold_scope_note:'Applies on this server only, like access rules. If the device is also online through another server of the network, approve or freeze it there too. Without a server nobody checks rules: a device that missed this list (was offline) still lets it in directly on the same LAN until it talks to a server again. A new device finds nobody without a server — first contact always goes through a server.',
+  dev_approve:'Approve', dev_reject:'Reject', dev_freeze:'Freeze in network', dev_unfreeze:'Unfreeze',
+  confirm_freeze:'Freeze “{n}” in the device network? Its direct and relayed connections will close, address and name stay. Server login (SSH) is not affected.',
+  approved:'Device approved', frozen_ok:'Device frozen', unfrozen_ok:'Device unfrozen',
+  net_approval:'New devices — after approval',
+  net_approval_note:'A device that joins the network for the first time waits until it is approved in “Devices”. Known devices are not affected.',
+  net_approval_on:'New devices now wait for approval', net_approval_off:'New devices join at once',
+  net_pending:'Awaiting approval',
+  ex_title:'Internet exit (chain)',
+  ex_no_profiles:'The device has not reported which servers it has — it needs a newer app version.',
+  ex_now:'On the device: {path}', ex_direct:'no chain — exits through {s}',
+  ex_by_panel:'set in the panel of {s}, {t}', ex_by_device:'set on the device itself, {t}',
+  ex_pending:'Sent {t}, not applied yet: the device gets it as soon as it is online.',
+  ex_changed:'Changed on the device after the panel — the device value is shown. The panel had set: {path}.',
+  ex_entry:'Entry', ex_hop:'Then through', ex_none:'— none —', ex_send:'Send to device',
+  ex_sent:'Chain sent to the device', ex_deleted:'deleted server',
+  ex_hint:'The device applies it as its own “Exit via” setting for this server if it is newer. The person on the device can change it — you will see it here.',
+  ev_pending:'{d} awaits approval', ev_approve:'{d} approved', ev_freeze:'{d} frozen', ev_unfreeze:'{d} unfrozen',
+  ev_approval_on:'Network {n}: new devices — after approval', ev_approval_off:'Network {n}: new devices join at once',
+  ev_exit:'Chain for {d}: {t}',
+});
+
+// holdBadge — значок «ждёт одобрения» / «заморожено» у устройства сети.
+function holdBadge(d){
+  if (!d || !(d.pending || d.frozen)) return null;
+  return el('span', 'badge warn', t(d.frozen ? 'hold_frozen' : 'hold_pending'));
+}
+
+// renderDevHold — что с устройством и кнопки «Одобрить» / «Отклонить».
+function renderDevHold(part, d){
+  if (!d.pending && !d.frozen) return;
+  part.appendChild(el('div', 'msg warn', t(d.frozen ? 'hold_frozen_note' : 'hold_pending_note')));
+  if (d.pending){
+    const acts = el('div', 'dacts');
+    const yes = el('button', 'btn small', t('dev_approve'));
+    yes.addEventListener('click', () => devHoldCall('/api/mesh/approve', {net: MESH_NET, device: d.id}, 'approved'));
+    const no = el('button', 'btn ghost small', t('dev_reject'));
+    no.addEventListener('click', async () => {
+      if (!await appConfirm(t('confirm_forget').replace('{n}', d.display), t('dev_reject'))) return;
+      devHoldCall('/api/mesh/forget', {net: MESH_NET, device: d.id}, 'forgotten');
+    });
+    acts.appendChild(yes);
+    acts.appendChild(no);
+    part.appendChild(acts);
+  }
+  part.appendChild(el('p', 'note', t('hold_scope_note')));
+}
+
+// freezeButton — «Заморозить в сети» / «Разморозить» для ряда кнопок карточки.
+function freezeButton(d){
+  const b = el('button', 'btn ghost small', t(d.frozen ? 'dev_unfreeze' : 'dev_freeze'));
+  b.addEventListener('click', async () => {
+    if (!d.frozen && !await appConfirm(fill('confirm_freeze', {n: d.display}), t('dev_freeze'))) return;
+    devHoldCall('/api/mesh/freeze', {net: MESH_NET, device: d.id, on: !d.frozen}, d.frozen ? 'unfrozen_ok' : 'frozen_ok');
+  });
+  return b;
+}
+
+async function devHoldCall(path, body, okKey){
+  const {ok, data} = await api(path, body);
+  if (!ok){ toast(meshErr(data), 'err'); return; }
+  toast(t(okKey));
+  loadMesh();
+  loadJournal();
+}
+
+// renderNetApproval — переключатель одобрения у сети в «Сетях».
+function renderNetApproval(card, n){
+  const devs = n.devices || [];
+  const waiting = devs.filter(d => d.pending).length;
+  if (waiting){
+    const r = el('div', 'kv');
+    r.appendChild(el('span', 'k', t('net_pending')));
+    r.appendChild(el('span', 'v', String(waiting)));
+    card.appendChild(r);
+  }
+  const lab = el('label', 'chk');
+  lab.style.marginTop = '10px';
+  const cb = el('input');
+  cb.type = 'checkbox';
+  cb.checked = !!n.approval;
+  lab.appendChild(cb);
+  const txt = el('span');
+  txt.appendChild(el('div', '', t('net_approval')));
+  txt.appendChild(el('div', 'note', t('net_approval_note')));
+  lab.appendChild(txt);
+  cb.addEventListener('change', async () => {
+    const want = cb.checked;
+    const {ok, data} = await api('/api/mesh/net/approval', {net: n.id, on: want});
+    if (!ok){ cb.checked = !want; toast(meshErr(data), 'err'); return; }
+    toast(t(want ? 'net_approval_on' : 'net_approval_off'));
+    loadMesh();
+    loadJournal();
+  });
+  card.appendChild(lab);
+}
+
+/* Цепочка выхода. Сервер называется ключом «адрес:порт» (id профилей у
+   каждого устройства свои). EX_DRAFT — что выбрано в полях, пока их не
+   отправили: опрос состояния перерисовывает карточку и не должен сбросить
+   выбор. */
+let EX_DRAFT = null; // {dev, entry, via:[...]}
+
+function exName(d, key){
+  if (!key) return t('ex_deleted');
+  const p = (d.profiles || []).find(x => x.k === key);
+  return p && p.n ? p.n + ' (' + key + ')' : key;
+}
+function exPath(d, entry, via){
+  if (!via || !via.length) return fill('ex_direct', {s: exName(d, entry)});
+  return [entry].concat(via).map(k => exName(d, k)).join(' → ');
+}
+function sameVia(a, b){ return (a || []).join('|') === (b || []).join('|'); }
+
+function renderDevExit(part, d){
+  const box = el('div', 'dexit');
+  box.appendChild(el('h3', '', t('ex_title')));
+  part.appendChild(box);
+  const profs = d.profiles || [];
+  if (!profs.length){ box.appendChild(el('p', 'note', t('ex_no_profiles'))); return; }
+  if (EX_DRAFT && EX_DRAFT.dev !== d.id) EX_DRAFT = null;
+  const es = d.exitSet;
+  const active = profs.find(p => p.a) || profs[0];
+  const entry = (EX_DRAFT && EX_DRAFT.entry) || (es && profs.some(p => p.k === es.entry) ? es.entry : active.k);
+  const prof = profs.find(p => p.k === entry) || active;
+
+  // Что на устройстве сейчас и откуда это.
+  box.appendChild(el('div', 'ex-now', fill('ex_now', {path: exPath(d, prof.k, prof.v)})));
+  if (prof.t) box.appendChild(el('div', 'note', prof.b
+    ? fill('ex_by_panel', {s: prof.b, t: fmtClock(prof.t)})
+    : fill('ex_by_device', {t: fmtClock(prof.t)})));
+  if (es && es.entry === prof.k){
+    if ((prof.t || 0) < es.t) box.appendChild(el('div', 'msg warn', fill('ex_pending', {t: fmtClock(es.t)})));
+    else if (prof.t > es.t || !sameVia(es.via, prof.v)) box.appendChild(el('div', 'msg warn', fill('ex_changed', {path: exPath(d, es.entry, es.via)})));
+  }
+
+  // Поля: вход и до двух серверов после него.
+  const draft = EX_DRAFT || {dev: d.id, entry: prof.k, via: (prof.v || []).filter(Boolean)};
+  const form = el('div', 'ex-row');
+  const mk = (label, value, opts, onChange) => {
+    const f = el('label', 'ex-f');
+    f.appendChild(el('span', 'k', label));
+    const s = el('select');
+    opts.forEach(([v, text]) => { const o = el('option', '', text); o.value = v; s.appendChild(o); });
+    s.value = value;
+    s.addEventListener('change', () => onChange(s.value));
+    f.appendChild(s);
+    form.appendChild(f);
+  };
+  const keep = () => { EX_DRAFT = draft; if (document.activeElement) document.activeElement.blur(); renderDetail(); };
+  mk(t('ex_entry'), draft.entry, profs.map(p => [p.k, exName(d, p.k)]), v => {
+    draft.entry = v;
+    const p = profs.find(x => x.k === v);
+    draft.via = ((p && p.v) || []).filter(Boolean);
+    keep();
+  });
+  for (let i = 0; i < 2; i++){
+    if (i > 0 && !draft.via[0]) break;
+    const opts = [['', t('ex_none')]].concat(profs.filter(p => p.k !== draft.entry &&
+      !draft.via.some((k, j) => j !== i && k === p.k)).map(p => [p.k, exName(d, p.k)]));
+    mk(t('ex_hop'), draft.via[i] || '', opts, v => {
+      if (v) draft.via[i] = v; else draft.via = draft.via.slice(0, i);
+      keep();
+    });
+  }
+  box.appendChild(form);
+  const send = el('button', 'btn small', t('ex_send'));
+  send.addEventListener('click', async () => {
+    send.disabled = true;
+    const {ok, data} = await api('/api/mesh/exit', {net: MESH_NET, device: d.id, entry: draft.entry, via: draft.via.filter(Boolean)});
+    send.disabled = false;
+    if (!ok){ toast(meshErr(data), 'err'); return; }
+    EX_DRAFT = null;
+    toast(t('ex_sent'));
+    loadMesh();
+    loadJournal();
+  });
+  const acts = el('div', 'dacts');
+  acts.appendChild(send);
+  box.appendChild(acts);
+  box.appendChild(el('p', 'note', t('ex_hint')));
+}
+
+// evText16 — записи журнала об одобрении, заморозке и цепочке; '' — не наши.
+function evText16(e, d){
+  switch (e.type){
+    case 'pending': return fill('ev_pending', {d: e.text || d});
+    case 'approve': return fill('ev_approve', {d: e.text || d});
+    case 'freeze': return fill('ev_freeze', {d: e.text || d});
+    case 'unfreeze': return fill('ev_unfreeze', {d: e.text || d});
+    case 'approval': return fill(e.text === 'on' ? 'ev_approval_on' : 'ev_approval_off', {n: evNet(e.net)});
+    case 'exit': return fill('ev_exit', {d, t: e.text || ''});
+  }
+  return '';
+}
 </script>
 </body>
 </html>

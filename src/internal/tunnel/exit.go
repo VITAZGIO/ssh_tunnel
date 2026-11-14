@@ -47,6 +47,9 @@ type Hop struct {
 	// UDPRelay — на этом сервере стоит ретранслятор UDP (галочка его
 	// профиля). Смотрится только у последнего: UDP выходит через него.
 	UDPRelay bool
+	// Need — звено из панели сервера, для которого на устройстве нет профиля
+	// («адрес:порт», ТЗ 16): туннель не стартует, а говорит, чего не хватает.
+	Need string
 }
 
 func (h Hop) addr() string {
@@ -216,6 +219,9 @@ func (t *Tunnel) loadExitSigners() error {
 	}
 	signers := make([]ssh.Signer, len(hops))
 	for i, h := range hops {
+		if h.Need != "" {
+			return fmt.Errorf("в цепочке выхода нужен профиль сервера %s — добавь его на этом устройстве или поменяй цепочку", h.Need)
+		}
 		if h.Host == "" {
 			return fmt.Errorf("в цепочке выхода у сервера «%s» не указан адрес", h.Name)
 		}
