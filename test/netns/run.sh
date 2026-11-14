@@ -27,6 +27,19 @@ echo "$(date +%T) старт" > "$OUT/section"
 
 say() { echo "### $(date +%T) run.sh: $*"; }
 
+# DNS машины сборки — то, без чего раннер теряет GitHub. Запомнить как есть
+# (ссылка или файл) и вернуть, если стенд его всё же тронул.
+cp -P /etc/resolv.conf "$OUT/host-resolv.conf"
+host_repair() {
+  if [ "$(readlink /etc/resolv.conf)" != "$(readlink "$OUT/host-resolv.conf")" ] ||
+     ! cmp -s /etc/resolv.conf "$OUT/host-resolv.conf"; then
+    echo "::error::стенд изменил /etc/resolv.conf машины сборки — возвращаю"
+    cat /etc/resolv.conf
+    rm -f /etc/resolv.conf
+    cp -P "$OUT/host-resolv.conf" /etc/resolv.conf
+  fi
+}
+
 # Сторож машины сборки: отдельный сеанс, высокий приоритет.
 setsid nice -n -10 bash "$HERE/guard.sh" "$OUT" > "$OUT/guard.log" 2>&1 < /dev/null &
 GUARD=$!
@@ -53,6 +66,7 @@ sleep 1
 kill "$TAIL" 2>/dev/null
 
 if [ -n "$why" ]; then
+  host_repair
   echo "::error::стенд снят ($why), раздел: $(cat "$OUT/section")"
   say "снимок состояния перед уборкой → dump-abort.txt"
   timeout 120 bash "$HERE/dump.sh" > "$OUT/dump-abort.txt" 2>&1
@@ -66,6 +80,7 @@ kill -9 -- "-$PGID" 2>/dev/null
 say "уборка"
 LAB_CLEANUP_ONLY=1 timeout 120 bash "$HERE/$SUITE.sh" > "$OUT/cleanup.log" 2>&1 < /dev/null
 tail -n 20 "$OUT/cleanup.log"
+host_repair
 
 kill -- "-$GUARD" 2>/dev/null
 say "код $rc"
