@@ -40,11 +40,32 @@ expect() {
   got=$("$@" 2>/dev/null | head -n1 | tr -d '\r' || true)
   if [ "$got" = "$want" ]; then pass "$d ($got)"; else fail "$d: ждали «$want», получили «$got»"; fi
 }
-# eventually СЕК команда… — ждать, пока команда не пройдёт.
+# eventually СЕК команда… — ждать, пока команда не пройдёт, не дольше СЕК
+# секунд по часам (а не СЕК попыток: попытка с curl -m 10 — это 10 секунд).
 eventually() {
-  local t=$1; shift
-  for _ in $(seq 1 "$t"); do "$@" >/dev/null 2>&1 && return 0; sleep 1; done
-  return 1
+  local end=$((SECONDS + $1)); shift
+  while :; do
+    "$@" >/dev/null 2>&1 && return 0
+    [ "$SECONDS" -lt "$end" ] || return 1
+    sleep 1
+  done
+}
+
+# section "название" — начало раздела: и в журнал, и в файл, который читает
+# сторож (test/netns/run.sh), чтобы при аварии было видно, где мы были.
+section() {
+  echo "== $(date +%T) $*"
+  echo "$(date +%T) $*" > "$LAB/out/section" 2>/dev/null || true
+}
+
+# hang_point ИМЯ — для проверки самого стенда: при LAB_HANG=ИМЯ сценарий
+# здесь «виснет» (и держит фоновый процесс), сторож и предел должны снять
+# его и оставить читаемый журнал.
+hang_point() {
+  [ "${LAB_HANG:-}" = "$1" ] || return 0
+  echo "!! нарочно виснем в точке $1 (LAB_HANG)"
+  sleep 100000 &
+  sleep 100000
 }
 
 set_rp() { # пространство

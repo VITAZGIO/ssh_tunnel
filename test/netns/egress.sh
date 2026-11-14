@@ -20,8 +20,10 @@ cleanup() {
   lab_down
 }
 trap cleanup EXIT
+# run.sh после аварии: только уборка.
+[ -z "${LAB_CLEANUP_ONLY:-}" ] || exit 0
 
-echo "== стенд: rp_filter=$RP"
+section "стенд: rp_filter=$RP"
 lab_down
 lab_inet
 lab_b
@@ -82,7 +84,7 @@ done
 for u in $UNITS; do rm -f "/etc/systemd/system/$u"; done
 systemctl daemon-reload
 
-echo "== сценарии выхода сервера (Go, внутри a)"
+section "сценарии выхода сервера (Go, внутри a)"
 set +e
 ns a env LAB="$LAB" LAB_SH="$HERE/lab.sh" LAB_VPN_BIN="$LAB/ssh_tunnel_vpn_linux" LAB_LINK="$(link_b)" \
   "$LAB/panel.test" -test.run '^TestEgressLab$' -test.v -test.timeout 25m

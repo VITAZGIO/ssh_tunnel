@@ -16,10 +16,22 @@ D() { timeout 60 docker -H "unix://$SOCK" "$@"; }
 
 cleanup() {
   set +e
+  set +x
   stop_client TERM
   D rm -f tun dir hst str >/dev/null 2>&1
-  [ -f /run/docker-lab.pid ] && kill "$(cat /run/docker-lab.pid)" 2>/dev/null
-  sleep 2
+  if [ -f /run/docker-lab.pid ]; then
+    local p; p=$(cat /run/docker-lab.pid)
+    kill "$p" 2>/dev/null
+    for _ in $(seq 1 15); do kill -0 "$p" 2>/dev/null || break; sleep 1; done
+    kill -9 "$p" 2>/dev/null
+    rm -f /run/docker-lab.pid
+  fi
+  # dockerd, убитый kill -9, оставляет контейнеры в containerd машины.
+  if command -v ctr >/dev/null; then
+    for t in $(timeout 10 ctr -n docker-lab task ls -q 2>/dev/null); do
+      timeout 10 ctr -n docker-lab task kill -s SIGKILL "$t" 2>/dev/null
+    done
+  fi
   lab_down
   rm -rf /etc/netns/c
 }
@@ -61,10 +73,14 @@ our_rules() { ip -n c rule | grep -E 'lookup 709[4-6]' || true; }
 count_rules() { ip -n c rule | grep -E 'lookup 709[4-6]' | grep -cE "$1" || true; }
 t_is_b() { [ "$(cecho tun 2>/dev/null)" = 203.0.113.20 ]; }
 
-echo "== стенд: rp_filter=$RP"
+# run.sh после аварии: только уборка.
+[ -z "${LAB_CLEANUP_ONLY:-}" ] || exit 0
+
+section "стенд: rp_filter=$RP"
 # Где мы: каждая строка сценария с временем — чтобы найти, что повисло.
 export PS4='+ $(date +%T) docker.sh:${LINENO}: '
 set -x
+hang_point start
 lab_down
 lab_inet
 lab_b
@@ -73,7 +89,7 @@ host lan br1 192.168.50.3/24 192.168.50.1
 mkdir -p /etc/netns/c
 echo "nameserver 192.0.2.53" > /etc/netns/c/resolv.conf
 
-echo "== свой dockerd в пространстве c"
+section "свой dockerd в пространстве c"
 rm -rf /var/lib/docker-lab /run/docker-lab
 # Свой daemon.json: у машины сборки в /etc/docker/daemon.json свой DNS.
 echo '{"dns":["192.0.2.53"],"ip6tables":false}' > "$LAB/daemon.json"
@@ -86,10 +102,11 @@ nsenter --net=/run/netns/c dockerd --data-root /var/lib/docker-lab --exec-root /
   --cgroup-parent docker-lab --config-file "$LAB/daemon.json" \
   > "$LAB/dockerd-c.log" 2>&1 &
 eventually 60 D info || { tail -n 40 "$LAB/dockerd-c.log"; exit 1; }
-docker save "$IMG" | D load >/dev/null
+timeout 120 docker save "$IMG" | D load >/dev/null
 ns c "$LAB/labd" -http 0.0.0.0:9090 > "$LAB/labd-c.log" 2>&1 &
+hang_point dockerd
 
-echo "== клиент ssh_tunnel в c"
+section "клиент ssh_tunnel в c"
 rm -rf "$CFG"
 ns c env XDG_CONFIG_HOME="$CFG" "$BIN" -host 203.0.113.20 -user tunlab -key "$LAB/key" -filter all \
   -direct 192.0.2.81,.d.test-lab.net -save
@@ -101,6 +118,7 @@ api /api/addons '{"op":"add","id":"docker"}' >/dev/null
 api /api/state '{"tunnel":true,"mesh":true}' >/dev/null
 tunnel_on || { echo "::error::туннель не поднялся"; api /api/state; tail -n 60 "$LAB/client-c.log"; exit 1; }
 
+hang_point tunnel
 run_ctr tun -p 8080:80
 run_ctr dir
 run_ctr hst
@@ -112,7 +130,7 @@ sleep 2
 echo "-- ip rule и nat в c:"; our_rules; ns c iptables -t nat -S | grep -E 'SSH_TUNNEL|MASQ' || true
 echo "-- /api/docker:"; api /api/docker | jq -c '.kernel, [.containers[] | {name, effective, strict, published}]'
 
-echo "== туннель включён"
+section "туннель включён"
 expect "«через сервер» виден адресом B" 203.0.113.20 cecho tun
 expect "«напрямую» виден домашним адресом" 192.168.50.2 cecho dir
 expect "«как компьютер» идёт как компьютер (через B)" 203.0.113.20 cecho hst
@@ -130,7 +148,7 @@ expect "контейнер → компьютер" "$(ip_of tun)" D exec tun wge
 expect "опубликованный порт из домашней сети" ok ns lan curl -fsS -m 5 http://192.168.50.2:8080/
 check "исключение из MASQUERADE стоит" sh -c "ip netns exec c iptables -t nat -S SSH_TUNNEL_DOCKER | grep -q -- '-s $(ip_of tun)/32 -j ACCEPT'"
 
-echo "== туннель выключен (сеть устройств включена)"
+section "туннель выключен (сеть устройств включена)"
 api /api/state '{"tunnel":false}' >/dev/null
 leak=0
 for _ in $(seq 1 12); do
@@ -146,13 +164,13 @@ expect "…и запрос имени никуда не ушёл" 0 sh -c "grep 
 expect "«напрямую» работает" 192.168.50.2 cecho dir
 expect "«как компьютер» — как компьютер (напрямую)" 192.168.50.2 cecho hst
 
-echo "== туннель снова включён, контейнер пересоздан"
+section "туннель снова включён, контейнер пересоздан"
 api /api/state '{"tunnel":true}' >/dev/null
 tunnel_on || fail "туннель не поднялся снова"
 run_ctr tun -p 8080:80
 if eventually 10 t_is_b; then pass "пересозданный «через сервер» — через B"; else fail "пересозданный «через сервер» не через B"; fi
 
-echo "== kill -9 клиента"
+section "kill -9 клиента"
 stop_client KILL
 sleep 2
 refute "после kill -9 «через сервер» без интернета" cecho tun
@@ -165,7 +183,7 @@ api /api/state '{"tunnel":true,"mesh":true}' >/dev/null
 tunnel_on || fail "после перезапуска туннель не поднялся"
 if eventually 15 t_is_b; then pass "после перезапуска «через сервер» снова через B"; else fail "после перезапуска «через сервер» не через B"; fi
 
-echo "== чистая остановка"
+section "чистая остановка"
 stop_client TERM
 sleep 1
 echo "-- правила после остановки:"; our_rules
@@ -176,7 +194,7 @@ expect "«через сервер» без программы — как ком�
 refute "строгий без программы — без интернета" cecho str
 check "строгий без программы ходит в домашнюю сеть" D exec str ping -c1 -W2 192.168.50.3
 
-echo "== снять галочку (VPN выключен)"
+section "снять галочку (VPN выключен)"
 start_client
 api /api/state '{"tunnel":false,"mesh":false}' >/dev/null
 sleep 2
@@ -188,5 +206,5 @@ expect "после всего правил нет" 0 count_rules '.'
 expect "после всего таблица 7094 пуста" 0 sh -c "ip -n c route show table 7094 | wc -l"
 
 echo "== журнал клиента (хвост)"; tail -n 40 "$LAB/client-c.log" || true
-echo "== итог: провалов $FAILS"
+section "итог: провалов $FAILS"
 [ "$FAILS" = 0 ]
