@@ -60,6 +60,40 @@ class TunnelService : VpnService(), Callbacks {
         @Volatile var serverDown: String = ""
         @Volatile var serverDownKind: String = ""
 
+        /**
+         * Обход погас сам, потому что сервер не ответил (а человек его с тех
+         * пор не нажимал): когда сервер вернётся, обход включится обратно, как
+         * на ПК (core.Machine, ТЗ 20). Любое нажатие человека это снимает.
+         */
+        @Volatile var bypassAutoOff: Boolean = false
+
+        // Нажатия человека по счёту и замок вокруг tunnel.setModes: возврат
+        // обхода сам по себе не должен лечь поверх нажатия, сделанного в тот
+        // же миг (см. serverBack).
+        @Volatile private var humanSeq = 0L
+        private val modesLock = Any()
+
+        /** Цепочка выхода для экрана (mobile.ExitJSON); пусто — её нет. */
+        @Volatile var exitJson: String = ""
+
+        /**
+         * Список серверов поменялся (экран сохранил настройки): дополнительные
+         * серверы сети устройств — сразу, цепочка — со следующим подключением.
+         */
+        fun profilesChanged(s: Settings) {
+            val svc = current ?: return
+            val json = s.coreProfilesJson()
+            val active = s.active().id
+            val udp = s.udpRelayEnabled
+            Thread {
+                try {
+                    svc.tunnel.setProfiles(json, active, udp)
+                } catch (e: Exception) {
+                    svc.onLog("серверы: ${e.message}")
+                }
+            }.start()
+        }
+
         /** Сеть устройств одной строкой (mobile.MeshSummary). */
         @Volatile var meshSummary: String = """{"state":"off"}"""
         @Volatile var statsJson: String = "{}"
@@ -219,6 +253,7 @@ class TunnelService : VpnService(), Callbacks {
             override fun onAvailable(network: Network) {
                 val prev = lastNetwork
                 lastNetwork = network
+                updateMetered(cm)
                 // Первый вызов — это просто исходная сеть, не смена. Кикать
                 // пул, пока он ещё не поднят, тоже незачем — tunnel.kick()
                 // сам по себе безвреден, но и толку от него в этот момент нет.
@@ -231,9 +266,16 @@ class TunnelService : VpnService(), Callbacks {
                     }
                 }
             }
+
+            // Та же сеть стала лимитной или перестала (точка доступа, отметка
+            // «лимитная» в настройках Wi-Fi) — резервным копиям это важно.
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                updateMetered(cm)
+            }
         }
         networkCallback = cb
         connectivityManager = cm
+        updateMetered(cm)
         // registerDefaultNetworkCallback, а не registerNetworkCallback с общим
         // запросом: нужна именно смена сети, которую система считает основной
         // для исходящих соединений, а не появление любой сети в принципе
@@ -373,12 +415,51 @@ class TunnelService : VpnService(), Callbacks {
             }
             statsJson = try { tunnel.statsJSON() } catch (e: Exception) { "{}" }
             meshSummary = try { tunnel.meshSummary() } catch (e: Exception) { """{"state":"off"}""" }
+            exitJson = try { tunnel.exitJSON() } catch (e: Exception) { "" }
+            serverBack(now)
             accumulateBlockedTotal()
             updateMulticast()
             refreshNotice()
             fireUpdate()
             ticker.postDelayed(this, 1500)
         }
+    }
+
+    /**
+     * Сервер вернулся, а обход погас из-за его потери и человек его не
+     * трогал — включить обход обратно (как круглая кнопка на ПК, ТЗ 20).
+     */
+    private fun serverBack(now: String) {
+        if (!bypassAutoOff || now != "connected" || stopping || draining || bypassOn) return
+        bypassAutoOff = false
+        val mesh = meshOn
+        val seq = humanSeq
+        onLog("сервер снова на связи — обход блокировок включается обратно")
+        Thread {
+            val refused = try {
+                synchronized(modesLock) {
+                    // Человек успел нажать — его выбор уже применяется.
+                    if (humanSeq != seq) return@Thread
+                    tunnel.setModes(true, mesh)
+                }
+                null
+            } catch (e: Exception) {
+                e.message ?: "нет связи с сервером"
+            }
+            ticker.post {
+                if (humanSeq != seq) return@post
+                if (refused == null) bypassOn = true
+                modesApplied(true, mesh, refused)
+                // Сервер успел пропасть снова — ждём следующего возврата.
+                if (refused != null) bypassAutoOff = true
+            }
+        }.start()
+    }
+
+    /** Лимитная ли сейчас связь — для «только по Wi-Fi» у резервных копий. */
+    private fun updateMetered(cm: ConnectivityManager) {
+        val metered = try { cm.isActiveNetworkMetered } catch (_: Exception) { false }
+        try { Mobile.setMetered(metered) } catch (_: Exception) {}
     }
 
     override fun onCreate() {
@@ -396,6 +477,9 @@ class TunnelService : VpnService(), Callbacks {
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_MODES) {
+            // Нажал человек — его решение ядро больше не переписывает.
+            bypassAutoOff = false
+            humanSeq++
             val bypass = intent.getBooleanExtra(EXTRA_BYPASS, true)
             val mesh = intent.getBooleanExtra(EXTRA_MESH, true)
             val running = state != "stopped" && state != "error" && !draining
@@ -410,7 +494,7 @@ class TunnelService : VpnService(), Callbacks {
                 // закроет соединения.
                 Thread {
                     val refused = try {
-                        tunnel.setModes(bypass, mesh)
+                        synchronized(modesLock) { tunnel.setModes(bypass, mesh) }
                         null
                     } catch (e: Exception) {
                         e.message ?: "нет связи с сервером"
@@ -425,6 +509,7 @@ class TunnelService : VpnService(), Callbacks {
             // Большая кнопка и запуск системой (always-on) включают всё.
             bypassOn = true
             meshOn = true
+            bypassAutoOff = false
         }
         // Включили обратно, пока шёл слив: интерфейс VPN никуда не девался,
         // поэтому достаточно поднять пул. Сокеты приложений при этом не
@@ -524,6 +609,10 @@ class TunnelService : VpnService(), Callbacks {
                     prof.meshIncoming,
                     !prof.meshDirectOff,
                 )
+                // Другие серверы (ТЗ 20): дополнительные серверы сети
+                // устройств с тем же ключом и цепочка выхода. Неверная
+                // цепочка — ошибка подключения, а не тихий выход напрямую.
+                tunnel.setProfiles(settings.coreProfilesJson(), prof.id, settings.udpRelayEnabled)
                 tunnel.startCore()
                 // Сервер не ответил, а сеть устройств нужна: ядро поднялось
                 // без него (ТЗ 11) — обход выключен с ошибкой сервера, сеть
@@ -531,6 +620,8 @@ class TunnelService : VpnService(), Callbacks {
                 // не останавливается.
                 val down = tunnel.serverDownText()
                 if (down.isNotBlank()) {
+                    // Погас сам, без человека: вернётся вместе с сервером.
+                    bypassAutoOff = bypassOn
                     bypassOn = false
                     serverDown = down
                     serverDownKind = tunnel.serverDownKind()
@@ -717,6 +808,8 @@ class TunnelService : VpnService(), Callbacks {
         unregisterNetworkCallback()
         statsJson = "{}"
         meshSummary = """{"state":"off"}"""
+        exitJson = ""
+        bypassAutoOff = false
         serverDown = ""
         serverDownKind = ""
         lastNotice = ""

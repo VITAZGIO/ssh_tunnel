@@ -90,6 +90,11 @@ type Machine struct {
 	want Want
 	errT *failure // почему выключилась круглая
 	errM *failure // почему выключилась «Сеть устройств»
+	// autoT — круглая кнопка погасла сама, потому что пропал сервер (а
+	// местная часть жива): когда сервер вернётся, она включится обратно. Любое
+	// нажатие круглой человеком (и Restore, и потеря связи целиком) это
+	// снимает — решение человека ядро не переписывает.
+	autoT bool
 
 	linkUp  bool               // связь с сервером поднята
 	linking bool               // идёт подключение
@@ -148,6 +153,7 @@ func (m *Machine) Set(tunnel, mesh *bool) error {
 	if tunnel != nil {
 		m.want.Tunnel = *tunnel
 		m.errT = nil
+		m.autoT = false
 	}
 	if mesh != nil {
 		m.want.Mesh = *mesh
@@ -173,6 +179,7 @@ func (m *Machine) Restore(w Want) {
 	m.mu.Lock()
 	m.want = w
 	m.errT, m.errM = nil, nil
+	m.autoT = false
 	m.mu.Unlock()
 	m.poke()
 }
@@ -222,6 +229,7 @@ func (m *Machine) LinkLost(err error) {
 	if m.want.Mesh {
 		m.want.Mesh, m.errM = false, f
 	}
+	m.autoT = false
 	m.lastErr = err
 	m.mu.Unlock()
 	m.poke()
@@ -239,11 +247,37 @@ func (m *Machine) ServerLost(err error) {
 	}
 	if m.want.Tunnel {
 		m.want.Tunnel, m.errT = false, m.failureLocked(err)
+		m.autoT = true
 	}
 	m.lastErr = err
 	m.reapply = true
 	m.mu.Unlock()
 	m.poke()
+}
+
+// ServerBack — сервер снова на связи (платформа узнала это сама). Если
+// круглая кнопка погасла из-за его потери и человек с тех пор её не трогал,
+// она включается обратно — так же, как сеть устройств сама находит сервер.
+// Действием человека не считается и не запоминается. Зовётся сколько угодно
+// раз; без потери сервера ничего не делает.
+//
+// Платформе звать его не обязательно: State тоже это замечает — по Link()
+// == "connected", а Link() платформа и так спрашивает на каждую смену связи.
+func (m *Machine) ServerBack() {
+	m.mu.Lock()
+	back := m.serverBackLocked()
+	m.mu.Unlock()
+	if back {
+		m.poke()
+	}
+}
+
+func (m *Machine) serverBackLocked() bool {
+	if !m.autoT || !m.linkUp || m.linking || m.want.Tunnel {
+		return false
+	}
+	m.want.Tunnel, m.errT, m.autoT = true, nil, false
+	return true
 }
 
 // Want — чего сейчас хочет человек.
@@ -317,6 +351,12 @@ func (m *Machine) State() State {
 		exit = r.Exit()
 	}
 	m.mu.Lock()
+	if link == "connected" && m.serverBackLocked() {
+		// Сервер вернулся, а круглая погасла из-за его потери — включить.
+		m.mu.Unlock()
+		m.poke()
+		m.mu.Lock()
+	}
 	defer m.mu.Unlock()
 	st := State{MeshAvailable: avail, Detail: detail, Seq: m.seq, Mode: ModeOff}
 	switch {
@@ -501,6 +541,9 @@ func (m *Machine) step() {
 		}
 		up, linkCancel := m.linkUp, m.linkCancel
 		m.linkUp, m.hasApplied, m.restart, m.linkCancel = false, false, false, nil
+		if !need {
+			m.autoT = false // всё выключено — возвращать нечего
+		}
 		m.mu.Unlock()
 		if up {
 			m.drv.Disconnect()
@@ -609,6 +652,7 @@ func (m *Machine) startConnectLocked() {
 			m.lastErr = down.Err
 			if m.want.Tunnel {
 				m.want.Tunnel, m.errT = false, m.failureLocked(down.Err)
+				m.autoT = true
 			}
 		case cancelled:
 			// Отменили — это не ошибка подключения.
@@ -621,6 +665,7 @@ func (m *Machine) startConnectLocked() {
 			if m.want.Mesh {
 				m.want.Mesh, m.errM = false, f
 			}
+			m.autoT = false
 		}
 		m.mu.Unlock()
 		m.poke()
