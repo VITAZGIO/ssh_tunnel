@@ -31,6 +31,9 @@ import java.util.TimeZone
  */
 object AndroidApi : mobile.API {
 
+    /** Сколько серверов может быть в цепочке после своего (config.MaxExitHops). */
+    private const val MAX_EXIT_HOPS = 2
+
     private lateinit var app: Context
     private val main = Handler(Looper.getMainLooper())
 
@@ -117,6 +120,7 @@ object AndroidApi : mobile.API {
             "/api/profile/export" -> exportProfile(s, obj(body))
             "/api/profile/import" -> importText(s, body)
             "/api/profile/latency" -> latency(s)
+            "/api/profile/exit" -> setExitVia(s, obj(body))
             "/api/key" -> saveKey(s, obj(body))
             "/api/settings/export" -> {
                 val list = s.profiles
@@ -215,6 +219,11 @@ object AndroidApi : mobile.API {
             out.put("meshLink", meshLink)
             val direct = ms.optInt("direct")
             if (direct > 0) out.put("meshDirect", direct)
+        }
+        // Цепочка выхода (core.ExitPath, как на ПК) — пока туннель поднят.
+        val exit = TunnelService.exitJson
+        if (run && exit.isNotEmpty()) {
+            try { out.put("exit", JSONObject(exit)) } catch (_: Exception) {}
         }
         return out
     }
@@ -391,6 +400,8 @@ object AndroidApi : mobile.API {
         .put("udpRelayEnabled", s.udpRelayEnabled)
         .put("meshEnabled", p.meshEnabled).put("meshKey", p.meshKey).put("meshName", p.meshName)
         .put("meshIncoming", p.meshIncoming).put("meshDirectOff", p.meshDirectOff)
+        .put("meshOnlyThis", p.meshOnlyThis)
+        .put("exitVia", JSONArray(p.exitVia))
 
     private fun config(s: Settings): JSONObject {
         val arr = JSONArray()
@@ -429,6 +440,42 @@ object AndroidApi : mobile.API {
         if (o.has("meshName")) p.meshName = o.optString("meshName").trim()
         if (o.has("meshIncoming")) p.meshIncoming = o.optBoolean("meshIncoming")
         if (o.has("meshDirectOff")) p.meshDirectOff = o.optBoolean("meshDirectOff")
+        if (o.has("meshOnlyThis")) p.meshOnlyThis = o.optBoolean("meshOnlyThis")
+    }
+
+    /**
+     * «Выход через» (ТЗ 20): проверка как на ПК (App.SetExitVia) — не сам
+     * себя, без повторов, до двух, только существующие серверы с адресом.
+     * Возвращает текст ошибки или null.
+     */
+    private fun exitViaError(s: Settings, id: String, via: List<String>): String? {
+        if (via.size > MAX_EXIT_HOPS) return "в цепочке может быть не больше $MAX_EXIT_HOPS серверов после этого"
+        val seen = mutableSetOf(id)
+        for (v in via) {
+            if (v == id) return "сервер не может выходить в интернет через самого себя"
+            if (!seen.add(v)) return "один сервер дважды в цепочке"
+            val hop = s.profiles.find { it.id == v } ?: return "сервер «$v» не найден"
+            if (hop.host.isBlank()) return "у сервера «${hop.name}» не указан адрес"
+        }
+        return null
+    }
+
+    private fun viaList(a: JSONArray?): List<String> =
+        if (a == null) emptyList() else (0 until a.length()).map { a.optString(it).trim() }.filter { it.isNotEmpty() }
+
+    /** POST /api/profile/exit {"id","via":[…]} — как на ПК (webui/exit.go). */
+    private fun setExitVia(s: Settings, o: JSONObject): String {
+        val id = o.optString("id").ifBlank { s.activeProfileId }
+        val p = s.profiles.find { it.id == id } ?: return err("сервер не найден")
+        val via = viaList(o.optJSONArray("via"))
+        exitViaError(s, id, via)?.let { return err(it) }
+        p.exitVia = via.toMutableList()
+        s.saveProfile(p)
+        TunnelService.profilesChanged(s)
+        pushState()
+        val r = JSONObject().put("ok", true).put("config", config(s))
+        if (running() && id == s.activeProfileId) r.put("note", app.getString(R.string.applies_on_reconnect))
+        return r.toString()
     }
 
     private fun saveConfig(s: Settings, doc: JSONObject): String {
@@ -439,6 +486,13 @@ object AndroidApi : mobile.API {
                 val o = arr.optJSONObject(i) ?: continue
                 val p = list.find { it.id == o.optString("id") } ?: continue
                 applyProfile(p, o)
+                // Цепочка из формы настроек — с той же проверкой, что у
+                // /api/profile/exit; неверная не сохраняется.
+                if (o.has("exitVia")) {
+                    val via = viaList(o.optJSONArray("exitVia"))
+                    exitViaError(s, p.id, via)?.let { return err(it) }
+                    p.exitVia = via.toMutableList()
+                }
                 s.saveProfile(p)
                 if (o.has("udpRelayEnabled")) s.udpRelayEnabled = o.optBoolean("udpRelayEnabled")
             }
@@ -452,6 +506,9 @@ object AndroidApi : mobile.API {
         if (doc.has("adBlockEnabled")) s.adBlockEnabled = doc.optBoolean("adBlockEnabled")
         if (doc.has("adBlockSources")) s.adBlockSources = doc.optString("adBlockSources")
         if (doc.has("adBlockAllowlist")) s.adBlockAllowlist = doc.optString("adBlockAllowlist")
+        // Дополнительные серверы сети устройств меняются сразу (цепочка — со
+        // следующим подключением).
+        TunnelService.profilesChanged(s)
         pushState()
         val r = JSONObject().put("ok", true).put("config", config(s))
         if (running()) r.put("note", app.getString(R.string.applies_on_reconnect))

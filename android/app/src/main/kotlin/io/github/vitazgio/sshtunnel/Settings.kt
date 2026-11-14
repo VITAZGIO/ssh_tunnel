@@ -51,6 +51,12 @@ class Settings(context: Context) {
         var meshDirectOff: Boolean = false,
         /** «Всегда в туннель» — обратный directHosts список, общий для всех серверов. */
         var tunnelHosts: String = "",
+        // Сеть устройств только через этот сервер: не держать соединений с
+        // другими серверами той же сети (ТЗ 12, как Profile.MeshOnlyThis на ПК).
+        var meshOnlyThis: Boolean = false,
+        // «Выход через» (ТЗ 8 на ПК, ТЗ 20 на телефоне): id других серверов по
+        // порядку, до двух; в интернет — только через последний.
+        var exitVia: MutableList<String> = mutableListOf(),
     )
 
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -195,6 +201,8 @@ class Settings(context: Context) {
             o.put("meshName", p.meshName); o.put("meshIncoming", p.meshIncoming)
             o.put("meshDirectOff", p.meshDirectOff)
             o.put("tunnelHosts", p.tunnelHosts)
+            o.put("meshOnlyThis", p.meshOnlyThis)
+            o.put("exitVia", JSONArray(p.exitVia))
             arr.put(o)
         }
         return arr.toString()
@@ -231,6 +239,10 @@ class Settings(context: Context) {
                         meshIncoming = o.optBoolean("meshIncoming", false),
                         meshDirectOff = o.optBoolean("meshDirectOff", false),
                         tunnelHosts = o.optString("tunnelHosts", ""),
+                        meshOnlyThis = o.optBoolean("meshOnlyThis", false),
+                        exitVia = o.optJSONArray("exitVia")?.let { a ->
+                            (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() }.toMutableList()
+                        } ?: mutableListOf(),
                     )
                 )
             }
@@ -270,6 +282,27 @@ class Settings(context: Context) {
             }
         }
         return p
+    }
+
+    /**
+     * Все серверы для ядра (mobile.Tunnel.SetProfiles) — в JSON профиля ПК
+     * (config.Profile): кого держать дополнительным сервером сети устройств и
+     * через кого выходить в интернет, решает общий код, как на ПК.
+     */
+    fun coreProfilesJson(): String {
+        val arr = JSONArray()
+        for (p in profiles) {
+            arr.put(
+                JSONObject()
+                    .put("id", p.id).put("name", p.name)
+                    .put("host", p.host).put("sshPort", p.sshPort).put("user", p.user)
+                    .put("keyPath", keyFile(p.id).absolutePath)
+                    .put("meshEnabled", p.meshEnabled).put("meshKey", p.meshKey)
+                    .put("meshOnlyThis", p.meshOnlyThis)
+                    .put("exitVia", JSONArray(p.exitVia))
+            )
+        }
+        return arr.toString()
     }
 
     fun keyFile(profileId: String): File {

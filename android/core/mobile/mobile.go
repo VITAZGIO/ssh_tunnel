@@ -22,6 +22,7 @@ import (
 
 	"sshtunnel/android/core"
 	"sshtunnel/internal/calendar"
+	"sshtunnel/internal/config"
 	core2 "sshtunnel/internal/core"
 	"sshtunnel/internal/devnet"
 	"sshtunnel/internal/events"
@@ -117,6 +118,12 @@ type Tunnel struct {
 	// см. tunnel.MeshHost): живёт, пока включена кнопка «Сеть устройств», и
 	// не зависит от того, ответил ли сервер.
 	meshHost *tunnel.MeshHost
+	// meshLinks — лёгкие соединения с дополнительными серверами сети
+	// устройств (ТЗ 20, как на ПК); extras — какие (профили с тем же ключом
+	// сети), exit — цепочка выхода активного сервера. Оба из SetProfiles.
+	meshLinks *tunnel.MeshLinks
+	extras    []config.Profile
+	exit      []tunnel.Hop
 
 	// localOnly — туннель поднят без сервера ради сети устройств (сервер не
 	// ответил на первом подключении и ищется в фоне); serverErr — почему не
@@ -132,11 +139,13 @@ type Tunnel struct {
 // переименовала бы функцию во что-то нечитаемое.
 func NewTunnel() *Tunnel {
 	t := &Tunnel{}
-	t.meshHost = tunnel.NewMeshHost(func(_, text string) {
+	logf := func(_, text string) {
 		if cb := t.callbacks(); cb != nil {
 			cb.OnLog(text)
 		}
-	})
+	}
+	t.meshHost = tunnel.NewMeshHost(logf)
+	t.meshLinks = tunnel.NewMeshLinks(t.meshHost, logf)
 	// Календарь ходит к Nextcloud через это ядро (calendar.go).
 	calendar.SetDial(t.dialSelf)
 	// Туннель в процессе один (служба VPN): он и даёт сеть устройств
@@ -454,6 +463,8 @@ func (t *Tunnel) StartCore() error {
 	// Клиентом сети устройств владеет не пул, а t.meshHost (как App на ПК):
 	// пул только даёт ему путь к серверу.
 	cfg.MeshHost = t.meshHost
+	// Цепочка выхода (SetProfiles): «через сервер» — только через последний.
+	cfg.Exit = t.exit
 	mc := t.meshWantedLocked()
 	t.localOnly, t.serverErr = false, nil
 	t.mu.Unlock()
@@ -465,7 +476,7 @@ func (t *Tunnel) StartCore() error {
 	// Сеть устройств нужна — её клиент поднимается сразу, ещё до сервера:
 	// кэш на диске, прямые соединения и маяки работают и без него.
 	if mc != nil {
-		t.meshHost.Start(*mc)
+		t.startMesh(mc)
 	}
 
 	bus := events.NewBus()
@@ -555,7 +566,7 @@ func (t *Tunnel) StartCore() error {
 // будет некому. Следующий StartCore поднимет его снова.
 func (t *Tunnel) stopMeshIf(mc *mesh.Config) {
 	if mc != nil {
-		t.meshHost.Stop()
+		t.stopMesh()
 	}
 }
 
@@ -767,7 +778,7 @@ func (t *Tunnel) Drain(seconds int) {
 	t.mu.Unlock()
 	// Слив — это «выключить всё»: сеть устройств гаснет сразу, как и
 	// раньше, когда её клиент жил в пуле.
-	t.meshHost.Stop()
+	t.stopMesh()
 	if tun == nil {
 		return
 	}
@@ -864,9 +875,9 @@ func (t *Tunnel) SetModes(bypass, mesh bool) error {
 	}
 	// Клиентом сети устройств владеет meshHost: кнопка его и включает.
 	if mc != nil {
-		t.meshHost.Start(*mc)
+		t.startMesh(mc)
 	} else {
-		t.meshHost.Stop()
+		t.stopMesh()
 	}
 	tun.SetBypass(bypass)
 	tun.SetMeshPaused(!mesh)
@@ -895,7 +906,7 @@ func (t *Tunnel) Resume() error {
 	mc := t.meshWantedLocked()
 	t.mu.Unlock()
 	if mc != nil {
-		t.meshHost.Start(*mc)
+		t.startMesh(mc)
 	}
 	if cb != nil {
 		cb.OnState(tun.State(), fmt.Sprintf("%s:%d", cfg.Host, cfg.SSHPort), "")
@@ -926,7 +937,7 @@ func (t *Tunnel) Stop() {
 	if tun != nil {
 		tun.Stop()
 	}
-	t.meshHost.Stop()
+	t.stopMesh()
 }
 
 // NetworkChanged сообщает, что телефон сменил сеть (Wi-Fi ↔ мобильная).
