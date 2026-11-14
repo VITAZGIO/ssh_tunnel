@@ -80,6 +80,8 @@
       </div>
       <div class="hint" id="whatHint" style="margin-top:6px"></div>
       <div class="bar" style="margin-top:10px"><span class="sp"></span><button class="btn primary" id="restoreBtn"></button></div>
+      <!-- Итог восстановления — рядом с кнопкой: на узком экране верх страницы не виден. -->
+      <div class="msg" id="restoreMsg" style="margin-top:6px"></div>
     </div>
   </div>
 </div>
@@ -91,6 +93,7 @@
 const set = (id, t) => $(id).textContent = t;
 let S = null, TAB = 'jobs', CUR = null, MAN = null, SEL = '';
 
+document.title = L('Резервные копии', 'Backups');
 const SCHED = {daily: L('раз в день', 'daily'), weekly: L('раз в неделю', 'weekly'), change: L('после изменений', 'on change')};
 set('tabJobs', L('Мои копии', 'My backups'));
 set('tabRestore', L('Восстановить', 'Restore'));
@@ -119,12 +122,23 @@ for(const [k, v] of [['rename', L('другой файл на месте — п�
 $('addSched').onchange = () => { $('addDelay').disabled = $('addSched').value !== 'change'; };
 $('addSched').onchange();
 
-let msgT = 0;
-function msg(t, cls){
-  const m = $('msg'); m.textContent = t || ''; m.className = 'msg ' + (cls || '');
-  clearTimeout(msgT);
-  if(t) msgT = setTimeout(() => { m.textContent = ''; }, 10000);
+const msgT = {};
+// msg — сообщение вверху (или в элементе where, если он виден).
+function msg(t, cls, where){
+  const id = where && !$(where).closest('[hidden]') ? where : 'msg';
+  const m = $(id); m.textContent = t || ''; m.className = 'msg ' + (cls || '');
+  clearTimeout(msgT[id]);
+  if(t) msgT[id] = setTimeout(() => { m.textContent = ''; }, id === 'msg' ? 10000 : 30000);
 }
+// many — «1 файл / 2 файла / 5 файлов» (en: file / files).
+function many(n, ru1, ru2, ru5, en1, en2){
+  n = Number(n) || 0;
+  if(LANG === 'en') return n + ' ' + (n === 1 ? en1 : en2);
+  const d = n % 10, h = n % 100;
+  return n + ' ' + (d === 1 && h !== 11 ? ru1 : d >= 2 && d <= 4 && (h < 12 || h > 14) ? ru2 : ru5);
+}
+const FILES = n => many(n, 'файл', 'файла', 'файлов', 'file', 'files');
+const VERSIONS = n => many(n, 'версия', 'версии', 'версий', 'version', 'versions');
 function when(t){ return t ? new Date(t * 1000).toLocaleString(LANG === 'en' ? 'en-GB' : 'ru-RU') : '—'; }
 function size(n){
   n = Number(n) || 0;
@@ -174,7 +188,7 @@ function statusOf(j){
   }
   if(st.waiting) return [st.waiting, 'warn'];
   if(st.lastErr) return [L('ошибка: ', 'error: ') + st.lastErr, 'err'];
-  if(st.lastOK) return [L('последняя копия ', 'last backup ') + when(st.lastOK) + ` — ${st.files} ` + L('файлов', 'files') + `, ${size(st.bytes)}`, 'ok'];
+  if(st.lastOK) return [L('последняя копия ', 'last backup ') + when(st.lastOK) + ` — ${FILES(st.files)}, ${size(st.bytes)}`, 'ok'];
   return [L('ещё не было', 'not yet'), 'warn'];
 }
 
@@ -248,7 +262,7 @@ async function loadSets(){
     const c = document.createElement('div');
     c.className = 'card';
     c.innerHTML = `<div class="bar"><h3 class="sp">${esc(s.name)}</h3><button class="btn">${esc(L('Выбрать', 'Choose'))}</button></div>
-      <div class="hint">${esc(s.own ? L('это устройство', 'this device') : (s.deviceName || s.device))} · ${s.versions} ${esc(L('версий', 'versions'))} · ${size(s.bytes)} · ${esc(when(s.last))}</div>`;
+      <div class="hint">${esc(s.own ? L('это устройство', 'this device') : (s.deviceName || s.device))} · ${esc(VERSIONS(s.versions))} · ${size(s.bytes)} · ${esc(when(s.last))}</div>`;
     c.querySelector('button').onclick = () => choose(s);
     box.appendChild(c);
   }
@@ -262,7 +276,7 @@ async function choose(s){
   if(r.error){ msg(r.error, 'err'); return; }
   const v = $('ver');
   v.innerHTML = '';
-  for(const x of r.versions) v.add(new Option(`${when(x.time)} — ${x.files} ${L('файлов', 'files')}, ${size(x.bytes)}`, x.id));
+  for(const x of r.versions) v.add(new Option(`${when(x.time)} — ${FILES(x.files)}, ${size(x.bytes)}`, x.id));
   v.onchange = loadFiles;
   loadFiles();
   $('pick').scrollIntoView({behavior: 'smooth'});
@@ -307,13 +321,13 @@ $('restoreBtn').onclick = async () => {
   if(!target){ $('target').focus(); return; }
   if($('mode').value === 'overwrite' && !confirm(L('Заменить файлы на месте версиями из копии? Текущие станут недоступны.', 'Replace files in place with versions from the backup? The current ones will be lost.'))) return;
   $('restoreBtn').disabled = true;
-  msg(L('Восстанавливаю…', 'Restoring…'));
+  msg(L('Восстанавливаю…', 'Restoring…'), '', 'restoreMsg');
   const r = await api('/api/backup/restore', {device: CUR.device, set: CUR.set, version: $('ver').value, path: SEL, target, mode: $('mode').value});
   $('restoreBtn').disabled = false;
-  if(r.error){ msg(r.error, 'err'); return; }
+  if(r.error){ msg(r.error, 'err', 'restoreMsg'); return; }
   msg(L(`Готово: записано ${r.written}, уже такие же ${r.same}, рядом с пометкой ${r.renamed}, пропущено ${r.skipped}`,
         `Done: written ${r.written}, already the same ${r.same}, put next to ${r.renamed}, skipped ${r.skipped}`) +
-      ((r.failed || []).length ? L('; не вышло: ', '; failed: ') + r.failed.slice(0, 3).join('; ') : ''), (r.failed || []).length ? 'err' : 'ok');
+      ((r.failed || []).length ? L('; не вышло: ', '; failed: ') + r.failed.slice(0, 3).join('; ') : ''), (r.failed || []).length ? 'err' : 'ok', 'restoreMsg');
 };
 
 load();

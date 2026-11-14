@@ -16,6 +16,7 @@ type localDriver struct {
 	bypassErr  error // не nil — Apply с обходом не проходит (сервера нет)
 	meshState  string
 	meshDirect int
+	gone       bool // сервер пропал после подключения (ServerLost)
 }
 
 func (d *localDriver) Connect(ctx context.Context) error {
@@ -38,6 +39,18 @@ func (d *localDriver) Apply(m Modes, h Hygiene) error {
 		return berr
 	}
 	return d.fakeDriver.Apply(m, h)
+}
+
+// Link — связь как у настоящей платформы: местная часть поднята, а сервера
+// нет (serverDown или gone) — «переподключение», а не «на связи».
+func (d *localDriver) Link() (string, string) {
+	st, detail := d.fakeDriver.Link()
+	d.smu.Lock()
+	defer d.smu.Unlock()
+	if st == "connected" && (d.serverDown != nil || d.gone) {
+		return "reconnecting", detail
+	}
+	return st, detail
 }
 
 func (d *localDriver) MeshLink() (string, int) {
@@ -148,6 +161,9 @@ func TestServerLostОставляетСеть(t *testing.T) {
 		t.Fatalf("режим %q", st.Mode)
 	}
 	lost := errors.New("запасной не поднялся")
+	d.smu.Lock()
+	d.gone = true
+	d.smu.Unlock()
 	m.ServerLost(lost)
 	st := waitIdle(t, m)
 	if st.Tunnel.Phase != PhaseError || st.Mesh.Phase != PhaseOn || st.Mode != ModeMesh {
