@@ -265,6 +265,9 @@ func toNetlinkRoute(r docker.Route, ifindex func(string) int) (*netlink.Route, e
 			return nil, fmt.Errorf("нет карты %s", r.Dev)
 		}
 		nr.LinkIndex = idx
+		// Тип явно: ядро возвращает такие маршруты как RTN_UNICAST, и ключ
+		// стоящего маршрута должен совпасть с ключом желаемого.
+		nr.Type = unix.RTN_UNICAST
 		if r.Kind == docker.KindVia {
 			nr.Gw = net.IP(r.Via.AsSlice())
 		} else {
@@ -277,8 +280,16 @@ func toNetlinkRoute(r docker.Route, ifindex func(string) int) (*netlink.Route, e
 }
 
 // routeKey — маршрут для сравнения: таблица, вид, адрес, карта, роутер,
-// метрика.
+// метрика. Тип 0 (не задан) — то же, что RTN_UNICAST: так его покажет ядро.
+// Найдено стендом (ТЗ 19): без этого ключи желаемого и стоящего маршрута в
+// карту расходились, каждая следующая перестановка снимала только что
+// поставленный маршрут — маршруты через адаптер и роутер «мигали», и
+// контейнеры «через сервер» то и дело оставались без интернета, а
+// «напрямую» уходили в туннель.
 func routeKey(r netlink.Route) string {
+	if r.Type == 0 {
+		r.Type = unix.RTN_UNICAST
+	}
 	dst := "default"
 	if r.Dst != nil {
 		dst = r.Dst.String()
