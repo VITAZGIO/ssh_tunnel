@@ -73,8 +73,13 @@ echo "== свой dockerd в пространстве c"
 rm -rf /var/lib/docker-lab /run/docker-lab
 # Свой daemon.json: у машины сборки в /etc/docker/daemon.json свой DNS.
 echo '{"dns":["192.0.2.53"],"ip6tables":false}' > "$LAB/daemon.json"
-# ip netns exec монтирует свой /sys — без cgroup внутри; Docker она нужна.
-ns c sh -c "mountpoint -q /sys/fs/cgroup || mount -t cgroup2 none /sys/fs/cgroup; [ -d /run/systemd/resolve ] && mount -t tmpfs tmpfs /run/systemd/resolve; exec dockerd --data-root /var/lib/docker-lab --exec-root /run/docker-lab --pidfile /run/docker-lab.pid -H unix://$SOCK --containerd-namespace docker-lab --containerd-plugins-namespace docker-lab-plugins --exec-opt native.cgroupdriver=cgroupfs --cgroup-parent docker-lab --config-file $LAB/daemon.json" \
+# Только сеть пространства c (nsenter --net), а не ip netns exec: у того своё
+# пространство монтирований, и корень контейнера, смонтированный dockerd, не
+# виден containerd машины сборки (контейнер «без sh»).
+nsenter --net=/run/netns/c dockerd --data-root /var/lib/docker-lab --exec-root /run/docker-lab \
+  --pidfile /run/docker-lab.pid -H "unix://$SOCK" --containerd-namespace docker-lab \
+  --containerd-plugins-namespace docker-lab-plugins --exec-opt native.cgroupdriver=cgroupfs \
+  --cgroup-parent docker-lab --config-file "$LAB/daemon.json" \
   > "$LAB/dockerd-c.log" 2>&1 &
 eventually 60 D info || { tail -n 40 "$LAB/dockerd-c.log"; exit 1; }
 docker save "$IMG" | D load >/dev/null
