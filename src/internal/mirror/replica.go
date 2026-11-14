@@ -92,12 +92,22 @@ type cached struct {
 
 // Status — что показывать у папки.
 type Status struct {
-	State     string     `json:"state"` // ok, pending, conflict, offline, error
+	State     string     `json:"state"` // ok, pending, conflict, offline, closed (ТЗ 18), error
 	Pending   int        `json:"pending"`
 	Conflicts []Conflict `json:"conflicts"`
 	Files     int        `json:"files"`
 	Error     string     `json:"error,omitempty"`
 	LastOK    int64      `json:"lastOk,omitempty"`
+}
+
+// ClosedText — что показать, когда папки на сервере для этого устройства
+// нет (ТЗ 18).
+const ClosedText = "владелец закрыл доступ к папке"
+
+// Closed — сервер ответил, что такой папки для этого устройства нет.
+func Closed(err error) bool {
+	var re *RemoteError
+	return errors.As(err, &re) && re.Code == http.StatusNotFound
 }
 
 func (r *Replica) clock() time.Time {
@@ -240,8 +250,15 @@ func (r *Replica) Sync(ctx context.Context, wait time.Duration, full bool) (bool
 			}
 		}
 		_ = r.save()
-		r.setStatus(Status{State: "offline", Pending: n, Error: err.Error(), LastOK: r.st.LastOK,
-			Conflicts: r.st.Conflicts, Files: countFiles(local)})
+		st := Status{State: "offline", Pending: n, Error: err.Error(), LastOK: r.st.LastOK,
+			Conflicts: r.st.Conflicts, Files: countFiles(local)}
+		if Closed(err) {
+			// Владелец не показывает эту папку (забрал доступ или больше не
+			// раздаёт — снаружи не отличить, и так задумано). Файлы здесь не
+			// трогаем; вернут доступ — сверка продолжится с того же места.
+			st.State, st.Error = "closed", ClosedText
+		}
+		r.setStatus(st)
 		return false, err
 	}
 

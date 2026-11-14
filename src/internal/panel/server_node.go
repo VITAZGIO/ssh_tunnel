@@ -21,6 +21,7 @@ func (s *Server) nodeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/node/folder/add", s.requireAuth(s.withNode(s.handleNodeFolderAdd)))
 	mux.HandleFunc("/api/node/folder/remove", s.requireAuth(s.withNode(s.handleNodeFolderRemove)))
 	mux.HandleFunc("/api/node/folder/quota", s.requireAuth(s.withNode(s.handleNodeFolderQuota)))
+	mux.HandleFunc("/api/node/folder/access", s.requireAuth(s.withNode(s.handleNodeFolderAccess)))
 	mux.HandleFunc("/api/node/clipboard/clear", s.requireAuth(s.withNode(s.handleNodeClipboardClear)))
 	mux.HandleFunc("/api/node/backup/delete", s.requireAuth(s.withNode(s.handleNodeBackupDelete)))
 	mux.HandleFunc("/api/node/net/delete", s.requireAuth(s.withNode(s.handleNodeNetDelete)))
@@ -38,7 +39,7 @@ func (s *Server) withNode(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *Server) handleNodeState(w http.ResponseWriter, r *http.Request) {
-	st := s.node.Status(r.Context())
+	st := s.nodeStatusWithAccess(r.Context())
 	st.Warnings = s.nodeWarnings(r.Context(), st.State)
 	writeJSON(w, http.StatusOK, st)
 }

@@ -47,6 +47,16 @@ func serverFor(h *Host, plugin string, c nodeapi.Caller) *httptest.Server {
 	}))
 }
 
+// grant даёт папку (или "*" — все папки сети) устройствам по их id в meshd.
+func grant(t *testing.T, h *Host, net, folder string, devices ...string) {
+	t.Helper()
+	for _, d := range devices {
+		if err := h.SetFolderAccess(nodeapi.AccessReq{Net: net, Folder: folder, Device: nodeapi.PeerID(d), On: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func remoteOf(srv *httptest.Server) *mirror.Remote {
 	return &mirror.Remote{Base: srv.URL, HC: srv.Client()}
 }
@@ -62,6 +72,7 @@ func TestРазныеСетиРазделены(t *testing.T) {
 	if _, err := h.AddFolder(nodeapi.FolderReq{Net: netA, Name: "Папка A"}); err != nil {
 		t.Fatal(err)
 	}
+	grant(t, h, netA, "*", "d1", "d2")
 
 	srvA := serverFor(h, nodeapi.PluginMirror, nodeapi.Caller{Net: netA, Device: "d1", Host: "pc", IP: "198.19.0.1"})
 	defer srvA.Close()
@@ -89,6 +100,7 @@ func TestЗеркальныеПапкиДваУстройства(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	grant(t, h, net, f.ID, "pc", "phone")
 
 	srvA := serverFor(h, nodeapi.PluginMirror, nodeapi.Caller{Net: net, Device: "pc", Host: "pc", IP: "198.19.0.1"})
 	defer srvA.Close()
@@ -254,6 +266,7 @@ func TestКвотаПапкиОстанавливаетЗагрузку(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	grant(t, h, net, f.ID, "pc")
 	srv := serverFor(h, nodeapi.PluginMirror, nodeapi.Caller{Net: net, Device: "pc", Host: "pc"})
 	defer srv.Close()
 
@@ -450,6 +463,7 @@ func TestНельзяВыйтиЗаПапку(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	grant(t, h, netID, f.ID, "pc")
 	ms := serverFor(h, nodeapi.PluginMirror, nodeapi.Caller{Net: netID, Device: "pc", Host: "pc"})
 	defer ms.Close()
 	hash := strings.Repeat("a", 64)

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,11 +31,23 @@ import (
 //
 // Кто пришёл (имя устройства для конфликтов) — из соединения сети устройств,
 // подделать нельзя.
+//
+// Доступ (ТЗ 18, Hub.Visible): папки, которой устройству не дали, для него
+// нет — /folders её не называет, а любой другой запрос с её id отвечает
+// ровно так же, как про несуществующую папку.
 
 // Handler — протокол сервера. who — имя устройства, которое пришло.
 func (h *Hub) Handler(who func(*http.Request) string) http.Handler {
 	mux := http.NewServeMux()
-	q := func(r *http.Request, k string) string { return r.URL.Query().Get(k) }
+	// q — параметр запроса; у "f" (папка) невидимая папка подменяется
+	// несуществующим id: дальше всё идёт как с неизвестной папкой.
+	q := func(r *http.Request, k string) string {
+		v := r.URL.Query().Get(k)
+		if k == "f" {
+			v = h.see(r, v)
+		}
+		return v
+	}
 	mux.HandleFunc("/folders", func(w http.ResponseWriter, r *http.Request) {
 		type pub struct {
 			ID   string `json:"id"`
@@ -42,7 +55,9 @@ func (h *Hub) Handler(who func(*http.Request) string) http.Handler {
 		}
 		out := []pub{}
 		for _, f := range h.Folders() {
-			out = append(out, pub{f.ID, f.Name})
+			if h.see(r, f.ID) == f.ID {
+				out = append(out, pub{f.ID, f.Name})
+			}
 		}
 		jsonOut(w, 200, out)
 	})
@@ -52,7 +67,14 @@ func (h *Hub) Handler(who func(*http.Request) string) http.Handler {
 		if wait > 60 {
 			wait = 60
 		}
-		rep, err := h.Index(q(r, "f"), since, time.Duration(wait)*time.Second, r.Context().Done())
+		f := q(r, "f")
+		done, stop := h.watchVisible(r, f)
+		rep, err := h.Index(f, since, time.Duration(wait)*time.Second, done)
+		stop()
+		if h.see(r, f) != f {
+			// Доступ забрали, пока ждали изменений.
+			rep, err = h.Index(noFolder, 0, 0, nil)
+		}
 		if err != nil {
 			errOut(w, http.StatusNotFound, err)
 			return
@@ -139,6 +161,7 @@ func (h *Hub) Handler(who func(*http.Request) string) http.Handler {
 				errOut(w, http.StatusBadRequest, err)
 				return
 			}
+			b.F = h.see(r, b.F)
 			v, err := fn(r, b)
 			if err != nil {
 				errOut(w, quotaCode(err, 500), err)
@@ -173,6 +196,47 @@ func (h *Hub) Handler(who func(*http.Request) string) http.Handler {
 		jsonOut(w, 200, vs)
 	})
 	return mux
+}
+
+// noFolder — id, которого не бывает (id папок — hex): так невидимая папка
+// отвечает теми же словами и кодами, что несуществующая.
+const noFolder = "-"
+
+// see — f, если папка видна запросу r, иначе noFolder.
+func (h *Hub) see(r *http.Request, f string) string {
+	if h.Visible == nil || f == "" || h.Visible(r, f) {
+		return f
+	}
+	return noFolder
+}
+
+// watchVisible — канал для долгого опроса: закрывается, когда запрос
+// кончился или папку перестали ему показывать (Changed будит проверку).
+// stop — опрос закончился сам.
+func (h *Hub) watchVisible(r *http.Request, f string) (<-chan struct{}, func()) {
+	if h.Visible == nil || f == noFolder {
+		return r.Context().Done(), func() {}
+	}
+	out, quit := make(chan struct{}), make(chan struct{})
+	go func() {
+		for {
+			ch := h.waitCh()
+			if !h.Visible(r, f) {
+				close(out)
+				return
+			}
+			select {
+			case <-ch:
+			case <-quit:
+				return
+			case <-r.Context().Done():
+				close(out)
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return out, func() { once.Do(func() { close(quit) }) }
 }
 
 // quotaCode — 507 для «нет места на сервере», иначе def.

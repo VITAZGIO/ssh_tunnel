@@ -13,6 +13,8 @@
 //	POST /clipboard/clear   {net}                → {"ok":true}
 //	POST /backup/delete     {net,scope,device,set} → {"ok":true}
 //	POST /net/delete        {net}                → {"ok":true}  данные сети целиком
+//	POST /folder/access     AccessReq            → {"ok":true}  галочка устройства (ТЗ 18)
+//	POST /folder/migrate    MigrateReq           → {"ok":true}  правило обновления
 //
 // Ошибки — HTTP 400 {"error":"<текст>"}.
 package nodeapi
@@ -20,6 +22,8 @@ package nodeapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -105,6 +109,11 @@ type Folder struct {
 	UsedBytes int64  `json:"usedBytes"`
 	Files     int    `json:"files"`
 	Conflicts int    `json:"conflicts,omitempty"`
+	// Devices — кому из устройств сети видна (PeerID, ТЗ 18). Old — папка
+	// с прошлой версии: видна всем, пока панель не применит правило
+	// обновления (MigrateAccess).
+	Devices []string `json:"devices"`
+	Old     bool     `json:"old,omitempty"`
 }
 
 // Clipboard — буфер сети на сервере.
@@ -193,6 +202,31 @@ type API interface {
 	ClearClipboard(ctx context.Context, net string) error
 	DeleteBackup(ctx context.Context, r BackupReq) error
 	DeleteNet(ctx context.Context, net string) error
+	SetFolderAccess(ctx context.Context, r AccessReq) error
+	MigrateAccess(ctx context.Context, r MigrateReq) error
+}
+
+// AccessReq — дать (On) или забрать у устройства зеркальную папку сети
+// (ТЗ 18). Folder "*" — все папки сети. Device — PeerID.
+type AccessReq struct {
+	Net    string `json:"net"`
+	Folder string `json:"folder"`
+	Device string `json:"device"`
+	Name   string `json:"name,omitempty"` // как показать, когда устройства не станет
+	On     bool   `json:"on"`
+}
+
+// MigrateReq — правило обновления: папки, которые раздавались до ТЗ 18,
+// получают все устройства сети, известные meshd сейчас.
+type MigrateReq struct {
+	Net     string        `json:"net"`
+	Devices []KnownDevice `json:"devices"`
+}
+
+// KnownDevice — устройство сети (PeerID и имя).
+type KnownDevice struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
 }
 
 // Client — API поверх unix-сокета.
@@ -285,6 +319,26 @@ func (c *Client) DeleteBackup(ctx context.Context, r BackupReq) error {
 
 func (c *Client) DeleteNet(ctx context.Context, n string) error {
 	return c.do(ctx, http.MethodPost, "/net/delete", map[string]string{"net": n}, nil)
+}
+
+func (c *Client) SetFolderAccess(ctx context.Context, r AccessReq) error {
+	return c.do(ctx, http.MethodPost, "/folder/access", r, nil)
+}
+
+func (c *Client) MigrateAccess(ctx context.Context, r MigrateReq) error {
+	return c.do(ctx, http.MethodPost, "/folder/migrate", r, nil)
+}
+
+// PeerID — постоянный id устройства для прав зеркальных папок (ТЗ 18) по
+// id устройства из meshd (Caller.Device, устройства в /v1/state). Тот же,
+// что mesh.PeerID и peerID в cmd/meshd (тесты сверяют), — копия здесь,
+// чтобы панель не тянула в себя всю сеть устройств.
+func PeerID(device string) string {
+	if device == "" {
+		return ""
+	}
+	h := sha256.Sum256([]byte("ssh_tunnel peer v1\x00" + device))
+	return hex.EncodeToString(h[:12])
 }
 
 // ValidNet — id сети от meshd: шестнадцатеричная строка (хеш ключа). Из

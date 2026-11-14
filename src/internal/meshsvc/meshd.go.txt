@@ -157,7 +157,10 @@ type msg struct {
 	Host     string `json:"host,omitempty"`
 	From     string `json:"from,omitempty"`
 	FromHost string `json:"fromHost,omitempty"`
-	Peers    []peer `json:"peers,omitempty"`
+	// FromID — постоянный id звонящего для служб устройства (ТЗ 18), см.
+	// peerID. Старые устройства его не читают.
+	FromID string `json:"fromId,omitempty"`
+	Peers  []peer `json:"peers,omitempty"`
 
 	// Что устройство рассказывает о себе в hello (всё необязательное).
 	Platform string `json:"platform,omitempty"` // windows, linux, android
@@ -235,6 +238,10 @@ type serverSeen struct {
 }
 
 type peer struct {
+	// ID — постоянный id устройства для других устройств (ТЗ 18): не сам
+	// id (он служит паролем устройства в dial/accept), а peerID от него.
+	// Адрес и имя меняются, этот — нет, пока устройство не начнёт заново.
+	ID       string `json:"id,omitempty"`
 	Name     string `json:"name"`
 	Host     string `json:"host"`
 	IP       string `json:"ip"`
@@ -449,6 +456,18 @@ func newServer(path string) *server {
 	return s
 }
 
+// peerID — постоянный id устройства, который видят другие устройства
+// (права зеркальных папок, ТЗ 18). По нему не восстановить id устройства,
+// поэтому позвонить от чужого имени с ним нельзя. Так же считает
+// internal/mesh (PeerID) — тест сверяет.
+func peerID(device string) string {
+	if device == "" {
+		return ""
+	}
+	h := sha256.Sum256([]byte("ssh_tunnel peer v1\x00" + device))
+	return hex.EncodeToString(h[:12])
+}
+
 func netID(key string) string {
 	h := sha256.Sum256([]byte("ssh_tunnel mesh v1\x00" + key))
 	return hex.EncodeToString(h[:])
@@ -569,7 +588,7 @@ func (s *server) peersLocked(n *network, me *device) []peer {
 		if d != me && !s.policy.visible(me.User, d.User) {
 			continue
 		}
-		p := peer{Name: d.displayName(), Host: d.Host, IP: d.IP, Online: d.ctrl != nil,
+		p := peer{ID: peerID(d.ID), Name: d.displayName(), Host: d.Host, IP: d.IP, Online: d.ctrl != nil,
 			Platform: d.Platform, OS: d.OS, Via: d.Via}
 		for _, o := range d.On {
 			p.On = append(p.On, serverSeen{ID: o.ID, Name: o.Name})
@@ -1138,7 +1157,7 @@ func (s *server) dial(conn net.Conn, m msg) {
 	callID := randomID()
 	cl := &call{net: id, target: target.ID, answer: make(chan answer, 1)}
 	s.calls[callID] = cl
-	target.ctrl.send(msg{Op: "incoming", Call: callID, From: from.IP, FromHost: from.Host, Port: m.Port})
+	target.ctrl.send(msg{Op: "incoming", Call: callID, From: from.IP, FromHost: from.Host, FromID: peerID(from.ID), Port: m.Port})
 	s.mu.Unlock()
 
 	var got answer
@@ -1939,7 +1958,7 @@ func (s *server) serverPeersLocked(n *network) []peer {
 		used[d.Host] = true
 	}
 	var out []peer
-	add := func(name, ip string, online bool, lastSeen time.Time) {
+	add := func(id, name, ip string, online bool, lastSeen time.Time) {
 		base := hostLabel(name)
 		if base == "" {
 			base = "server"
@@ -1950,13 +1969,16 @@ func (s *server) serverPeersLocked(n *network) []peer {
 		}
 		used[h] = true
 		p := peer{Name: name, Host: h, IP: ip, Online: online, Platform: "server"}
+		if id != "" {
+			p.ID = peerID("server\x00" + id)
+		}
 		if !lastSeen.IsZero() {
 			p.LastSeen = lastSeen.Unix()
 		}
 		out = append(out, p)
 	}
 	if s.self.Enabled {
-		add(s.selfNameLocked(), s.self.IP, true, time.Time{})
+		add(s.self.ID, s.selfNameLocked(), s.self.IP, true, time.Time{})
 	}
 	ids := make([]string, 0, len(s.relayRecs))
 	for id := range s.relayRecs {
@@ -1966,7 +1988,7 @@ func (s *server) serverPeersLocked(n *network) []peer {
 	for _, id := range ids {
 		r := s.relayRecs[id]
 		_, online := s.relays[id]
-		add(r.Name, r.IP, online, r.LastSeen)
+		add(id, r.Name, r.IP, online, r.LastSeen)
 	}
 	return out
 }
@@ -2139,7 +2161,7 @@ func (s *server) dialServer(conn net.Conn, nid string, from *device, ip string, 
 	callID := randomID()
 	cl := &call{net: netID(relayNet), target: r.ID, answer: make(chan answer, 1)}
 	s.calls[callID] = cl
-	r.ctrl.send(msg{Op: "incoming", Call: callID, From: from.IP, FromHost: from.Host, Port: port})
+	r.ctrl.send(msg{Op: "incoming", Call: callID, From: from.IP, FromHost: from.Host, FromID: peerID(from.ID), Port: port})
 	s.mu.Unlock()
 
 	peerConn, errText := s.waitCall(callID, cl)

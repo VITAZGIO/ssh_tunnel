@@ -539,6 +539,11 @@ func (d *demoBackend) nodeStatus() NodeStatus {
 	}
 	ns := NodeStatus{Unit: UnitState{Installed: true, Active: true, Enabled: true, Detail: "active"}, State: &st}
 	ns.Warnings = pluginWarnings(MeshRoleMain, d.self.Enabled, d.self.Ports, d.access, d.clients, d.nodeConfig)
+	nets := make([]MeshNetwork, 0, len(d.nets))
+	for _, n := range d.nets {
+		nets = append(nets, *n)
+	}
+	ns.Access = nodeAccess(nets, &st)
 	return ns
 }
 
@@ -1154,7 +1159,8 @@ func (d *demoBackend) routes() http.Handler {
 		if req.QuotaMB <= 0 {
 			req.QuotaMB = nodeapi.DefaultFolderQuotaMB
 		}
-		f := nodeapi.Folder{ID: fmt.Sprintf("demo%d", len(d.nodeFolders[req.Net])+1), Name: name, QuotaMB: req.QuotaMB}
+		f := nodeapi.Folder{ID: fmt.Sprintf("demo%d", len(d.nodeFolders[req.Net])+1), Name: name, QuotaMB: req.QuotaMB,
+			Devices: []string{}}
 		d.nodeFolders[req.Net] = append(d.nodeFolders[req.Net], f)
 		writeJSON(w, http.StatusOK, f)
 	})
@@ -1183,6 +1189,40 @@ func (d *demoBackend) routes() http.Handler {
 			if list[i].ID == req.ID {
 				list[i].QuotaMB = req.QuotaMB
 			}
+		}
+		writeJSON(w, http.StatusOK, ok)
+	})
+	h("/api/node/folder/access", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.AccessReq
+		if !decodePost(w, r, &req) {
+			return
+		}
+		if req.Device == "" {
+			replyErr(w, errors.New("нужны папка и id устройства"), nil)
+			return
+		}
+		list := d.nodeFolders[req.Net]
+		found := false
+		for i := range list {
+			if req.Folder != "*" && list[i].ID != req.Folder {
+				continue
+			}
+			found = true
+			devs := []string{}
+			for _, x := range list[i].Devices {
+				if x != req.Device {
+					devs = append(devs, x)
+				}
+			}
+			if req.On {
+				devs = append(devs, req.Device)
+				sort.Strings(devs)
+			}
+			list[i].Devices, list[i].Old = devs, false
+		}
+		if !found {
+			replyErr(w, errors.New("нет такой папки"), nil)
+			return
 		}
 		writeJSON(w, http.StatusOK, ok)
 	})

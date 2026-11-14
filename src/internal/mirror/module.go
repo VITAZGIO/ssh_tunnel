@@ -39,7 +39,7 @@ func init() {
 	addons.Register("mirror", func() addons.Module { return &module{} })
 	addons.RegisterRoutes("mirror",
 		addons.Route{Path: "/api/mirror", Methods: "GET, POST",
-			Desc: "Зеркальные папки: раздаваемые (serve), подключённые (subs) со статусом, найденные серверы (found). POST {\"op\":\"serve\",\"path\",\"name\"} | {\"op\":\"unserve\",\"id\"} | {\"op\":\"ignore\",\"id\",\"list\":[…]} | {\"op\":\"join\",\"peer\",\"host\",\"folder\",\"name\",\"path\",\"mode\":\"both|recv|send\"} | {\"op\":\"leave\",\"id\"} | {\"op\":\"mode\",\"id\",\"mode\"} | {\"op\":\"sync\",\"id\"} | {\"op\":\"resolve\",\"id\",\"path\",\"keep\":\"orig|copy|both\"} | {\"op\":\"restore\",\"id\",\"blob\"}. id раздаваемой — «hub:<id>».",
+			Desc: "Зеркальные папки: раздаваемые (serve, у каждой devices — кому видна), подключённые (subs) со статусом, найденные серверы (found), доступ (access: устройства сети, сколько папок у каждого). POST {\"op\":\"serve\",\"path\",\"name\"} | {\"op\":\"unserve\",\"id\"} | {\"op\":\"grant\",\"device\":\"<id устройства>\",\"id\":\"hub:<id>|*\",\"on\":true|false} | {\"op\":\"ignore\",\"id\",\"list\":[…]} | {\"op\":\"join\",\"peer\",\"host\",\"folder\",\"name\",\"path\",\"mode\":\"both|recv|send\"} | {\"op\":\"leave\",\"id\"} | {\"op\":\"mode\",\"id\",\"mode\"} | {\"op\":\"sync\",\"id\"} | {\"op\":\"resolve\",\"id\",\"path\",\"keep\":\"orig|copy|both\"} | {\"op\":\"restore\",\"id\",\"blob\"}. id раздаваемой — «hub:<id>».",
 			H:    handleAPI},
 		addons.Route{Path: "/api/mirror/versions", Methods: "GET",
 			Desc: "Версии и корзина папки ?id=<hub:id|id подключённой>[&p=путь] (30 дней).",
@@ -95,6 +95,7 @@ type module struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	hub    *Hub
+	acl    *Access
 	srv    *http.Server
 	ln     *meshListener
 
@@ -146,6 +147,22 @@ func (m *module) Start() error {
 	}
 	h.OnEvent = notify
 	m.hub = h
+	var ids []string
+	for _, f := range h.Folders() {
+		ids = append(ids, f.ID)
+	}
+	if m.acl, err = OpenAccess(filepath.Join(dataDir(), "access.json"), ids); err != nil {
+		h.Close()
+		return err
+	}
+	h.Visible = func(r *http.Request, folder string) bool {
+		id := callerOf(r).ID
+		if id != "" && id == selfID() {
+			return true // сам к себе
+		}
+		return m.acl.Allowed(folder, id)
+	}
+	m.migrate()
 	m.ctx, m.cancel = context.WithCancel(context.Background())
 	m.subs = map[string]*runner{}
 
@@ -237,7 +254,128 @@ func (m *module) findLoop() {
 	}
 }
 
+// selfID — постоянный id этого устройства в сети (mesh.PeerID).
+func selfID() string { return devnet.Status().Self.ID }
+
+// netDevice — устройство сети в списке «Доступ к папкам».
+type netDevice struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Host     string `json:"host,omitempty"`
+	IP       string `json:"ip,omitempty"`
+	Platform string `json:"platform,omitempty"`
+	Server   bool   `json:"server,omitempty"`
+	Online   bool   `json:"online"`
+	// Gone — устройства больше нет в списке сети (убрали в панели), а
+	// папки у него остались: их можно забрать.
+	Gone    bool `json:"gone,omitempty"`
+	Folders int  `json:"folders"`
+}
+
+// devices — все устройства сети с id (и не в сети), сначала серверы,
+// потом остальные, внутри — по имени.
+func (m *module) devices() []netDevice {
+	return listDevices(devnet.Status().Peers, m.acl)
+}
+
+func listDevices(peers []mesh.Peer, acl *Access) []netDevice {
+	granted := acl.Granted()
+	seen := map[string]bool{}
+	out := []netDevice{}
+	for _, p := range peers {
+		if p.Self || p.ID == "" || seen[p.ID] {
+			continue
+		}
+		seen[p.ID] = true
+		name := p.Name
+		if name == "" {
+			name = p.Host
+		}
+		d := netDevice{ID: p.ID, Name: name, Host: p.Host, Platform: p.Platform, Server: p.Platform == "server",
+			Online: p.Online, Folders: granted[p.ID]}
+		if p.IP.IsValid() {
+			d.IP = p.IP.String()
+		}
+		out = append(out, d)
+	}
+	for id, n := range granted {
+		if !seen[id] {
+			name := acl.Name(id)
+			if name == "" {
+				name = id
+			}
+			out = append(out, netDevice{ID: id, Name: name, Gone: true, Folders: n})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Server != b.Server {
+			return a.Server
+		}
+		if x, y := strings.ToLower(a.Name), strings.ToLower(b.Name); x != y {
+			return x < y
+		}
+		return a.ID < b.ID
+	})
+	return out
+}
+
+// known — устройства сети с id для правила обновления.
+func known(peers []mesh.Peer) []Known {
+	var out []Known
+	for _, p := range peers {
+		if !p.Self && p.ID != "" {
+			out = append(out, Known{ID: p.ID, Name: p.Name})
+		}
+	}
+	return out
+}
+
+// migrate — правило обновления (access.go): как только известны id
+// устройств сети, старые папки получают все известные в этот момент.
+func (m *module) migrate() {
+	if !m.acl.Pending() {
+		return
+	}
+	if did, _ := m.acl.Migrate(known(devnet.Status().Peers)); did {
+		m.hub.Changed()
+	}
+}
+
+// grant — дать или забрать папку (folder "*" — все раздаваемые).
+func (m *module) grant(device, folder string, on bool) error {
+	if device == "" {
+		return errors.New("нужен device — id устройства")
+	}
+	m.migrate() // старые папки — сначала по правилу обновления
+	name := ""
+	for _, d := range m.devices() {
+		if d.ID == device {
+			name = d.Name
+		}
+	}
+	var ids []string
+	if folder == "*" {
+		for _, f := range m.hub.Folders() {
+			ids = append(ids, f.ID)
+		}
+	} else {
+		if _, err := m.hub.folder(folder); err != nil {
+			return errors.New("нет такой раздаваемой папки")
+		}
+		ids = []string{folder}
+	}
+	defer m.hub.Changed() // ждущие опросы перепроверят доступ сразу
+	for _, f := range ids {
+		if err := m.acl.Set(f, device, name, on); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (m *module) find() {
+	m.migrate()
 	var mu sync.Mutex
 	var out []found
 	var wg sync.WaitGroup
@@ -323,7 +461,7 @@ func (r *runner) loop(ctx context.Context) {
 		switch {
 		case err != nil && ctx.Err() == nil:
 			wait, pause = 0, 30*time.Second
-			if r.rep.Status().State != "offline" {
+			if st := r.rep.Status().State; st != "offline" && st != "closed" {
 				pause = 15 * time.Second
 			}
 		case did:
@@ -493,10 +631,15 @@ func (m *module) state() map[string]any {
 		HubFolder
 		Files     int        `json:"files"`
 		Conflicts []Conflict `json:"conflicts"`
+		// Devices — кому видна (id устройств, ТЗ 18); Old — папка с прошлой
+		// версии, пока видна всем (ждёт id устройств от meshd).
+		Devices []string `json:"devices"`
+		Old     bool     `json:"old,omitempty"`
 	}
+	m.migrate()
 	serve := []serveItem{}
 	for _, f := range m.hub.Folders() {
-		it := serveItem{HubFolder: f, Conflicts: []Conflict{}}
+		it := serveItem{HubFolder: f, Conflicts: []Conflict{}, Devices: m.acl.Devices(f.ID), Old: m.acl.IsOld(f.ID)}
 		if r, err := m.hub.Index(f.ID, 0, 0, nil); err == nil {
 			for p, fi := range r.Files {
 				if !fi.Deleted && !isDir(p) {
@@ -539,8 +682,15 @@ func (m *module) state() map[string]any {
 		go func() { defer m.finding.Store(false); m.find() }()
 	}
 	sort.Slice(subs, func(i, j int) bool { return subs[i].Name < subs[j].Name })
+	devs := m.devices()
+	// ids — сеть даёт id устройств (новый meshd): без них доступ не выдать.
+	ids := false
+	for _, d := range devs {
+		ids = ids || !d.Gone
+	}
 	return map[string]any{"serve": serve, "subs": subs, "found": fs, "self": selfName(),
-		"suggest": suggestBase(), "platform": runtime.GOOS, "devnet": devnet.Status().State}
+		"suggest": suggestBase(), "platform": runtime.GOOS, "devnet": devnet.Status().State,
+		"access": map[string]any{"devices": devs, "ids": ids, "pending": m.acl.Pending()}}
 }
 
 func handleAPI(w http.ResponseWriter, r *http.Request) {
@@ -562,6 +712,8 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 			Mode   string   `json:"mode"`
 			Keep   string   `json:"keep"`
 			Blob   string   `json:"blob"`
+			Device string   `json:"device"`
+			On     bool     `json:"on"`
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 			writeJSON(w, map[string]string{"error": "нужен JSON {\"op\"}"})
@@ -575,7 +727,18 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 				_, err = m.hub.AddFolder(localPath(req.Path), req.Name)
 			}
 		case "unserve":
-			err = m.hub.RemoveFolder(hubID)
+			if err = m.hub.RemoveFolder(hubID); err == nil {
+				err = m.acl.Remove(hubID)
+			}
+		case "grant":
+			switch {
+			case req.ID == "*":
+				err = m.grant(req.Device, "*", req.On)
+			case isHub:
+				err = m.grant(req.Device, hubID, req.On)
+			default:
+				err = errors.New("id: hub:<id папки> или *")
+			}
 		case "ignore":
 			err = m.hub.SetIgnore(hubID, req.List)
 		case "join":
@@ -617,7 +780,7 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 				err = errors.New("нет такой папки")
 			}
 		default:
-			err = errors.New("op: serve, unserve, ignore, join, leave, mode, sync, resolve или restore")
+			err = errors.New("op: serve, unserve, grant, ignore, join, leave, mode, sync, resolve или restore")
 		}
 		if err != nil {
 			writeJSON(w, map[string]string{"error": err.Error()})
@@ -733,9 +896,15 @@ func (l *meshListener) Accept() (net.Conn, error) {
 func (l *meshListener) Close() error   { l.once.Do(func() { close(l.done) }); return nil }
 func (l *meshListener) Addr() net.Addr { return &net.TCPAddr{Port: Port} }
 
+// callerOf — кто пришёл (ставит сеть устройств, не подделать).
+func callerOf(r *http.Request) mesh.Caller {
+	c, _ := r.Context().Value(callerKey{}).(mesh.Caller)
+	return c
+}
+
 // who — имя пришедшего устройства (ставит сеть устройств, не подделать).
 func who(r *http.Request) string {
-	c, _ := r.Context().Value(callerKey{}).(mesh.Caller)
+	c := callerOf(r)
 	if c.Host != "" {
 		return c.Host
 	}

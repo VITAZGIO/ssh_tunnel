@@ -24,6 +24,7 @@ func TestКвотаТочнаяПриКопииНаСервере(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	grant(t, h, net, f.ID, "pc")
 	srv := serverFor(h, nodeapi.PluginMirror, nodeapi.Caller{Net: net, Device: "pc", Host: "pc"})
 	defer srv.Close()
 	dir := t.TempDir()
