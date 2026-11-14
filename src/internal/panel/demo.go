@@ -839,6 +839,7 @@ func (d *demoBackend) routes() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, AutostartStatus{})
 	})
+	h("/api/book", serveBook)
 	h("/api/update", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"error": "в режиме показа обновления не проверяются", "code": "update_failed"})
 	})
