@@ -115,6 +115,21 @@ func startDevice(t *testing.T, addr, key, name string) *device {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	// Адрес сервера в сети у каждого сервера свой (ТЗ 12) — берём его из
+	// списка устройств, как это делают сами приложения.
+	for serverIP == "" {
+		for _, p := range c.Status().Peers {
+			if p.Platform == "server" && p.IP.IsValid() {
+				serverIP = p.IP.String()
+			}
+		}
+		if serverIP == "" {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s не видит сервер в списке устройств: %+v", name, c.Status())
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
 	return d
 }
 
@@ -126,7 +141,8 @@ func (d *device) stop() {
 	}
 }
 
-const serverIP = "198.19.255.254"
+// serverIP — адрес сервера в сети устройств; узнаётся при первом подключении.
+var serverIP string
 
 func base(port int) string { return "http://" + net.JoinHostPort(serverIP, strconv.Itoa(port)) }
 
@@ -146,6 +162,7 @@ func TestСквозьНастоящийMeshd(t *testing.T) {
 		t.Skip("долгий")
 	}
 	portsFree(t)
+	serverIP = "" // у каждого запущенного meshd адрес свой
 	addr := runMeshd(t)
 
 	var cmu sync.Mutex
