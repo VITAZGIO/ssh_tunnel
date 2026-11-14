@@ -105,6 +105,11 @@ type NodeStatus struct {
 	State *nodeapi.State `json:"state,omitempty"`
 	Error string         `json:"error,omitempty"`
 	Job   *meshJob       `json:"job,omitempty"`
+	// Warnings — что мешает плагинам (порты сервера, права, роль сервера).
+	Warnings []NodeWarning `json:"warnings,omitempty"`
+	// Access — устройства каждой сети для галочек зеркальных папок (ТЗ 18),
+	// по id сети; нет — meshd не ответил.
+	Access map[string][]NodeDevice `json:"access,omitempty"`
 }
 
 // Status — состояние хоста: установлен ли юнит, и если да — живое
@@ -141,4 +146,20 @@ func (m *NodeManager) SetFolderQuota(ctx context.Context, r nodeapi.FolderReq) e
 
 func (m *NodeManager) ClearClipboard(ctx context.Context, netID string) error {
 	return m.api.ClearClipboard(ctx, netID)
+}
+
+func (m *NodeManager) DeleteBackup(ctx context.Context, r nodeapi.BackupReq) error {
+	return m.api.DeleteBackup(ctx, r)
+}
+
+func (m *NodeManager) DeleteNet(ctx context.Context, netID string) error {
+	return m.api.DeleteNet(ctx, netID)
+}
+
+func (m *NodeManager) SetFolderAccess(ctx context.Context, r nodeapi.AccessReq) error {
+	return m.api.SetFolderAccess(ctx, r)
+}
+
+func (m *NodeManager) MigrateAccess(ctx context.Context, r nodeapi.MigrateReq) error {
+	return m.api.MigrateAccess(ctx, r)
 }

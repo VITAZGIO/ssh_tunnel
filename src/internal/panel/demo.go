@@ -53,6 +53,7 @@ type demoBackend struct {
 	nets     []*MeshNetwork
 	servers  []MeshServer
 	self     meshsvc.Self
+	known    []meshsvc.KnownServer // серверы, которые панель советует устройствам (ТЗ 12)
 	capacity int
 
 	meshdStarted int64
@@ -71,6 +72,11 @@ type demoBackend struct {
 	nodeConfig    nodeapi.Config
 	nodeFolders   map[string][]nodeapi.Folder
 	nodeClipboard map[string]int
+	// nodeBackups — резервные копии устройств по сетям (ТЗ 13); nodeOrphan —
+	// данные сети, которую уже удалили в meshd («сеть удалена, данные
+	// остались»).
+	nodeBackups map[string][]nodeapi.BackupSet
+	nodeOrphan  string
 	// egress — выход этого сервера через другой сервер (ТЗ 10): свой
 	// маленький стейт-машин для показа, не настоящий EgressManager (ему
 	// нужна система).
@@ -107,6 +113,8 @@ func NewDemoHandler(version string) http.Handler {
 		nodeConfig:    nodeapi.Config{QuotaMB: nodeapi.DefaultQuotaMB},
 		nodeFolders:   map[string][]nodeapi.Folder{},
 		nodeClipboard: map[string]int{},
+		nodeBackups:   map[string][]nodeapi.BackupSet{},
+		nodeOrphan:    "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
 	}
 	d.seed()
 	return d.routes()
@@ -491,8 +499,24 @@ func (d *demoBackend) nodeStatus() NodeStatus {
 		return NodeStatus{Unit: UnitState{Installed: false}}
 	}
 	st := nodeapi.State{Version: d.version, Config: d.nodeConfig, Meshd: "ok"}
-	for _, n := range d.nets {
+	now := time.Now().Unix()
+	for i, n := range d.nets {
 		net := nodeapi.Network{ID: n.ID, Folders: []nodeapi.Folder{}}
+		// Последняя активность — выдуманная, но разная по плагинам.
+		net.LastActive = map[string]int64{}
+		if len(d.nodeFolders[n.ID]) > 0 {
+			net.LastActive[nodeapi.PluginMirror] = now - int64(40+i*300)
+		}
+		if d.nodeConfig.Clipboard {
+			net.LastActive[nodeapi.PluginClipboard] = now - int64(90+i*600)
+		}
+		if bs := d.nodeBackups[n.ID]; len(bs) > 0 {
+			net.Backups = append([]nodeapi.BackupSet(nil), bs...)
+			for _, b := range bs {
+				net.BackupBytes += b.Bytes * 2 / 3
+			}
+			net.LastActive[nodeapi.PluginBackup] = bs[0].Last
+		}
 		for _, f := range d.nodeFolders[n.ID] {
 			f.UsedBytes = int64(len(f.Name)) << 20 // выдуманное, но не ноль
 			net.Folders = append(net.Folders, f)
@@ -502,7 +526,45 @@ func (d *demoBackend) nodeStatus() NodeStatus {
 		}
 		st.Networks = append(st.Networks, net)
 	}
-	return NodeStatus{Unit: UnitState{Installed: true, Active: true, Enabled: true, Detail: "active"}, State: &st}
+	if d.nodeOrphan != "" {
+		st.Networks = append(st.Networks, nodeapi.Network{ID: d.nodeOrphan, Folders: []nodeapi.Folder{
+			{ID: "old1", Name: "Старые фото", QuotaMB: 2048, UsedBytes: 734 << 20, Files: 212}},
+			FilesBytes: 12 << 20, UsedBytes: 746 << 20})
+	}
+	for _, n := range st.Networks {
+		st.UsedBytes += n.UsedBytes + n.BackupBytes
+		for _, f := range n.Folders {
+			st.UsedBytes += f.UsedBytes
+		}
+	}
+	ns := NodeStatus{Unit: UnitState{Installed: true, Active: true, Enabled: true, Detail: "active"}, State: &st}
+	ns.Warnings = pluginWarnings(MeshRoleMain, d.self.Enabled, d.self.Ports, d.access, d.clients, d.nodeConfig)
+	nets := make([]MeshNetwork, 0, len(d.nets))
+	for _, n := range d.nets {
+		nets = append(nets, *n)
+	}
+	ns.Access = nodeAccess(nets, &st)
+	return ns
+}
+
+// seedBackups — выдуманные резервные копии устройств (показ).
+func (d *demoBackend) seedBackups() {
+	if len(d.nodeBackups) > 0 || len(d.nets) == 0 {
+		return
+	}
+	now := time.Now().Unix()
+	n := d.nets[0]
+	var out []nodeapi.BackupSet
+	names := []string{"Документы", "Фото с телефона"}
+	for i, dev := range n.Devices {
+		if i >= len(names) {
+			break
+		}
+		out = append(out, nodeapi.BackupSet{Scope: "u-demo" + strconv.Itoa(i), Device: dev.ID, DeviceName: dev.Name,
+			Set: "set" + strconv.Itoa(i+1), Name: names[i], Keep: 10, Versions: 4 + i*3,
+			Bytes: int64(380+i*1900) << 20, Last: now - int64(3600*(i*20+2))})
+	}
+	d.nodeBackups[n.ID] = out
 }
 
 // ---------- ручки ----------
@@ -879,6 +941,22 @@ func (d *demoBackend) routes() http.Handler {
 	h("/api/mesh/join", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "в режиме показа сервер остаётся главным"})
 	})
+	h("/api/mesh/known", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Servers []meshsvc.KnownServer `json:"servers"`
+		}
+		if !decodePost(w, r, &req) {
+			return
+		}
+		for _, k := range req.Servers {
+			if err := validHost(strings.TrimSpace(k.Host)); err != nil {
+				replyErr(w, err, nil)
+				return
+			}
+		}
+		d.known = append([]meshsvc.KnownServer{}, req.Servers...)
+		writeJSON(w, http.StatusOK, ok)
+	})
 	h("/api/mesh/serveraccess", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Enabled bool   `json:"enabled"`
@@ -1036,6 +1114,7 @@ func (d *demoBackend) routes() http.Handler {
 		d.nodeInstalled = false
 		if req.DeleteData {
 			d.nodeFolders, d.nodeClipboard = map[string][]nodeapi.Folder{}, map[string]int{}
+			d.nodeBackups, d.nodeOrphan = map[string][]nodeapi.BackupSet{}, ""
 		}
 		writeJSON(w, http.StatusOK, ok)
 	})
@@ -1056,6 +1135,12 @@ func (d *demoBackend) routes() http.Handler {
 		if p.Clipboard != nil {
 			d.nodeConfig.Clipboard = *p.Clipboard
 		}
+		if p.Backup != nil {
+			d.nodeConfig.Backup = *p.Backup
+			if d.nodeConfig.Backup {
+				d.seedBackups()
+			}
+		}
 		if p.QuotaMB != nil && *p.QuotaMB > 0 {
 			d.nodeConfig.QuotaMB = *p.QuotaMB
 		}
@@ -1074,7 +1159,8 @@ func (d *demoBackend) routes() http.Handler {
 		if req.QuotaMB <= 0 {
 			req.QuotaMB = nodeapi.DefaultFolderQuotaMB
 		}
-		f := nodeapi.Folder{ID: fmt.Sprintf("demo%d", len(d.nodeFolders[req.Net])+1), Name: name, QuotaMB: req.QuotaMB}
+		f := nodeapi.Folder{ID: fmt.Sprintf("demo%d", len(d.nodeFolders[req.Net])+1), Name: name, QuotaMB: req.QuotaMB,
+			Devices: []string{}}
 		d.nodeFolders[req.Net] = append(d.nodeFolders[req.Net], f)
 		writeJSON(w, http.StatusOK, f)
 	})
@@ -1106,6 +1192,40 @@ func (d *demoBackend) routes() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, ok)
 	})
+	h("/api/node/folder/access", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.AccessReq
+		if !decodePost(w, r, &req) {
+			return
+		}
+		if req.Device == "" {
+			replyErr(w, errors.New("нужны папка и id устройства"), nil)
+			return
+		}
+		list := d.nodeFolders[req.Net]
+		found := false
+		for i := range list {
+			if req.Folder != "*" && list[i].ID != req.Folder {
+				continue
+			}
+			found = true
+			devs := []string{}
+			for _, x := range list[i].Devices {
+				if x != req.Device {
+					devs = append(devs, x)
+				}
+			}
+			if req.On {
+				devs = append(devs, req.Device)
+				sort.Strings(devs)
+			}
+			list[i].Devices, list[i].Old = devs, false
+		}
+		if !found {
+			replyErr(w, errors.New("нет такой папки"), nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, ok)
+	})
 	h("/api/node/clipboard/clear", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Net string `json:"net"`
@@ -1115,6 +1235,61 @@ func (d *demoBackend) routes() http.Handler {
 		}
 		delete(d.nodeClipboard, req.Net)
 		writeJSON(w, http.StatusOK, ok)
+	})
+	h("/api/node/backup/delete", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.BackupReq
+		if !decodePost(w, r, &req) {
+			return
+		}
+		list, out := d.nodeBackups[req.Net], []nodeapi.BackupSet{}
+		for _, b := range list {
+			if !(b.Scope == req.Scope && b.Device == req.Device && b.Set == req.Set) {
+				out = append(out, b)
+			}
+		}
+		if len(out) == len(list) {
+			replyErr(w, errors.New("такой копии нет"), nil)
+			return
+		}
+		d.nodeBackups[req.Net] = out
+		writeJSON(w, http.StatusOK, ok)
+	})
+	h("/api/node/net/delete", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Net string `json:"net"`
+		}
+		if !decodePost(w, r, &req) {
+			return
+		}
+		for _, n := range d.nets {
+			if n.ID == req.Net {
+				replyErr(w, errors.New("эта сеть ещё есть в сети устройств — сначала удали её в «Сетях»"), nil)
+				return
+			}
+		}
+		if req.Net == d.nodeOrphan {
+			d.nodeOrphan = ""
+		}
+		delete(d.nodeFolders, req.Net)
+		delete(d.nodeClipboard, req.Net)
+		delete(d.nodeBackups, req.Net)
+		writeJSON(w, http.StatusOK, ok)
+	})
+	h("/api/node/fix", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Code string `json:"code"`
+		}
+		if !decodePost(w, r, &req) {
+			return
+		}
+		switch req.Code {
+		case WarnServerOff, WarnPortsBlocked:
+			d.self.Ports = fixServerPorts(d.self.Enabled, d.self.Ports, d.nodeConfig)
+			d.self.Enabled = true
+			writeJSON(w, http.StatusOK, ok)
+		default:
+			replyErr(w, errors.New("для этого исправления одной кнопкой нет"), nil)
+		}
 	})
 
 	// --- только для проверки показа ---
@@ -1217,6 +1392,12 @@ func (d *demoBackend) state() MeshState {
 	if d.oldMeshd {
 		st.Version = "1.6.0 (старая)"
 	}
+	// Другие серверы сети по рассказам устройств: у Амстердама правила
+	// доступа другие — панель должна это сказать.
+	st.Peers = []meshsvc.SeenServer{
+		{ID: "ams01", Name: "Амстердам", Pol: "a1b2c3", Same: false, Devices: 2, LastSeen: time.Now().Unix()},
+	}
+	st.Known = append([]meshsvc.KnownServer{}, d.known...)
 	self := d.self
 	st.Self = &self
 	for _, n := range d.nets {

@@ -100,6 +100,29 @@ type Self struct {
 	IP      string `json:"ip"`
 	Enabled bool   `json:"enabled"`
 	Ports   string `json:"ports,omitempty"`
+	// ID — id этого сервера, Pol — отпечаток его правил доступа (meshd 4+).
+	ID  string `json:"id,omitempty"`
+	Pol string `json:"pol,omitempty"`
+}
+
+// SeenServer — другой сервер той же сети, о котором рассказали устройства
+// (они на связи и с ним). Same — правила доступа там такие же (по
+// отпечатку); Devices — сколько устройств этого сервера сейчас на связи и
+// с тем.
+type SeenServer struct {
+	ID       string `json:"id"`
+	Name     string `json:"name,omitempty"`
+	Pol      string `json:"pol,omitempty"`
+	Same     bool   `json:"same"`
+	Devices  int    `json:"devices"`
+	LastSeen int64  `json:"lastSeen,omitempty"`
+}
+
+// KnownServer — сервер сети, который панель советует устройствам.
+type KnownServer struct {
+	Name string `json:"name,omitempty"`
+	Host string `json:"host"`
+	Port int    `json:"port,omitempty"`
 }
 
 // State — ответ meshd на /v1/state.
@@ -109,6 +132,10 @@ type State struct {
 	Networks  []Network `json:"networks"`
 	Servers   []Server  `json:"servers"`
 	Self      Self      `json:"self"`
+	// Peers и Known — несколько серверов без главного (meshd 4+; у старого
+	// пусто).
+	Peers []SeenServer  `json:"peers"`
+	Known []KnownServer `json:"known"`
 }
 
 // Admin — клиент входа meshd для панели (HTTP по unix-сокету).
@@ -261,6 +288,25 @@ func (a *Admin) Check(ctx context.Context, netID, from, to string, port int) (Ch
 // устройства и на какие порты ("" — на все).
 func (a *Admin) SetSelf(ctx context.Context, name string, enabled bool, ports string) error {
 	return a.do(ctx, http.MethodPost, "/v1/self", map[string]any{"name": name, "enabled": enabled, "ports": ports}, nil)
+}
+
+// SetSelfIP — адрес этого сервера в сети устройств (meshd 4+): если два
+// сервера сети получили один и тот же или нужно сохранить прежний.
+func (a *Admin) SetSelfIP(ctx context.Context, ip string) error {
+	st, err := a.State(ctx)
+	if err != nil {
+		return err
+	}
+	return a.do(ctx, http.MethodPost, "/v1/self", map[string]any{"name": st.Self.Name,
+		"enabled": st.Self.Enabled, "ports": st.Self.Ports, "ip": ip}, nil)
+}
+
+// SetKnown — какие серверы сети советовать устройствам (meshd 4+).
+func (a *Admin) SetKnown(ctx context.Context, list []KnownServer) error {
+	if list == nil {
+		list = []KnownServer{}
+	}
+	return a.do(ctx, http.MethodPost, "/v1/known", map[string]any{"servers": list}, nil)
 }
 
 // ForgetServer забывает адрес отключённого побочного сервера.

@@ -96,6 +96,9 @@ type App struct {
 	// не по туннелю: без сервера, при переподключении и переходе на запасной
 	// сервер он тот же самый (см. tunnel.MeshHost, mesh.go).
 	meshHost *tunnel.MeshHost
+	// meshLinks — лёгкие соединения с другими серверами той же сети
+	// устройств (ТЗ 12): живут вместе с клиентом сети.
+	meshLinks *tunnel.MeshLinks
 }
 
 // NetLayer заворачивает в туннель весь трафик системы — вместо системного
@@ -147,6 +150,7 @@ func New(cfg config.Config) *App {
 		seenApps: map[string]struct{}{},
 	}
 	a.meshHost = tunnel.NewMeshHost(tunnel.MeshLog(a.Bus))
+	a.meshLinks = tunnel.NewMeshLinks(a.meshHost, tunnel.MeshLog(a.Bus))
 	a.machine = core.NewMachine((*driver)(a), core.Options{
 		Save:      a.saveWant,
 		Changed:   a.publishState,
@@ -264,6 +268,12 @@ func (a *App) SetConfig(cfg config.Config) (string, error) {
 	} else if running && rulesChanged(old.Active(), active) {
 		a.machine.Reapply()
 	}
+	// Серверы сети устройств — другие профили с тем же ключом: правка любого
+	// из них сразу меняет лёгкие соединения (сам клиент сети не трогается).
+	if a.meshHost.Running() {
+		tc, _, _ := a.tunnelConfig(cfg, active)
+		a.meshLinks.Set(meshServers(cfg, active, tc))
+	}
 	if running && connectionSettingsChanged(old, cfg) {
 		return "часть настроек вступит в силу после переподключения", nil
 	}
@@ -380,7 +390,7 @@ func connectionSettingsChanged(a, b config.Config) bool {
 		oldActive.PoolSize != newActive.PoolSize || oldActive.LocalViaTunnel != newActive.LocalViaTunnel ||
 		oldActive.MeshEnabled != newActive.MeshEnabled || oldActive.MeshKey != newActive.MeshKey ||
 		oldActive.MeshName != newActive.MeshName || oldActive.MeshIncoming != newActive.MeshIncoming ||
-		oldActive.MeshDirectOff != newActive.MeshDirectOff ||
+		oldActive.MeshDirectOff != newActive.MeshDirectOff || oldActive.MeshOnlyThis != newActive.MeshOnlyThis ||
 		exitChainKey(a, oldActive) != exitChainKey(b, newActive) ||
 		a.SysProxy != b.SysProxy || a.SetEnvVars != b.SetEnvVars
 }
@@ -495,7 +505,7 @@ func (a *App) startLink(ctx context.Context) error {
 	// снимет (снимать нечего), поэтому клиент сети гасим здесь. Если он
 	// нужен (смена сервера), следующее подключение поднимет его снова.
 	if meshOn {
-		a.meshHost.Stop()
+		a.stopMesh()
 	}
 	if ctx.Err() != nil {
 		return ctx.Err() // отменили — это не ошибка подключения

@@ -311,11 +311,22 @@ Invoke-RestMethod "$($a.url)/api/calendar/events?from=2026-11-01&to=2026-11-08" 
 Отвечают, только пока приложение добавлено и включено. Раздаваемая папка
 этого устройства — `id` вида `hub:<id>`, подключённая — её `id`.
 
-- `GET /api/mirror` — `{"serve":[{id,name,path,ignore,files,conflicts}],
+- `GET /api/mirror` — `{"serve":[{id,name,path,ignore,files,conflicts,devices,old}],
   "subs":[{id,peer,host,folder,name,path,mode,status:{state,pending,conflicts,files,error,lastOk}}],
-  "found":[{peer,host,folders:[{id,name}],joined}],"self","suggest","platform","devnet"}`.
-  `state`: `ok` | `pending` | `conflict` | `offline` | `error`.
+  "found":[{peer,host,folders:[{id,name}],joined}],"self","suggest","platform","devnet",
+  "access":{"devices":[{id,name,host,ip,platform,server,online,gone,folders}],"ids","pending"}}`.
+  `state`: `ok` | `pending` | `conflict` | `offline` | `closed` | `error`
+  (`closed` — владелец не показывает эту папку этому устройству: забрал доступ
+  или больше не раздаёт; файлы на устройстве не трогаются).
+- Доступ по устройствам (ТЗ 18): `serve[].devices` — id устройств, которым папка
+  видна; `old: true` — папка с прошлой версии, видна всем, пока сеть не сообщает
+  id устройств (нужен новый `meshd`). `access.devices` — все устройства сети с
+  id (и не в сети), сначала серверы, потом остальные, по имени; `folders` —
+  сколько папок видно устройству, `gone` — его уже нет в сети, а папки остались.
+  `access.ids` — id устройств известны.
 - `POST /api/mirror`: `{"op":"serve","path","name"}`, `{"op":"unserve","id"}`,
+  `{"op":"grant","device":<id устройства>,"id":"hub:<id>"|"*","on":true|false}`
+  (дать или забрать папку; `*` — все раздаваемые),
   `{"op":"ignore","id","list":[шаблоны]}`, `{"op":"join","peer","host","folder","name","path","mode":"both|recv|send"}`,
   `{"op":"leave","id"}` (файлы остаются), `{"op":"mode","id","mode"}`,
   `{"op":"sync","id"}`, `{"op":"resolve","id","path":<копия конфликта>,"keep":"orig|copy|both"}`,
@@ -325,7 +336,40 @@ Invoke-RestMethod "$($a.url)/api/calendar/events?from=2026-11-01&to=2026-11-08" 
   для просмотра (до 2 МБ).
 
 Между устройствами — свой протокол на порту 47836 сети устройств
-(`internal/mirror/proto.go`).
+(`internal/mirror/proto.go`). Папка, которой устройству не дали, для него не
+существует: `/folders` её не называет, любой другой запрос с её id отвечает
+так же, как про несуществующую. id звонящего ставит сеть устройств
+(`mesh.Caller.ID`), подделать его устройство не может.
+
+Папки плагина на сервере — в панели сервера: `GET /api/node/state` →
+`state.networks[].folders[].devices` / `old` и `access` (по id сети — устройства
+meshd: `{id,name,host,user,online,gone,folders}`); `POST /api/node/folder/access`
+`{"net","folder":<id>|"*","device":<id>,"on"}` → `{"ok":true}`. Папки прошлой
+версии панель при чтении состояния отдаёт всем устройствам, которые сейчас
+знает meshd (правило обновления), дальше — только по галочкам.
+
+## Резервные копии (ТЗ 13)
+
+Отвечают, только пока приложение добавлено и включено. Копии лежат только на
+сервере сети (хост плагинов, порт 47838) и ходят по сети устройств.
+
+- `GET /api/backup` — `{"jobs":[{id,name,path,schedule:"daily|weekly|change",delayMin,keep,metered,server,
+  status:{running,phase,done,total,lastRun,lastOK,lastErr,waiting,files,bytes,skipped:[{p,why}],server,next}}],
+  "servers":[{host,name,ip}],"metered","mesh"}`.
+- `POST /api/backup`: `{"op":"add","job":{name,path,schedule,delayMin,keep,metered,server}}`,
+  `{"op":"update","job":{id,…}}`, `{"op":"remove","id"}` (на сервере копия остаётся),
+  `{"op":"run","id"}`, `{"op":"cancel","id"}`.
+- `GET /api/backup/remote[?server=]` — копии на сервере: свои и других устройств того же
+  пользователя, `{"sets":[{device,deviceName,set,name,keep,versions,bytes,last,own}]}`.
+- `GET /api/backup/versions?device=&set=` — версии, новые сверху.
+- `GET /api/backup/files?device=&set=&version=` — список файлов версии.
+- `POST /api/backup/restore` `{"device","set","version","path":<файл или папка, пусто — всё>,
+  "target":<полный путь>,"mode":"rename|skip|overwrite"}` → `{written,same,renamed,skipped,failed}`.
+  Молча ничего не перезаписывает: по умолчанию другой файл на месте остаётся, восстановленное
+  ложится рядом «имя (из копии ДД.ММ.ГГГГ)».
+- `POST /api/backup/delete` `{"device","set"[,"version"]}` — убрать копию с сервера.
+
+Протокол с сервером — `internal/backup/proto.go`.
 
 ## Трафик, сканер, буфер (ТЗ 5)
 

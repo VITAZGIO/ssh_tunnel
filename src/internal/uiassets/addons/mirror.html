@@ -43,13 +43,34 @@
   .vrow{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;border-bottom:1px solid var(--line);padding:6px 2px;font-size:13px}
   .vrow .d{color:var(--dim);font-size:12px;white-space:nowrap}
   .warn{border-color:var(--warn)}
+  /* «Доступ к папкам» (ТЗ 18): список устройств слева, карточка справа; на
+     узком экране — список, потом карточка во весь экран с «Назад». */
+  .acc{display:grid;grid-template-columns:minmax(220px,320px) 1fr;gap:10px;align-items:start}
+  .acc .list{display:flex;flex-direction:column;gap:4px}
+  .dev{display:flex;gap:10px;align-items:center;width:100%;text-align:left;border:1px solid var(--line);background:var(--card);
+       border-radius:8px;padding:8px 10px;cursor:pointer;color:var(--text);font:inherit}
+  .dev.on{border-color:var(--accent);background:var(--card2)}
+  .dev.off{opacity:.55}
+  .dev .tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dev .n{font-size:12px;color:var(--dim);white-space:nowrap}
+  .grp{font-size:12px;color:var(--dim);margin:6px 2px 0}
+  .chk{display:flex;gap:10px;align-items:center;padding:8px 2px;border-bottom:1px solid var(--line);cursor:pointer}
+  .chk input{width:18px;height:18px;margin:0;flex:none}
+  .chk .tx{flex:1;min-width:0}
+  .back{display:none}
+  @media (max-width:760px){
+    .acc{grid-template-columns:1fr}
+    #vAcc.card-open .list,#vAcc.card-open .accHead,#vAcc.card-open #accHint{display:none}
+    #vAcc:not(.card-open) .devCard{display:none}
+    .back{display:inline-flex}
+  }
 </style>
 </head>
 <body>
 <div class="box">
   <div class="tabs">
     <button id="tabSubs" class="on"></button><button id="tabServe"></button>
-    <button id="tabConf"></button><button id="tabTrash"></button>
+    <button id="tabAcc" hidden></button><button id="tabConf"></button><button id="tabTrash"></button>
     <button class="ico" id="reloadAll"></button>
   </div>
   <div class="card warn" id="perm" hidden></div>
@@ -70,6 +91,14 @@
       <input id="serveName" style="width:160px">
       <button class="btn primary" id="serveAdd"></button>
     </div></div>
+  </div>
+
+  <!-- Доступ к папкам: кому из устройств сети что видно (ТЗ 18). -->
+  <div id="vAcc" class="box" style="padding:0" hidden>
+    <div class="bar accHead"><b id="accTitle"></b><span class="sp"></span><button class="btn" id="accReload"></button></div>
+    <div class="hint" id="accHint"></div>
+    <div class="card warn" id="accWarn" hidden></div>
+    <div class="acc" id="acc"><div class="list" id="accList"></div><div class="devCard" id="accCard"></div></div>
   </div>
 
   <!-- Конфликты: две версии рядом. -->
@@ -95,6 +124,11 @@ set('tabSubs', L('Папки', 'Folders'));
 set('tabServe', L('Раздаю', 'Sharing'));
 set('tabTrash', L('Корзина и версии', 'Trash & versions'));
 set('tabConf', L('Конфликты', 'Conflicts'));
+set('tabAcc', L('Доступ', 'Access'));
+set('accTitle', L('Доступ к папкам', 'Folder access'));
+$('accReload').innerHTML = icon('refresh') + esc(L('Обновить', 'Refresh'));
+set('accHint', L('Новое устройство сети не видит раздаваемых папок, пока ему их не отметят. Нажми устройство и отметь папки — сохраняется сразу.',
+  'A new device of the network sees no shared folders until they are ticked for it. Tap a device and tick folders — saved at once.'));
 set('loading', L('Загружаю…', 'Loading…'));
 $('reloadAll').innerHTML = icon('refresh');
 $('reloadAll').title = L('Обновить всё', 'Refresh all');
@@ -153,8 +187,8 @@ function bindPick(root){
 bindPick(document);
 function tab(t){
   TAB = t;
-  for(const [k, b] of [['subs','tabSubs'],['serve','tabServe'],['conf','tabConf'],['trash','tabTrash']]) $(b).classList.toggle('on', k === t);
-  $('vSubs').hidden = t !== 'subs'; $('vServe').hidden = t !== 'serve';
+  for(const [k, b] of [['subs','tabSubs'],['serve','tabServe'],['acc','tabAcc'],['conf','tabConf'],['trash','tabTrash']]) $(b).classList.toggle('on', k === t);
+  $('vSubs').hidden = t !== 'subs'; $('vServe').hidden = t !== 'serve'; $('vAcc').hidden = t !== 'acc';
   $('vConf').hidden = t !== 'conf'; $('vTrash').hidden = t !== 'trash';
   if(t === 'trash') loadTrash();
   if(t === 'conf') drawConflicts();
@@ -162,6 +196,7 @@ function tab(t){
 $('tabSubs').onclick = () => tab('subs');
 $('tabServe').onclick = () => tab('serve');
 $('tabConf').onclick = () => tab('conf');
+$('tabAcc').onclick = () => { tab('acc'); drawAccess(); };
 $('tabTrash').onclick = () => tab('trash');
 
 async function post(body){
@@ -177,6 +212,7 @@ function statusText(st){
     case 'ok': return [L('синхронизировано', 'in sync'), 'ok'];
     case 'conflict': return [L('конфликт', 'conflict') + ` (${st.conflicts.length})`, 'warn'];
     case 'offline': return [L('сервер недоступен', 'server unreachable') + (st.pending ? ` — ${st.pending} ` + L('файлов ждут', 'files waiting') : ''), 'warn'];
+    case 'closed': return [L('владелец закрыл доступ к папке — файлы здесь не тронуты', 'the owner closed access to the folder — files here are untouched'), 'warn'];
     case 'error': return [L('ошибка: ', 'error: ') + (st.error || ''), 'err'];
     default: return [(st.pending ? `${st.pending} ` : '') + L('файлов ждут', 'files waiting') + (st.error ? ' — ' + st.error : ''), 'warn'];
   }
@@ -199,6 +235,10 @@ function draw(r){
       <button class="btn primary" id="permBtn">${esc(L('Разрешить', 'Allow'))}</button>`;
     $('permBtn').onclick = () => window.SSHTunnelAndroid.requestAllFiles();
   } else $('perm').hidden = true;
+
+  $('tabAcc').hidden = !r.serve.length;
+  if(!r.serve.length && TAB === 'acc') tab('serve');
+  if(TAB === 'acc') drawAccess();
 
   const n = allConflicts().length;
   $('tabConf').innerHTML = esc(L('Конфликты', 'Conflicts')) + (n ? `<span class="badge">${n}</span>` : '');
@@ -272,7 +312,7 @@ function draw(r){
     const c = document.createElement('div');
     c.className = 'card';
     c.innerHTML = `<div class="fold">${icon('dns')}<div class="tx"><div><b>${esc(f.name)}</b> · ${f.files} ${esc(L('файлов', 'files'))}</div>
-        <div class="p">${esc(shortPath(f.path))}</div></div>
+        <div class="p">${esc(shortPath(f.path))}</div><div class="hint">${esc(whoHas(f))}</div></div>
       <button class="ico" data-a="ign" title="${esc(L('Исключения', 'Exclusions'))}">${icon('settings')}</button>
       <button class="ico" data-a="off" title="${esc(L('Перестать раздавать', 'Stop sharing'))}">${icon('close')}</button></div>
       <div class="ign" hidden><div class="hint">${esc(L('Свои исключения, шаблон на строку (например *.log или build/). Мусор Obsidian, временные файлы и конфликты Syncthing исключены всегда.', 'Own exclusions, one pattern per line (e.g. *.log or build/). Obsidian workspace, temp files and Syncthing conflicts are always excluded.'))}</div>
@@ -295,6 +335,95 @@ function draw(r){
   if(TAB === 'conf' && sig !== CONF_SIG) drawConflicts();
   CONF_SIG = sig;
 }
+
+// ---- Доступ к папкам (ТЗ 18) ----
+let SEL = null; // id выбранного устройства
+const devName = id => { const d = ((S && S.access && S.access.devices) || []).find(x => x.id === id); return d ? d.name : id; };
+
+// whoHas — строка у раздаваемой папки: каким устройствам она видна.
+function whoHas(f){
+  if(f.old) return L('Видна всем устройствам сети, как раньше: сеть пока не сообщает id устройств.', 'Visible to every device of the network, as before: the network does not report device ids yet.');
+  const ds = f.devices || [];
+  if(!ds.length) return L('Не видна ни одному устройству — отметь их во вкладке «Доступ».', 'Visible to no device — tick them on the «Access» tab.');
+  return L('Видна: ', 'Visible to: ') + ds.map(devName).join(', ');
+}
+
+function drawAccess(){
+  if(!S) return;
+  const a = S.access || {devices: []};
+  const w = $('accWarn');
+  w.hidden = !!a.ids;
+  if(!a.ids) w.textContent = L('Сеть не сообщает id устройств — обнови meshd на сервере сети. До этого прежние папки видны всем, как раньше, а новые — никому.',
+    'The network does not report device ids — update meshd on the network server. Until then old folders stay visible to all, as before, and new ones to nobody.');
+  const box = $('accList'); box.innerHTML = '';
+  if(!a.devices.length) box.innerHTML = `<div class="empty" style="padding:12px">${esc(L('Других устройств в сети нет. Появилось новое — нажми «Обновить».', 'No other devices in the network. A new one appeared — press Refresh.'))}</div>`;
+  let group = null;
+  for(const d of a.devices){
+    const g = d.server ? 'srv' : 'dev';
+    if(g !== group){
+      group = g;
+      const h = document.createElement('div');
+      h.className = 'grp';
+      h.textContent = g === 'srv' ? L('Серверы', 'Servers') : L('Устройства', 'Devices');
+      box.appendChild(h);
+    }
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'dev' + (d.id === SEL ? ' on' : '') + (d.online ? '' : ' off');
+    const kind = d.server ? 'dns' : d.platform === 'android' ? 'smartphone' : 'computer';
+    const note = d.gone ? L('нет в сети устройств', 'gone from the network') : d.online ? '' : L('не в сети', 'offline');
+    b.innerHTML = `${icon(kind)}<span class="tx">${esc(d.name)}${note ? ' · <span class="n">' + esc(note) + '</span>' : ''}</span>
+      <span class="n">${d.folders}/${S.serve.length}</span>`;
+    b.title = L('папок видно: ', 'folders visible: ') + d.folders;
+    b.onclick = () => { SEL = d.id; drawAccess(); };
+    box.appendChild(b);
+  }
+  if(SEL && !a.devices.some(d => d.id === SEL)) SEL = null;
+  $('vAcc').classList.toggle('card-open', !!SEL);
+  drawDevCard();
+}
+
+function drawDevCard(){
+  const box = $('accCard');
+  const d = SEL && S.access.devices.find(x => x.id === SEL);
+  if(!d){ box.innerHTML = `<div class="empty" style="padding:20px">${esc(L('Выбери устройство в списке.', 'Pick a device in the list.'))}</div>`; return; }
+  const hint = d.server
+    ? L('Сервер сети сам к папкам этого устройства не ходит: галочка пригодится, только если он станет их забирать.', 'The network server does not fetch the folders of this device itself: a tick only matters if it starts to.')
+    : L('Отмеченные папки устройство увидит во вкладке «Папки». Снятая галочка останавливает синхронизацию у него; его файлы остаются.', 'Ticked folders appear on its «Folders» tab. Unticking stops syncing there; its files stay.');
+  box.innerHTML = `<div class="card"><div class="bar"><button class="btn back" type="button">${icon('arrow_back')}${esc(L('Назад', 'Back'))}</button>
+      <b>${esc(d.name)}</b>${d.ip ? ' <span class="hint">' + esc(d.ip) + '</span>' : ''}<span class="sp"></span>
+      <button class="btn" data-all="1">${esc(L('Все', 'All'))}</button><button class="btn" data-all="0">${esc(L('Ни одной', 'None'))}</button></div>
+    <div class="hint" style="margin:6px 0">${esc(hint)}</div>
+    <div class="rows"></div><div class="msg err" data-e></div></div>`;
+  box.querySelector('.back').onclick = () => { SEL = null; drawAccess(); };
+  const rows = box.querySelector('.rows'), err = box.querySelector('[data-e]');
+  for(const f of S.serve){
+    const lab = document.createElement('label');
+    lab.className = 'chk';
+    const on = !f.old && (f.devices || []).includes(d.id);
+    lab.innerHTML = `<input type="checkbox"${on ? ' checked' : ''}><span class="tx"><b>${esc(f.name)}</b><div class="p">${esc(shortPath(f.path))}</div>
+      ${f.old ? '<div class="hint">' + esc(L('сейчас видна всем (сеть не сообщает id устройств)', 'visible to all now (no device ids from the network)')) + '</div>' : ''}</span>`;
+    const cb = lab.querySelector('input');
+    // Каждая галочка — свой запрос сразу; не сохранилось — вернуть как было
+    // и сказать почему.
+    cb.onchange = async () => {
+      const want = cb.checked;
+      cb.disabled = true; err.textContent = '';
+      const r = await api('/api/mirror', {op: 'grant', device: d.id, id: 'hub:' + f.id, on: want}).catch(e => ({error: e.message}));
+      cb.disabled = false;
+      if(r.error){ cb.checked = !want; err.textContent = L('Не сохранилось: ', 'Not saved: ') + r.error; return; }
+      draw(r);
+    };
+    rows.appendChild(lab);
+  }
+  for(const b of box.querySelectorAll('[data-all]')) b.onclick = async () => {
+    err.textContent = '';
+    const r = await api('/api/mirror', {op: 'grant', device: d.id, id: '*', on: b.dataset.all === '1'}).catch(e => ({error: e.message}));
+    if(r.error){ err.textContent = L('Не сохранилось: ', 'Not saved: ') + r.error; return; }
+    draw(r);
+  };
+}
+$('accReload').onclick = () => refresh(true);
 
 async function text(id, p){
   const r = await fetch(`/api/mirror/file?id=${encodeURIComponent(id)}&p=${encodeURIComponent(p)}&t=${T}`, {headers: {'X-Token': T}});

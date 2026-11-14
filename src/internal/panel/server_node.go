@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"errors"
 	"net/http"
 
 	"sshtunnel/internal/nodeapi"
@@ -20,7 +21,11 @@ func (s *Server) nodeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/node/folder/add", s.requireAuth(s.withNode(s.handleNodeFolderAdd)))
 	mux.HandleFunc("/api/node/folder/remove", s.requireAuth(s.withNode(s.handleNodeFolderRemove)))
 	mux.HandleFunc("/api/node/folder/quota", s.requireAuth(s.withNode(s.handleNodeFolderQuota)))
+	mux.HandleFunc("/api/node/folder/access", s.requireAuth(s.withNode(s.handleNodeFolderAccess)))
 	mux.HandleFunc("/api/node/clipboard/clear", s.requireAuth(s.withNode(s.handleNodeClipboardClear)))
+	mux.HandleFunc("/api/node/backup/delete", s.requireAuth(s.withNode(s.handleNodeBackupDelete)))
+	mux.HandleFunc("/api/node/net/delete", s.requireAuth(s.withNode(s.handleNodeNetDelete)))
+	mux.HandleFunc("/api/node/fix", s.requireAuth(s.withNode(s.handleNodeFix)))
 }
 
 func (s *Server) withNode(next http.HandlerFunc) http.HandlerFunc {
@@ -34,7 +39,50 @@ func (s *Server) withNode(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *Server) handleNodeState(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.node.Status(r.Context()))
+	st := s.nodeStatusWithAccess(r.Context())
+	st.Warnings = s.nodeWarnings(r.Context(), st.State)
+	writeJSON(w, http.StatusOK, st)
+}
+
+func (s *Server) handleNodeBackupDelete(w http.ResponseWriter, r *http.Request) {
+	var req nodeapi.BackupReq
+	if !decodePost(w, r, &req) {
+		return
+	}
+	replyErr(w, s.node.DeleteBackup(r.Context(), req), map[string]bool{"ok": true})
+}
+
+// handleNodeNetDelete — стереть данные плагинов сети, которой больше нет в
+// meshd. Сеть ещё есть (или проверить нельзя) — отказ: данные живой сети
+// так не стираются.
+func (s *Server) handleNodeNetDelete(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Net string `json:"net"`
+	}
+	if !decodePost(w, r, &req) {
+		return
+	}
+	has, ok := s.meshHasNet(r.Context(), req.Net)
+	switch {
+	case !ok:
+		replyErr(w, errors.New("не удалось спросить meshd, есть ли эта сеть, — данные не тронуты"), nil)
+		return
+	case has:
+		replyErr(w, errors.New("эта сеть ещё есть в сети устройств — сначала удали её в «Сетях»"), nil)
+		return
+	}
+	replyErr(w, s.node.DeleteNet(r.Context(), req.Net), map[string]bool{"ok": true})
+}
+
+// handleNodeFix — безопасное исправление того, что мешает плагинам.
+func (s *Server) handleNodeFix(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if !decodePost(w, r, &req) {
+		return
+	}
+	replyErr(w, s.fixNode(r.Context(), req.Code), map[string]bool{"ok": true})
 }
 
 func (s *Server) handleNodeInstall(w http.ResponseWriter, r *http.Request) {

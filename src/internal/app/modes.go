@@ -179,7 +179,7 @@ func (d *driver) Disconnect() {
 	// Связь снимают и при смене сервера (Restart) — тогда сеть устройств,
 	// если она нужна, живёт дальше; снимают совсем — гаснет и она.
 	if !a.meshWanted() {
-		a.meshHost.Stop()
+		a.stopMesh()
 	}
 }
 
@@ -285,15 +285,39 @@ func (a *App) meshWanted() bool { return a.machine.Want().Mesh && a.meshConfigur
 // профиля p. Тот же клиент с теми же настройками не пересоздаётся.
 func (a *App) ensureMesh(p config.Profile, on bool) {
 	if !on {
-		a.meshHost.Stop()
+		a.stopMesh()
 		return
 	}
-	tc, _, _ := a.tunnelConfig(a.Config(), p)
+	cfg := a.Config()
+	tc, _, _ := a.tunnelConfig(cfg, p)
 	if mc := tc.MeshConfig(); mc != nil {
 		a.meshHost.Start(*mc)
+		a.meshLinks.Set(meshServers(cfg, p, tc))
 	} else {
-		a.meshHost.Stop()
+		a.stopMesh()
 	}
+}
+
+// stopMesh гасит клиента сети устройств и лёгкие соединения с
+// дополнительными серверами сети.
+func (a *App) stopMesh() {
+	a.meshLinks.Stop()
+	a.meshHost.Stop()
+}
+
+// meshServers — дополнительные серверы сети устройств профиля p (ТЗ 12):
+// другие профили с тем же ключом сети и включённой сетью. С каждым —
+// лёгкое SSH-соединение только для сети устройств.
+func meshServers(cfg config.Config, p config.Profile, tc tunnel.Config) []tunnel.MeshServer {
+	var out []tunnel.MeshServer
+	for _, q := range cfg.MeshServers(p) {
+		out = append(out, tunnel.MeshServer{
+			Key: q.ID, Name: q.Name, Host: q.Host, SSHPort: q.SSHPort, User: q.User, KeyPath: q.KeyPath,
+			KnownHostsPath: config.KnownHostsPath(), IPVersion: q.IPVersion, Cipher: q.Cipher,
+			ProtectSocket: tc.ProtectSocket, Resolver: tc.Resolver,
+		})
+	}
+	return out
 }
 
 // logModeChange пишет в журнал, что включилось и что выключилось.

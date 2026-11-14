@@ -40,6 +40,36 @@ type node struct {
 	servers map[string]bool
 	stop    chan struct{}
 	pulled  chan struct{} // тесты: прошёл круг забора с серверов
+
+	// src — сеть устройств (devnet; в тестах — подделка); pull/peer —
+	// HTTP-клиенты поверх неё.
+	src  source
+	pull *http.Client
+	peer *http.Client
+}
+
+// source — откуда узел знает, кто в сети, и как до них дозвониться.
+type source interface {
+	Status() mesh.Status
+	DialPeer(addr string) (net.Conn, error)
+}
+
+type devnetSource struct{}
+
+func (devnetSource) Status() mesh.Status                    { return devnet.Status() }
+func (devnetSource) DialPeer(addr string) (net.Conn, error) { return devnet.DialPeer(addr) }
+
+func clientOver(src source, timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+				return src.DialPeer(addr)
+			},
+			MaxIdleConnsPerHost: 1,
+			IdleConnTimeout:     30 * time.Second,
+		},
+	}
 }
 
 var (
@@ -88,9 +118,12 @@ type callerConn struct {
 	from mesh.Caller
 }
 
-func startNode(dir string) *node {
+func startNode(dir string) *node { return startNodeWith(dir, devnetSource{}) }
+
+func startNodeWith(dir string, src source) *node {
 	n := &node{h: openHistory(dir), ln: &chanListener{ch: make(chan net.Conn), done: make(chan struct{})},
-		servers: map[string]bool{}, stop: make(chan struct{}), pulled: make(chan struct{}, 1)}
+		servers: map[string]bool{}, stop: make(chan struct{}), pulled: make(chan struct{}, 1),
+		src: src, pull: clientOver(src, 2*time.Minute), peer: clientOver(src, 5*time.Minute)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/clip", n.receive)
 	n.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 20 * time.Second,
@@ -191,7 +224,7 @@ func (n *node) accept(it Item, data []byte) error {
 
 // pullEvery — как часто спрашивать серверы о пропущенном; сразу — когда
 // сервер (снова) появился на связи.
-const (
+var (
 	pullEvery = time.Minute
 	pullCheck = 5 * time.Second
 )
@@ -206,7 +239,7 @@ func (n *node) pullLoop() {
 	for {
 		now := map[string]bool{}
 		fresh := false
-		for _, p := range devnet.Status().Peers {
+		for _, p := range n.src.Status().Peers {
 			if p.Self || !p.Online || p.Platform != "server" || !p.IP.IsValid() {
 				continue
 			}
@@ -239,7 +272,7 @@ func (n *node) pullLoop() {
 // окажется в буфере), потом отметка «получено».
 func (n *node) pullFrom(ip string) {
 	base := "http://" + net.JoinHostPort(ip, strconv.Itoa(Port))
-	resp, err := pullClient.Get(base + "/missed")
+	resp, err := n.pull.Get(base + "/missed")
 	if err != nil {
 		n.setServer(ip, false)
 		return
@@ -259,7 +292,7 @@ func (n *node) pullFrom(ip string) {
 		if it.ID == "" || n.h.has(it.ID) {
 			continue
 		}
-		r, err := pullClient.Get(base + "/data?id=" + url.QueryEscape(it.ID))
+		r, err := n.pull.Get(base + "/data?id=" + url.QueryEscape(it.ID))
 		if err != nil {
 			return // связь пропала — отметку не двигаем, заберём потом
 		}
@@ -272,7 +305,7 @@ func (n *node) pullFrom(ip string) {
 			return
 		}
 	}
-	if r, err := pullClient.Post(base+"/ack?seq="+strconv.FormatInt(out.Seq, 10), "text/plain", nil); err == nil {
+	if r, err := n.pull.Post(base+"/ack?seq="+strconv.FormatInt(out.Seq, 10), "text/plain", nil); err == nil {
 		r.Body.Close()
 	}
 }
@@ -293,28 +326,6 @@ func (n *node) hasServer(ip string) bool {
 	return n.servers[ip]
 }
 
-var pullClient = &http.Client{
-	Timeout: 2 * time.Minute,
-	Transport: &http.Transport{
-		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
-			return devnet.DialPeer(addr)
-		},
-		MaxIdleConnsPerHost: 1,
-		IdleConnTimeout:     30 * time.Second,
-	},
-}
-
-var peerClient = &http.Client{
-	Timeout: 5 * time.Minute,
-	Transport: &http.Transport{
-		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
-			return devnet.DialPeer(addr)
-		},
-		MaxIdleConnsPerHost: 1,
-		IdleConnTimeout:     30 * time.Second,
-	},
-}
-
 // ErrTooBig — больше MaxBytes.
 var ErrTooBig = fmt.Errorf("больше %d МБ — для этого «Файлы устройства»", MaxBytes>>20)
 
@@ -326,7 +337,7 @@ func (n *node) push(it Item, data []byte) (Item, error) {
 	if len(data) == 0 {
 		return it, errors.New("пусто")
 	}
-	st := devnet.Status()
+	st := n.src.Status()
 	if st.State == "off" || st.State == "stopped" {
 		return it, devnet.ErrOff
 	}
@@ -355,7 +366,7 @@ func (n *node) push(it Item, data []byte) (Item, error) {
 		wg.Add(1)
 		go func(ip string) {
 			defer wg.Done()
-			if sendTo(ip, it, data) == nil && !srv {
+			if n.sendTo(ip, it, data) == nil && !srv {
 				mu.Lock()
 				sent++
 				mu.Unlock()
@@ -368,14 +379,14 @@ func (n *node) push(it Item, data []byte) (Item, error) {
 	return it, nil
 }
 
-func sendTo(ip string, it Item, data []byte) error {
+func (n *node) sendTo(ip string, it Item, data []byte) error {
 	q := url.Values{"id": {it.ID}, "kind": {it.Kind}, "name": {it.Name}, "mime": {it.Mime}}
 	req, err := http.NewRequest(http.MethodPost, "http://"+net.JoinHostPort(ip, strconv.Itoa(Port))+"/clip?"+q.Encode(), bytesReader(data))
 	if err != nil {
 		return err
 	}
 	req.ContentLength = int64(len(data))
-	resp, err := peerClient.Do(req)
+	resp, err := n.peer.Do(req)
 	if err != nil {
 		return err
 	}

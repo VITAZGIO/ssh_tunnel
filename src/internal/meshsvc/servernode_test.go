@@ -81,8 +81,11 @@ func TestСерверыКакУзлыСети(t *testing.T) {
 		_, b := c.Resolve("germaniya.mesh")
 		return a && b
 	})
-	if ip, _ := c.Resolve("frankfurt"); ip.String() != "198.19.255.254" {
-		t.Fatalf("адрес главного %s", ip)
+	// Адрес сервера в сети — свой у каждого (новый сервер — из его id).
+	st0, _ := admin.State(ctx)
+	selfIP := st0.Self.IP
+	if ip, _ := c.Resolve("frankfurt"); ip.String() != selfIP || selfIP == "" {
+		t.Fatalf("адрес сервера %s, в панели %s", ip, selfIP)
 	}
 
 	got, err := askVia(t, c, "frankfurt.mesh:"+strconv.Itoa(mainPort), "привет")
@@ -116,7 +119,7 @@ func TestСерверыКакУзлыСети(t *testing.T) {
 		return !ok
 	})
 	st, _ := admin.State(ctx)
-	if st.Self.Enabled || st.Self.IP != "198.19.255.254" || len(st.Servers) != 1 || st.Servers[0].IP == "" {
+	if st.Self.Enabled || st.Self.IP != selfIP || len(st.Servers) != 1 || st.Servers[0].IP == "" {
 		t.Fatalf("состояние: %+v", st)
 	}
 }

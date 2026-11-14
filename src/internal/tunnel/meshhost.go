@@ -10,9 +10,9 @@ package tunnel
 // Пул к нему только подключается и отключается (Attach/Detach) — через шов
 // ServerDial, по которому клиент ходит к meshd на сервере.
 //
-// Шов нарочно маленький: позже клиент будет говорить с несколькими
-// серверами сразу, и тогда за ServerDial встанет выбор сервера, а не один
-// туннель.
+// Серверов сети может быть несколько (ТЗ 12): основной путь даёт туннель
+// (Attach), остальные — лёгкие SSH-соединения только для сети устройств
+// (AttachExtra, см. meshlinks.go). Клиент держит связь со всеми сразу.
 
 import (
 	"context"
@@ -64,6 +64,13 @@ type MeshHost struct {
 	// от прежнего туннеля не должен снять путь, который уже дал новый.
 	server ServerDial
 	owner  any
+	// extras — дополнительные серверы сети: ключ → путь.
+	extras map[string]extraServer
+}
+
+type extraServer struct {
+	via  string
+	dial ServerDial
 }
 
 // NewMeshHost готовит пустого хозяина. log получает строки журнала ("info",
@@ -98,6 +105,9 @@ func (h *MeshHost) Start(cfg mesh.Config) *mesh.Client {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c := mesh.New(cfg, h.dial, h.log)
+	for key, e := range h.extras {
+		c.AddServer(key, e.via, h.extraDial(key))
+	}
 	done := make(chan struct{})
 	h.client, h.id, h.cancel, h.done = c, id, cancel, done
 	go func() {
@@ -154,6 +164,57 @@ func (h *MeshHost) Detach(owner any) {
 		h.server, h.owner = nil, nil
 	}
 	h.mu.Unlock()
+}
+
+// AttachExtra даёт клиенту путь к ещё одному серверу сети (key — как его
+// назвать, обычно адрес из профиля; via — адрес сервера снаружи).
+func (h *MeshHost) AttachExtra(key, via string, d ServerDial) {
+	h.mu.Lock()
+	if h.extras == nil {
+		h.extras = map[string]extraServer{}
+	}
+	_, had := h.extras[key]
+	h.extras[key] = extraServer{via: via, dial: d}
+	c := h.client
+	h.mu.Unlock()
+	if c != nil && !had {
+		c.AddServer(key, via, h.extraDial(key))
+	}
+}
+
+// DetachExtra убирает дополнительный сервер.
+func (h *MeshHost) DetachExtra(key string) {
+	h.mu.Lock()
+	_, had := h.extras[key]
+	delete(h.extras, key)
+	c := h.client
+	h.mu.Unlock()
+	if c != nil && had {
+		c.RemoveServer(key)
+	}
+}
+
+// Extras — ключи дополнительных серверов.
+func (h *MeshHost) Extras() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]string, 0, len(h.extras))
+	for k := range h.extras {
+		out = append(out, k)
+	}
+	return out
+}
+
+func (h *MeshHost) extraDial(key string) mesh.Dialer {
+	return func(network, addr string) (net.Conn, error) {
+		h.mu.Lock()
+		e, ok := h.extras[key]
+		h.mu.Unlock()
+		if !ok || e.dial == nil {
+			return nil, ErrNoServer
+		}
+		return e.dial(network, addr)
+	}
 }
 
 // dial — шов, которым пользуется клиент: текущий путь или ErrNoServer.
