@@ -204,8 +204,26 @@ are the same), servers the panel suggests to devices. Access rules, the
 journal, names and removal apply to this server only — the panel says so. The
 old way — a "secondary" server forwarding to another one's `meshd` — still
 works and is marked "old way"; to move off it: "Settings" → "Switch to an own
-network service". Details and the upgrade order for several servers — in
-[MESH.md](MESH.md) (Russian).
+network service". The device card has "Approve" / "Reject" (when "New
+devices — after approval" is on for the network in "Networks"), "Freeze in
+network" and the exit chain the panel suggests to the device (the device may
+change it — the panel shows its value). Approval and freezing also apply to
+this server only; they need `meshd` version 5 ("Update meshd").
+
+Panel API for this (session auth, errors — 400 `{"error"}`):
+`POST /api/mesh/net/approval` `{"net","on"}`, `POST /api/mesh/approve`
+`{"net","device"}`, `POST /api/mesh/freeze` `{"net","device","on"}`,
+`POST /api/mesh/exit` `{"net","device","entry":"host:port","via":[…]}` →
+`{"ok":true,"exit":{entry,via,t,by,byId}}`. `GET /api/mesh/state` gains
+`approval` per network and `pending`, `frozen`, `profiles` (`[{k,n,a,v,t,b}]`:
+key, name, active, chain, time, set by) and `exitSet` per device.
+`POST /api/mesh/check` may answer `reason` `"pending"` or `"frozen"`. The
+simple access mode is saved in one request, `POST /api/access/simple`
+`{"enabled","groups","rules","clients":{"<client id>":[groups]}}`: everything
+is checked before anything is written.
+
+Details and the upgrade order for several servers — in [MESH.md](MESH.md)
+(Russian).
 
 ## Server plugins
 

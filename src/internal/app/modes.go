@@ -291,7 +291,7 @@ func (a *App) ensureMesh(p config.Profile, on bool) {
 	cfg := a.Config()
 	tc, _, _ := a.tunnelConfig(cfg, p)
 	if mc := tc.MeshConfig(); mc != nil {
-		a.meshHost.Start(*mc)
+		a.meshHost.Start(*mc).SetProfiles(meshProfiles(cfg))
 		a.meshLinks.Set(meshServers(cfg, p, tc))
 	} else {
 		a.stopMesh()

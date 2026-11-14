@@ -49,6 +49,16 @@
 //	кто ты:     → {"op":"id"}  ← {"op":"id","server":{..}} (до hello; старый
 //	            meshd отвечает ошибкой — значит, он старый)
 //
+// Профиль устройства в панели (с версии 5, ТЗ 16), тоже только
+// необязательное:
+//
+//	welcome:    + "hold":"pending"|"frozen" (ждёт одобрения / заморожено)
+//	            ← {"op":"hold","hold":..}  (одобрили, заморозили, разморозили)
+//	            → {"op":"profiles","profiles":[{k,n,a,v,t,b}]} (серверы, для
+//	              которых у устройства есть профиль, и их цепочки выхода)
+//	            ← {"op":"exit","exit":{entry,via,t,by,byId}} (цепочку задали
+//	              в панели; новее — побеждает, см. «цепочка выхода из панели»)
+//
 // Старый способ тоже работает: на «побочном» сервере meshd не запущен, его
 // 127.0.0.1:47831 — SSH-проброс (ssh -L) к meshd «главного». Сам побочный
 // сервер (его панель) держит здесь управляющее соединение "server" — чтобы
@@ -95,8 +105,9 @@ import (
 const (
 	protoVersion = 2
 	// version — версия самого meshd, её видно в панели.
-	// "4" — несколько серверов без главного (ТЗ 12).
-	version = "4"
+	// "4" — несколько серверов без главного (ТЗ 12); "5" — профиль
+	// устройства в панели: одобрение, заморозка, цепочка выхода (ТЗ 16).
+	version = "5"
 
 	maxLine          = 4096
 	maxNetworks      = 1000
@@ -210,6 +221,37 @@ type msg struct {
 	Server  *serverInfo  `json:"server,omitempty"`
 	Servers []serverAd   `json:"servers,omitempty"`
 	On      []serverSeen `json:"on,omitempty"`
+
+	// Профиль устройства в панели (ТЗ 16). Hold — устройство ждёт одобрения
+	// ("pending") или заморожено ("frozen") на этом сервере; Profiles —
+	// серверы, для которых у устройства есть профиль; Exit — цепочка
+	// выхода, которую задала панель.
+	Hold     string     `json:"hold,omitempty"`
+	Profiles []profRef  `json:"profiles,omitempty"`
+	Exit     *exitOrder `json:"exit,omitempty"`
+}
+
+// profRef — сервер, для которого у устройства есть профиль, и цепочка
+// выхода этого профиля (ТЗ 16). Профиль называется ключом «адрес:порт» SSH
+// (см. «цепочка выхода из панели»): id профилей у каждого устройства свои.
+// Поля короткие: строка протокола не длиннее maxLine.
+type profRef struct {
+	Key    string   `json:"k"`
+	Name   string   `json:"n,omitempty"`
+	Active bool     `json:"a,omitempty"` // сейчас подключено через него
+	Via    []string `json:"v,omitempty"` // цепочка выхода: ключи звеньев
+	T      int64    `json:"t,omitempty"` // когда цепочку задали (unix)
+	By     string   `json:"b,omitempty"` // какая панель; пусто — само устройство
+}
+
+// exitOrder — цепочка выхода, которую задала панель: войти через Entry и
+// выйти в интернет через Via по порядку (пусто — без цепочки).
+type exitOrder struct {
+	Entry string   `json:"entry"`
+	Via   []string `json:"via,omitempty"`
+	T     int64    `json:"t"`
+	By    string   `json:"by,omitempty"`   // имя сервера, чья панель задала
+	ByID  string   `json:"byId,omitempty"` // его id
 }
 
 // serverInfo — сервер глазами устройства: id, имя, адрес в сети устройств и
@@ -291,6 +333,15 @@ type device struct {
 	AliasT int64 `json:"aliasT,omitempty"`
 	// On — с какими серверами сети устройство на связи (последний отчёт).
 	On []serverSeen `json:"on,omitempty"`
+	// Pending — ждёт одобрения в панели, Frozen — заморожено (ТЗ 16): такое
+	// устройство никуда не звонит, ему никто не звонит, в списках других
+	// его нет. Только на этом сервере, см. «одобрение и заморозка».
+	Pending bool `json:"pending,omitempty"`
+	Frozen  bool `json:"frozen,omitempty"`
+	// Profiles — что устройство рассказало о своих серверах (op profiles);
+	// ExitSet — последняя цепочка выхода, заданная панелью этого сервера.
+	Profiles []profRef  `json:"profiles,omitempty"`
+	ExitSet  *exitOrder `json:"exitSet,omitempty"`
 
 	// claims — устройство само называет адрес (новый клиент): при споре ему
 	// хватает сообщения readdress, старого приходится переподключать.
@@ -306,7 +357,24 @@ type device struct {
 	up, down    atomic.Int64 // трафик за время жизни процесса, поверх Bytes*
 	activeCalls atomic.Int64
 	link        linkStats
+	// streams — соединения через сервер, которые сейчас идут у устройства
+	// (вызовы к другим устройствам и к серверу): заморозка их рвёт. Под s.mu.
+	streams map[net.Conn]bool
 }
+
+// hold — ждёт ли устройство одобрения или заморожено ("" — нет).
+func (d *device) hold() string {
+	switch {
+	case d.Frozen:
+		return "frozen"
+	case d.Pending:
+		return "pending"
+	}
+	return ""
+}
+
+// blocked — устройству нельзя ни звонить, ни принимать вызовы.
+func (d *device) blocked() bool { return d.Pending || d.Frozen }
 
 // displayName — имя для людей: переименование из панели главнее.
 func (d *device) displayName() string {
@@ -373,6 +441,9 @@ type network struct {
 	Name       string `json:"name,omitempty"`
 	Created    int64  `json:"created,omitempty"`
 	EmptySince int64  `json:"emptySince,omitempty"`
+	// Approval — «Новые устройства — после одобрения» (ТЗ 16): устройство,
+	// которое пришло впервые, ждёт, пока его одобрят в панели.
+	Approval bool `json:"approval,omitempty"`
 }
 
 type call struct {
@@ -582,10 +653,14 @@ func (s *server) save() {
 
 // peersLocked — список устройств сети для устройства me: только те, с
 // кем ему разрешено общаться хоть в одну сторону (и оно само). Под s.mu.
+//
+// Устройство, которое ждёт одобрения или заморожено, видит только себя, а
+// другие его не видят вовсе: так оно пропадает и из их списков на диске, и
+// прямые соединения с ним рвутся (mesh: peerCache.setList → p2p.forget).
 func (s *server) peersLocked(n *network, me *device) []peer {
 	out := make([]peer, 0, len(n.Devices)+len(s.relayRecs)+1)
 	for _, d := range n.Devices {
-		if d != me && !s.policy.visible(me.User, d.User) {
+		if d != me && (me.blocked() || d.blocked() || !s.policy.visible(me.User, d.User)) {
 			continue
 		}
 		p := peer{ID: peerID(d.ID), Name: d.displayName(), Host: d.Host, IP: d.IP, Online: d.ctrl != nil,
@@ -598,7 +673,7 @@ func (s *server) peersLocked(n *network, me *device) []peer {
 		}
 		out = append(out, p)
 	}
-	if s.policy.visible(me.User, serversGroup) {
+	if !me.blocked() && s.policy.visible(me.User, serversGroup) {
 		out = append(out, s.serverPeersLocked(n)...)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
@@ -852,7 +927,7 @@ func (s *server) control(conn net.Conn, m msg) {
 			writeMsg(conn, msg{Op: "error", Error: "кончились адреса"})
 			return
 		}
-		d = &device{ID: m.Device}
+		d = &device{ID: m.Device, Pending: n.Approval}
 		n.Devices[m.Device] = d
 		n.EmptySince = 0
 		newDevice = true
@@ -889,10 +964,18 @@ func (s *server) control(conn net.Conn, m msg) {
 	d.ctrl = c
 	c.send(msg{Op: "welcome", V: protoVersion, IP: d.IP, Host: d.Host, Since: d.Since,
 		Alias: d.Alias, AliasT: d.AliasT, Peers: s.peersLocked(n, d), Stun: s.stunPorts,
-		Server: s.infoLocked(), Servers: s.self.Known})
+		Server: s.infoLocked(), Servers: s.self.Known, Hold: d.hold()})
+	if o := s.exitDueLocked(d); o != nil {
+		// Панель задала цепочку, пока устройства не было, — или оно её ещё
+		// не применило: отдать снова (устройство само решит, новее ли она).
+		c.send(msg{Op: "exit", Exit: o})
+	}
 	s.broadcastLocked(n)
 	if newDevice {
 		s.emitLocked(event{Type: "new-device", Net: id, Device: d.ID, Text: d.displayName()})
+		if d.Pending {
+			s.emitLocked(event{Type: "pending", Net: id, Device: d.ID, Text: d.displayName()})
+		}
 	}
 	s.emitLocked(event{Type: "connect", Net: id, Device: d.ID, Text: d.displayName()})
 	s.mu.Unlock()
@@ -911,6 +994,10 @@ func (s *server) control(conn net.Conn, m msg) {
 	}, func(in msg) {
 		if in.Op == "self" || in.Op == "on" {
 			s.selfMessage(id, n, d, c, in)
+			return
+		}
+		if in.Op == "profiles" {
+			s.profilesMessage(d, c, in)
 			return
 		}
 		if in.Op == "p2p" || in.Op == "p2pstat" {
@@ -1112,6 +1199,12 @@ func (s *server) dial(conn net.Conn, m msg) {
 		fail("это устройство подключено под другим пользователем")
 		return
 	}
+	if from.blocked() {
+		s.emitLocked(event{Type: "denied", Net: id, Device: from.ID, Peer: m.To, Port: m.Port, Text: from.hold()})
+		s.mu.Unlock()
+		fail(holdText(from.hold()))
+		return
+	}
 	if ip, ok := s.serverTargetLocked(n, m.To); ok {
 		if !s.policy.allowed(user, serversGroup, m.Port) {
 			s.emitLocked(event{Type: "denied", Net: id, Device: from.ID, Peer: m.To, Port: m.Port, Text: "server"})
@@ -1129,7 +1222,7 @@ func (s *server) dial(conn net.Conn, m msg) {
 			break
 		}
 	}
-	if target == nil || !s.policy.visible(user, target.User) {
+	if target == nil || target.blocked() || !s.policy.visible(user, target.User) {
 		s.mu.Unlock()
 		fail("нет такого устройства в сети")
 		return
@@ -1191,6 +1284,21 @@ func (s *server) dial(conn net.Conn, m msg) {
 		return
 	}
 	peerConn := got.conn
+	// Пока ждали ответа, одного из двух могли заморозить.
+	s.mu.Lock()
+	frozen := from.blocked() || target.blocked()
+	if !frozen {
+		s.trackLocked(from, conn)
+		s.trackLocked(target, peerConn)
+	}
+	s.mu.Unlock()
+	if frozen {
+		peerConn.Close()
+		fail("нет такого устройства в сети")
+		return
+	}
+	defer s.untrack(from, conn)
+	defer s.untrack(target, peerConn)
 	if err := writeMsg(conn, msg{Op: "connected"}); err != nil {
 		conn.Close()
 		peerConn.Close()
@@ -1295,6 +1403,12 @@ type adminDevice struct {
 	ActiveCalls int64        `json:"activeCalls"`
 	NAT         *natInfo     `json:"nat,omitempty"`
 	Direct      []directLink `json:"direct,omitempty"`
+	// ТЗ 16: ждёт одобрения, заморожено, серверы устройства с их цепочками
+	// и что последним задала панель этого сервера.
+	Pending  bool       `json:"pending,omitempty"`
+	Frozen   bool       `json:"frozen,omitempty"`
+	Profiles []profRef  `json:"profiles,omitempty"`
+	ExitSet  *exitOrder `json:"exitSet,omitempty"`
 }
 
 type adminNetwork struct {
@@ -1302,6 +1416,7 @@ type adminNetwork struct {
 	Name       string        `json:"name"`
 	Created    int64         `json:"created"`
 	EmptySince int64         `json:"emptySince"` // 0 — в сети есть устройства
+	Approval   bool          `json:"approval,omitempty"`
 	Devices    []adminDevice `json:"devices"`
 }
 
@@ -1372,7 +1487,7 @@ func (s *server) adminState() adminState {
 	defer s.mu.Unlock()
 	st := adminState{Version: version, StartedAt: s.started.Unix(), Networks: []adminNetwork{}}
 	for id, n := range s.nets {
-		an := adminNetwork{ID: id, Name: n.Name, Created: n.Created, EmptySince: n.EmptySince}
+		an := adminNetwork{ID: id, Name: n.Name, Created: n.Created, EmptySince: n.EmptySince, Approval: n.Approval}
 		for _, d := range n.Devices {
 			ad := adminDevice{
 				ID: d.ID, Name: d.Name, Alias: d.Alias, Display: d.displayName(),
@@ -1385,6 +1500,10 @@ func (s *server) adminState() adminState {
 				BytesUp:   d.BytesUp + d.up.Load(),
 				BytesDown: d.BytesDown + d.down.Load(),
 				Quality:   "unknown",
+				Pending:   d.Pending,
+				Frozen:    d.Frozen,
+				Profiles:  d.Profiles,
+				ExitSet:   d.ExitSet,
 			}
 			if d.ctrl != nil {
 				ad.ConnectedAt = unixOrZero(d.connectedAt)
@@ -1680,7 +1799,15 @@ func (s *server) check(netID, from, to string, port int) (checkResult, error) {
 		return checkResult{Rule: -1, Reason: "unknown device"}, nil
 	}
 	res := checkResult{Rule: -1, Visible: s.policy.visible(fu, tu)}
+	held := ""
+	for _, id := range []string{from, to} {
+		if d := n.Devices[id]; d != nil && held == "" {
+			held = d.hold()
+		}
+	}
 	switch {
+	case held != "":
+		res.Reason, res.Visible = held, false
 	case fromServer:
 		res.Reason = "server cannot initiate"
 	case !s.policy.Enabled:
@@ -1722,6 +1849,11 @@ func (s *server) adminHandler() http.Handler {
 		// Для /v1/self (адрес сервера) и /v1/known.
 		IP      string     `json:"ip"`
 		Servers []serverAd `json:"servers"`
+		// Для /v1/net/approval и /v1/freeze — включить или выключить; для
+		// /v1/exit — цепочка выхода (ТЗ 16).
+		On    bool     `json:"on"`
+		Entry string   `json:"entry"`
+		Via   []string `json:"via"`
 	}
 	decode := func(r *http.Request) (req, error) {
 		var q req
@@ -1818,6 +1950,35 @@ func (s *server) adminHandler() http.Handler {
 			res, err = s.check(q.Net, q.From, q.To, q.Port)
 		}
 		reply(w, res, err)
+	})
+	mux.HandleFunc("/v1/net/approval", func(w http.ResponseWriter, r *http.Request) {
+		q, err := decode(r)
+		if err == nil {
+			err = s.setApproval(q.Net, q.On)
+		}
+		reply(w, map[string]bool{"ok": true}, err)
+	})
+	mux.HandleFunc("/v1/approve", func(w http.ResponseWriter, r *http.Request) {
+		q, err := decode(r)
+		if err == nil {
+			err = s.approve(q.Net, q.Device)
+		}
+		reply(w, map[string]bool{"ok": true}, err)
+	})
+	mux.HandleFunc("/v1/freeze", func(w http.ResponseWriter, r *http.Request) {
+		q, err := decode(r)
+		if err == nil {
+			err = s.freeze(q.Net, q.Device, q.On)
+		}
+		reply(w, map[string]bool{"ok": true}, err)
+	})
+	mux.HandleFunc("/v1/exit", func(w http.ResponseWriter, r *http.Request) {
+		q, err := decode(r)
+		var o *exitOrder
+		if err == nil {
+			o, err = s.setExit(q.Net, q.Device, q.Entry, q.Via)
+		}
+		reply(w, map[string]any{"ok": true, "exit": o}, err)
 	})
 	mux.HandleFunc("/v1/forget", func(w http.ResponseWriter, r *http.Request) {
 		q, err := decode(r)
@@ -2205,6 +2366,19 @@ func (s *server) waitCall(callID string, cl *call) (net.Conn, string) {
 
 // serveCall сообщает вызывающему, что соединение есть, и перекачивает данные.
 func (s *server) serveCall(conn, peerConn net.Conn, from *device) {
+	s.mu.Lock()
+	frozen := from.blocked()
+	if !frozen {
+		s.trackLocked(from, conn)
+	}
+	s.mu.Unlock()
+	if frozen {
+		writeMsg(conn, msg{Op: "error", Error: holdText(from.hold())})
+		conn.Close()
+		peerConn.Close()
+		return
+	}
+	defer s.untrack(from, conn)
 	if err := writeMsg(conn, msg{Op: "connected"}); err != nil {
 		conn.Close()
 		peerConn.Close()
@@ -2335,6 +2509,16 @@ func outranks(aSince int64, aID string, bSince int64, bID string) bool {
 	return aID < bID
 }
 
+// wins — устройство d (держит адрес с since) сильнее o в споре за адрес
+// или имя. Ждущее одобрения не отнимает ни адрес, ни имя у одобренного:
+// иначе любой, у кого есть ключ сети, мог бы заранее выбивать чужие адреса.
+func wins(d *device, since int64, o *device) bool {
+	if d.Pending != o.Pending {
+		return !d.Pending
+	}
+	return outranks(since, d.ID, sinceOf(o), o.ID)
+}
+
 // claimLocked решает адрес и имя устройства d по тому, что оно назвало
 // само (ip, host, since; у старого клиента всё пустое). Под s.mu.
 func (s *server) claimLocked(nid string, n *network, d *device, ip, host string, since int64) {
@@ -2348,7 +2532,7 @@ func (s *server) claimLocked(nid string, n *network, d *device, ip, host string,
 		switch {
 		case holder == nil:
 			d.IP, d.Since = ip, since
-		case outranks(since, d.ID, sinceOf(holder), holder.ID):
+		case wins(d, since, holder):
 			d.IP, d.Since = ip, since
 			s.readdressLocked(nid, n, holder)
 		default:
@@ -2403,7 +2587,7 @@ func (s *server) hostLocked(nid string, n *network, d *device, claim string) {
 			d.Host = c
 			return
 		}
-		if outranks(sinceOf(d), d.ID, sinceOf(o), o.ID) {
+		if wins(d, sinceOf(d), o) {
 			d.Host = c
 			o.Host = ""
 			s.hostLocked(nid, n, o, "")
@@ -2569,6 +2753,292 @@ func (s *server) setSelfIP(ip string) error {
 	return nil
 }
 
+// ---------- одобрение и заморозка (ТЗ 16) ----------
+//
+// «Новые устройства — после одобрения» — настройка сети: устройство, которое
+// подключилось впервые (его нет в списке сети), ждёт (Pending), пока его не
+// одобрят в панели. «Заморозить» — то же для уже знакомого: адрес и имя
+// остаются, но пока не разморозят, устройство никуда не звонит и ему никто
+// не звонит, а прямые соединения с ним рвутся.
+//
+// Как: ждущее и замороженное устройство видит в списке только себя, а в
+// списках остальных его нет. Новые клиенты держат прямые соединения только
+// с устройствами из списка и без сервера пускают только тех, кто в нём есть
+// (mesh/store.go), — поэтому, получив список, они рвут прямую связь с ним и
+// дальше не пускают его и в одной локальной сети. Своё соединение с
+// сервером устройство не теряет: так оно узнаёт, что ждёт или заморожено, а
+// панель видит его на связи. Идущие через сервер соединения заморозка рвёт.
+//
+// У каждого сервера — своё, как правила доступа: права не приезжают с
+// устройств. Одобрили на одном сервере и не на другом — через второй
+// устройство никого не видит; заморозили на одном — через другой общий
+// сервер оно по-прежнему ходит (действует самое разрешающее). Панель об этом
+// пишет. Без сервера правила не проверяет никто: устройство, которое
+// заморозили, пока какое-то другое было вне связи, это другое пустит
+// напрямую, пока само не свяжется с сервером и не получит новый список.
+//
+// Ждущее устройство не отнимает адрес и имя у одобренного (см. wins).
+
+// holdText — отказ устройству, которое ждёт одобрения или заморожено.
+func holdText(hold string) string {
+	if hold == "frozen" {
+		return "это устройство заморожено в панели сервера — соединения с другими устройствами закрыты"
+	}
+	return "это устройство ждёт одобрения в панели сервера — пока его не одобрят, соединения закрыты"
+}
+
+// trackLocked запоминает идущее через сервер соединение устройства. Под s.mu.
+func (s *server) trackLocked(d *device, c net.Conn) {
+	if d.streams == nil {
+		d.streams = map[net.Conn]bool{}
+	}
+	d.streams[c] = true
+}
+
+func (s *server) untrack(d *device, c net.Conn) {
+	s.mu.Lock()
+	delete(d.streams, c)
+	s.mu.Unlock()
+}
+
+// deviceLocked — сеть и устройство по id. Под s.mu.
+func (s *server) deviceLocked(netID, devID string) (*network, *device, error) {
+	n := s.nets[netID]
+	if n == nil {
+		return nil, nil, errors.New("нет такой сети")
+	}
+	d := n.Devices[devID]
+	if d == nil {
+		return nil, nil, errors.New("нет такого устройства")
+	}
+	return n, d, nil
+}
+
+// holdChangedLocked рассказывает устройству и остальным, что его одобрили,
+// заморозили или разморозили; заморозка рвёт его соединения через сервер.
+// Под s.mu.
+func (s *server) holdChangedLocked(n *network, d *device) {
+	if d.ctrl != nil {
+		d.ctrl.send(msg{Op: "hold", Hold: d.hold()})
+	}
+	if d.blocked() {
+		for c := range d.streams {
+			c.Close()
+		}
+	}
+	s.broadcastLocked(n)
+	s.markDirty()
+}
+
+// setApproval включает и выключает «Новые устройства — после одобрения».
+// Выключение не одобряет тех, кто уже ждёт: их одобряют или убирают руками.
+func (s *server) setApproval(netID string, on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := s.nets[netID]
+	if n == nil {
+		return errors.New("нет такой сети")
+	}
+	if n.Approval == on {
+		return nil
+	}
+	n.Approval = on
+	text := "off"
+	if on {
+		text = "on"
+	}
+	s.emitLocked(event{Type: "approval", Net: netID, Text: text})
+	s.markDirty()
+	return nil
+}
+
+// approve пускает ждущее устройство в сеть. Отклонить — «Убрать» (forget).
+func (s *server) approve(netID, devID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n, d, err := s.deviceLocked(netID, devID)
+	if err != nil {
+		return err
+	}
+	if !d.Pending {
+		return nil
+	}
+	d.Pending = false
+	s.emitLocked(event{Type: "approve", Net: netID, Device: devID, Text: d.displayName()})
+	s.holdChangedLocked(n, d)
+	return nil
+}
+
+// freeze замораживает (on) или размораживает устройство.
+func (s *server) freeze(netID, devID string, on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n, d, err := s.deviceLocked(netID, devID)
+	if err != nil {
+		return err
+	}
+	if d.Frozen == on {
+		return nil
+	}
+	d.Frozen = on
+	typ := "unfreeze"
+	if on {
+		typ = "freeze"
+	}
+	s.emitLocked(event{Type: typ, Net: netID, Device: devID, Text: d.displayName()})
+	s.holdChangedLocked(n, d)
+	return nil
+}
+
+// ---------- цепочка выхода из панели (ТЗ 16) ----------
+//
+// Панель задаёт устройству цепочку выхода: войти через сервер Entry и выйти
+// в интернет через Via (до двух звеньев). Устройство применяет её так, как
+// если бы человек сам выставил «Выход через» в профиле Entry, — и может её
+// поменять: панель — подсказка, а не замок.
+//
+// Сервер в цепочке называется ключом «адрес:порт» SSH, как в профиле. Id
+// профилей у каждого устройства свои, а id meshd есть только у серверов с
+// сетью устройств — звеном же выхода бывает любой SSH-сервер. Тот же ключ
+// (адрес, порт) несут цепочки в файлах обмена (ТЗ 8).
+//
+// Кто новее — тот и прав, как с именем из панели: у цепочки есть время T.
+// Устройство применяет приказ панели, только если он новее цепочки его
+// профиля, и рассказывает всем своим серверам, что вышло (op profiles), —
+// так и панели других серверов видят свежее. Время берётся не меньше
+// прошлого+1 — и здесь, и на устройстве, — чтобы правка после чужой
+// побеждала её даже при сбитых часах.
+
+const maxProfiles = 16
+
+// validServerKey — «адрес:порт» из протокола или панели.
+func validServerKey(k string) bool {
+	if k == "" || len(k) > 80 || strings.ContainsAny(k, " /@\\\t\n") {
+		return false
+	}
+	host, port, err := net.SplitHostPort(k)
+	if err != nil || host == "" {
+		return false
+	}
+	p, err := atoiStrict(port)
+	return err == nil && p > 0 && p <= 65535
+}
+
+// profileOf — что устройство рассказало о своём профиле с ключом k.
+func profileOf(d *device, k string) (profRef, bool) {
+	for _, p := range d.Profiles {
+		if p.Key == k {
+			return p, true
+		}
+	}
+	return profRef{}, false
+}
+
+// exitDueLocked — цепочка панели, которую устройство ещё не применило (или
+// nil). Под s.mu.
+func (s *server) exitDueLocked(d *device) *exitOrder {
+	o := d.ExitSet
+	if o == nil {
+		return nil
+	}
+	if p, ok := profileOf(d, o.Entry); ok && p.T >= o.T {
+		return nil // применило это или задало своё позже
+	}
+	cp := *o
+	return &cp
+}
+
+// setExit — панель задаёт устройству цепочку выхода (via пусто — без неё).
+func (s *server) setExit(netID, devID, entry string, via []string) (*exitOrder, error) {
+	entry = strings.ToLower(strings.TrimSpace(entry))
+	if !validServerKey(entry) {
+		return nil, errors.New("неверный сервер входа: нужно «адрес:порт»")
+	}
+	if len(via) > 2 {
+		return nil, errors.New("в цепочке может быть не больше двух серверов после входа")
+	}
+	seen := map[string]bool{entry: true}
+	clean := []string{}
+	for _, v := range via {
+		v = strings.ToLower(strings.TrimSpace(v))
+		if !validServerKey(v) {
+			return nil, errors.New("неверный сервер в цепочке: нужно «адрес:порт»")
+		}
+		if seen[v] {
+			return nil, errors.New("один сервер дважды в цепочке")
+		}
+		seen[v] = true
+		clean = append(clean, v)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, d, err := s.deviceLocked(netID, devID)
+	if err != nil {
+		return nil, err
+	}
+	if len(d.Profiles) == 0 {
+		return nil, errors.New("устройство не рассказало о своих серверах — нужна новая версия программы на нём")
+	}
+	cur, ok := profileOf(d, entry)
+	if !ok {
+		return nil, errors.New("у устройства нет профиля сервера " + entry)
+	}
+	t := s.now().Unix()
+	if cur.T >= t {
+		t = cur.T + 1
+	}
+	if d.ExitSet != nil && d.ExitSet.T >= t {
+		t = d.ExitSet.T + 1
+	}
+	o := &exitOrder{Entry: entry, Via: clean, T: t, By: s.selfNameLocked(), ByID: s.self.ID}
+	d.ExitSet = o
+	text := entry
+	for _, v := range clean {
+		text += " → " + v
+	}
+	if len(clean) == 0 {
+		text += " (без цепочки)"
+	}
+	s.emitLocked(event{Type: "exit", Net: netID, Device: devID, Text: text})
+	if d.ctrl != nil {
+		cp := *o
+		d.ctrl.send(msg{Op: "exit", Exit: &cp})
+	}
+	s.markDirty()
+	cp := *o
+	return &cp, nil
+}
+
+// profilesMessage — устройство рассказало о своих серверах и их цепочках.
+func (s *server) profilesMessage(d *device, c *ctrlConn, in msg) {
+	var out []profRef
+	for _, p := range in.Profiles {
+		p.Key = strings.ToLower(clip(p.Key))
+		if !validServerKey(p.Key) || len(out) >= maxProfiles {
+			continue
+		}
+		p.Name, p.By = clip(p.Name), clip(p.By)
+		var via []string
+		for _, v := range p.Via {
+			// "" — звено, которого на устройстве уже нет («удалённый сервер»).
+			if v = strings.ToLower(clip(v)); len(via) < 2 && (v == "" || validServerKey(v)) {
+				via = append(via, v)
+			}
+		}
+		p.Via = via
+		if p.T < 0 {
+			p.T = 0
+		}
+		out = append(out, p)
+	}
+	s.mu.Lock()
+	if d.ctrl == c {
+		d.Profiles = out
+	}
+	s.mu.Unlock()
+	s.markDirty()
+}
+
 // ---------- прямые соединения (p2p) ----------
 //
 // Устройства пробуют соединяться друг с другом напрямую, минуя сервер. Сам
@@ -2618,6 +3088,9 @@ func (s *server) p2pMessage(n *network, d *device, c *ctrlConn, in msg) {
 	if target == nil || target.ctrl == nil || target == d || len(in.Call) > 64 || len(in.FP) > 128 {
 		return
 	}
+	if d.blocked() || target.blocked() {
+		return // ждёт одобрения или заморожено: и напрямую нельзя
+	}
 	// По прямому соединению устройства ходят друг к другу на любые порты и в
 	// обе стороны, и сервер этого уже не видит. Поэтому сводим их напрямую,
 	// только если правила и так разрешают всё в обе стороны; иначе
@@ -2645,7 +3118,7 @@ const echoPerMinute = 240
 func (s *server) echoMessage(n *network, d *device, c *ctrlConn, in msg) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if d.ctrl != c || len(in.Call) > 64 {
+	if d.ctrl != c || len(in.Call) > 64 || d.blocked() {
 		return
 	}
 	now := time.Now().Unix() / 60
@@ -2667,7 +3140,7 @@ func (s *server) echoMessage(n *network, d *device, c *ctrlConn, in msg) {
 		}
 	}
 	for _, t := range n.Devices {
-		if t.IP == in.To && t != d && t.ctrl != nil && s.policy.visible(d.User, t.User) {
+		if t.IP == in.To && t != d && t.ctrl != nil && !t.blocked() && s.policy.visible(d.User, t.User) {
 			t.ctrl.send(msg{Op: in.Op, From: d.IP, Call: in.Call})
 			return
 		}

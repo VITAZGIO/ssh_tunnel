@@ -79,6 +79,36 @@ type Config struct {
 	// Права — как у остальных настроек программы (0600/0700). Пусто — всё
 	// только в памяти: без сервера живут лишь уже открытые прямые соединения.
 	StateDir string
+
+	// OnExit получает цепочку выхода, которую задала панель сервера (ТЗ 16):
+	// применить её или нет (новее ли она), решает хозяин — приложение. Зовётся
+	// в своей горутине. nil — цепочки из панели не принимаются.
+	OnExit func(ExitOrder)
+}
+
+// ProfileRef — сервер, для которого у устройства есть профиль, как его видят
+// панели серверов (ТЗ 16): ключ «адрес:порт» SSH (id профилей у каждого
+// устройства свои), имя, подключено ли сейчас через него и его цепочка
+// выхода — ключи звеньев ("" — звена на устройстве уже нет), когда её
+// задали и какая панель (пусто — человек на самом устройстве).
+type ProfileRef struct {
+	Key    string   `json:"k"`
+	Name   string   `json:"n,omitempty"`
+	Active bool     `json:"a,omitempty"`
+	Via    []string `json:"v,omitempty"`
+	T      int64    `json:"t,omitempty"`
+	By     string   `json:"b,omitempty"`
+}
+
+// ExitOrder — цепочка выхода из панели сервера: войти через Entry и выйти
+// через Via (пусто — без цепочки). T — когда задали, By/ByID — сервер, чья
+// панель задала.
+type ExitOrder struct {
+	Entry string   `json:"entry"`
+	Via   []string `json:"via,omitempty"`
+	T     int64    `json:"t"`
+	By    string   `json:"by,omitempty"`
+	ByID  string   `json:"byId,omitempty"`
 }
 
 // NewKey придумывает ключ новой сети.
@@ -132,6 +162,9 @@ type ServerStatus struct {
 	// Primary — сервер туннеля; остальные — лёгкие соединения только для
 	// сети устройств.
 	Primary bool `json:"primary,omitempty"`
+	// Hold — на этом сервере устройство ждёт одобрения ("pending") или
+	// заморожено ("frozen"); тогда через него не видно никого (ТЗ 16).
+	Hold string `json:"hold,omitempty"`
 }
 
 // Status — то, что показывается человеку.
@@ -202,6 +235,8 @@ type Client struct {
 	alias    string
 	aliasT   int64
 	stunLink *srvLink // чей STUN сейчас у прямых соединений
+	// profiles — серверы устройства и их цепочки для панелей (SetProfiles).
+	profiles []ProfileRef
 	// helloMu — по одному входу за раз: «кто ты» и hello двух соединений
 	// не должны перемешаться, иначе два пути к одному meshd выбьют друг
 	// друга раньше, чем станет понятно, что это один сервер.
@@ -228,6 +263,8 @@ type srvLink struct {
 	ads      []wireAd
 	since    time.Time // когда соединение поднялось
 	sentOn   string    // последний отчёт op on этому серверу
+	sentProf string    // последний отчёт op profiles этому серверу
+	hold     string    // ждёт одобрения или заморожено на этом сервере
 }
 
 // New готовит клиента. dial — путь к серверу туннеля (основной); другие
@@ -333,6 +370,11 @@ type wire struct {
 	Server  *wireServer  `json:"server,omitempty"`
 	Servers []wireAd     `json:"servers,omitempty"`
 	On      []wireServer `json:"on,omitempty"`
+
+	// Профиль устройства в панели (ТЗ 16), см. cmd/meshd.
+	Hold     string       `json:"hold,omitempty"`
+	Profiles []ProfileRef `json:"profiles,omitempty"`
+	Exit     *ExitOrder   `json:"exit,omitempty"`
 }
 
 type wirePeer struct {
@@ -728,6 +770,48 @@ func (c *Client) reportOn() {
 	}
 }
 
+// maxProfilesLine — предел строки op profiles: meshd читает строку не
+// длиннее 4096 байт и рвёт соединение, если она длиннее.
+const maxProfilesLine = 3500
+
+// SetProfiles — серверы, для которых у устройства есть профиль, и их цепочки
+// выхода (ТЗ 16): по ним панель сервера предлагает цепочку. Каждому серверу
+// отчёт уходит, только когда он для него изменился; при входе — заново.
+func (c *Client) SetProfiles(list []ProfileRef) {
+	list = append([]ProfileRef(nil), list...)
+	for len(list) > 0 {
+		b, _ := json.Marshal(wire{Op: "profiles", Profiles: list, V: protoVersion})
+		if len(b) <= maxProfilesLine {
+			break
+		}
+		list = list[:len(list)-1] // лишние профили не помещаются — без них
+	}
+	c.mu.Lock()
+	c.profiles = list
+	c.mu.Unlock()
+	c.reportProfiles()
+}
+
+// reportProfiles отдаёт серверам свежий отчёт op profiles. Старый meshd его
+// пропускает.
+func (c *Client) reportProfiles() {
+	c.mu.Lock()
+	b, _ := json.Marshal(c.profiles)
+	key := string(b)
+	m := wire{Op: "profiles", Profiles: c.profiles}
+	var targets []func(wire) error
+	for _, l := range c.links {
+		if l.ctrl != nil && l.sentProf != key && len(c.profiles) > 0 {
+			l.sentProf = key
+			targets = append(targets, l.ctrl)
+		}
+	}
+	c.mu.Unlock()
+	for _, f := range targets {
+		f(m)
+	}
+}
+
 // saveSelf — адрес, давность и имя из панели в кэш на диске.
 func (c *Client) saveSelf() {
 	c.mu.Lock()
@@ -813,6 +897,8 @@ func (c *Client) session(ctx context.Context, l *srvLink) error {
 	c.status.Self.Online = true
 	l.ctrl, l.info, l.state, l.err, l.since = ctrl, info, "online", "", time.Now()
 	l.sentOn = "" // meshd забывает прежний отчёт при каждом hello
+	l.sentProf = ""
+	l.hold = welcome.Hold
 	l.ads = welcome.Servers
 	firstOnline := true
 	for _, o := range c.links {
@@ -850,6 +936,10 @@ func (c *Client) session(ctx context.Context, l *srvLink) error {
 		c.saveSelf()
 	}
 	c.reportOn()
+	c.reportProfiles()
+	if welcome.Hold != "" {
+		c.log("warn", "Сеть устройств, сервер "+name+": "+holdNote(welcome.Hold))
+	}
 
 	// Проверка NAT — один раз на подключение основного сервера: сеть
 	// сменилась — подключение пересобирается, и проверка идёт заново.
@@ -955,6 +1045,23 @@ func (c *Client) session(ctx context.Context, l *srvLink) error {
 			c.mu.Unlock()
 			if changed {
 				c.pushSelf(l)
+			}
+		case "hold":
+			c.mu.Lock()
+			l.hold = m.Hold
+			c.mu.Unlock()
+			if m.Hold != "" {
+				c.log("warn", "Сеть устройств, сервер "+name+": "+holdNote(m.Hold))
+			} else {
+				c.log("info", "Сеть устройств, сервер "+name+": устройство снова в сети")
+			}
+		case "exit":
+			if m.Exit != nil && c.cfg.OnExit != nil {
+				o := *m.Exit
+				if o.By == "" {
+					o.By = name
+				}
+				go c.cfg.OnExit(o)
 			}
 		case "ping":
 			// Сервер меряет задержку: вернуть его метку времени как есть.
@@ -1213,6 +1320,9 @@ func (c *Client) Status() Status {
 	for _, l := range c.links {
 		ss := ServerStatus{Key: l.key, ID: l.info.ID, Name: l.info.Name, IP: l.info.IP,
 			State: l.state, Error: l.err, Primary: l.primary}
+		if l.ctrl != nil {
+			ss.Hold = l.hold
+		}
 		st.Servers = append(st.Servers, ss)
 		seen[strings.ToLower(l.key)], seen[strings.ToLower(l.via)] = true, true
 	}
@@ -1248,6 +1358,14 @@ func (c *Client) Status() Status {
 		st.State = "local"
 	}
 	return st
+}
+
+// holdNote — что сказать человеку, если сервер его не пускает (ТЗ 16).
+func holdNote(hold string) string {
+	if hold == "frozen" {
+		return "устройство заморожено в панели — через этот сервер соединения с другими устройствами закрыты"
+	}
+	return "устройство ждёт одобрения в панели — пока его не одобрят, через этот сервер других устройств не видно"
 }
 
 // PingMatch — отвечает ли за ping на этот адрес сеть устройств.

@@ -41,6 +41,7 @@ func (s *Server) meshRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/mesh/join", s.requireAuth(s.withMesh(s.handleMeshJoin)))
 	mux.HandleFunc("/api/mesh/serveraccess", s.requireAuth(s.withMesh(s.handleMeshServerAccess)))
 	mux.HandleFunc("/api/mesh/known", s.requireAuth(s.withMesh(s.handleMeshKnown)))
+	s.deviceRoutes(mux)
 }
 
 func (s *Server) withMesh(next http.HandlerFunc) http.HandlerFunc {

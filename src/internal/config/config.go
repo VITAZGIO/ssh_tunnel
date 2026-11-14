@@ -7,6 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -117,25 +120,137 @@ type Profile struct {
 	// у серверов из списка не действуют — действует цепочка того профиля,
 	// к которому подключаемся.
 	ExitVia []string `json:"exitVia,omitempty"`
+	// ExitT — когда задали цепочку (unix); ExitBy — имя сервера, чья панель
+	// её задала (ТЗ 16); пусто — человек на этом устройстве. Правка новее
+	// побеждает: панель — подсказка, а не замок (см. ApplyExitOrder).
+	ExitT  int64  `json:"exitT,omitempty"`
+	ExitBy string `json:"exitBy,omitempty"`
 }
 
 // MaxExitHops — сколько серверов можно поставить в «Выход через».
 const MaxExitHops = 2
 
+// ExitNeedPrefix — звено цепочки из панели, для которого на устройстве нет
+// профиля: в ExitVia лежит "need:<адрес:порт>" вместо id. Туннель с таким
+// звеном не стартует и говорит «нужен профиль сервера …»; появится профиль
+// с этим адресом — звено станет его id само (normalize).
+const ExitNeedPrefix = "need:"
+
+// ServerKey — как сервер профиля называется для других устройств и панелей
+// (ТЗ 16): «адрес:порт» SSH, адрес — маленькими буквами. Id профиля у
+// каждого устройства свой, а этот ключ одинаков везде, где есть профиль
+// этого сервера; те же адрес и порт несёт цепочка в файле обмена (ТЗ 8).
+func ServerKey(p Profile) string {
+	host := strings.ToLower(strings.TrimSpace(p.Host))
+	if host == "" {
+		return ""
+	}
+	port := p.SSHPort
+	if port <= 0 {
+		port = 22
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
+// ProfileByKey — профиль с ключом ServerKey == key (первый по списку: два
+// профиля одного сервера под разными пользователями — редкость).
+func (c Config) ProfileByKey(key string) (Profile, bool) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	for _, p := range c.Profiles {
+		if key != "" && ServerKey(p) == key {
+			return p, true
+		}
+	}
+	return Profile{}, false
+}
+
 // ExitChain — серверы цепочки выхода профиля p по порядку. Профиль, которого
 // больше нет в списке (удалили), возвращается пустым, с одним id и
 // именем-пометкой: туннель с такой цепочкой не стартует — молча укоротить
-// цепочку значило бы выпустить интернет не там, где просили.
+// цепочку значило бы выпустить интернет не там, где просили. Так же звено из
+// панели без профиля (ExitNeedPrefix): имя — «нужен профиль сервера …».
 func (c Config) ExitChain(p Profile) []Profile {
 	var out []Profile
 	for _, id := range p.ExitVia {
 		hop, ok := c.ProfileByID(id)
-		if !ok {
+		if key, need := strings.CutPrefix(id, ExitNeedPrefix); need {
+			hop = Profile{ID: id, Name: "нужен профиль сервера " + key}
+		} else if !ok {
 			hop = Profile{ID: id, Name: "удалённый сервер"}
 		}
 		out = append(out, hop)
 	}
 	return out
+}
+
+// ExitMissing — адреса звеньев цепочки p, для которых нет профиля.
+func (c Config) ExitMissing(p Profile) []string {
+	var out []string
+	for _, id := range p.ExitVia {
+		if key, need := strings.CutPrefix(id, ExitNeedPrefix); need {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
+// ExitOrder — цепочка выхода из панели сервера (ТЗ 16): вход Entry, выход
+// через Via (ключи ServerKey), время T и имя сервера By.
+type ExitOrder struct {
+	Entry string
+	Via   []string
+	T     int64
+	By    string
+}
+
+// ApplyExitOrder применяет цепочку из панели так, как если бы человек сам
+// выставил «Выход через» у профиля Entry, — если она новее того, что там
+// есть (ExitT): старый приказ, пришедший позже нового (другая панель,
+// переподключение), ничего не меняет. Звено без профиля становится
+// ExitNeedPrefix. Возвращает, изменился ли профиль, и что сказать человеку.
+func (c *Config) ApplyExitOrder(o ExitOrder) (changed bool, note string, err error) {
+	entry, ok := c.ProfileByKey(o.Entry)
+	if !ok {
+		return false, "", fmt.Errorf("панель сервера %s задала цепочку для сервера %s, а его профиля на этом устройстве нет", o.By, o.Entry)
+	}
+	if o.T <= entry.ExitT {
+		return false, "", nil
+	}
+	if len(o.Via) > MaxExitHops {
+		return false, "", fmt.Errorf("цепочка из панели длиннее %d серверов", MaxExitHops)
+	}
+	var via, missing []string
+	for _, k := range o.Via {
+		k = strings.ToLower(strings.TrimSpace(k))
+		hop, ok := c.ProfileByKey(k)
+		switch {
+		case k == "":
+			return false, "", errors.New("пустой сервер в цепочке из панели")
+		case ok && hop.ID == entry.ID:
+			return false, "", errors.New("сервер не может выходить в интернет через самого себя")
+		case ok:
+			via = append(via, hop.ID)
+		default:
+			via = append(via, ExitNeedPrefix+k)
+			missing = append(missing, k)
+		}
+	}
+	entry.ExitVia, entry.ExitT, entry.ExitBy = via, o.T, o.By
+	c.SetProfile(entry)
+	if len(missing) > 0 {
+		note = "нужен профиль сервера " + strings.Join(missing, ", ") + " — без него интернет через цепочку не пойдёт"
+	}
+	return true, note, nil
+}
+
+// TouchExit — человек на устройстве сам поменял цепочку профиля p: время
+// правки не меньше прошлого+1, чтобы она побеждала приказ панели, на который
+// отвечает, даже если часы устройства отстают.
+func TouchExit(p *Profile, now int64) {
+	if now <= p.ExitT {
+		now = p.ExitT + 1
+	}
+	p.ExitT, p.ExitBy = now, ""
 }
 
 // Границы тонкой настройки: за ними значения уже вредят, а не помогают.
@@ -689,7 +804,7 @@ func (c *Config) normalize() {
 		c.ActiveProfile = c.Profiles[0].ID
 	}
 	for i := range c.Profiles {
-		c.Profiles[i].ExitVia = cleanExitVia(c.Profiles[i])
+		c.Profiles[i].ExitVia = c.cleanExitVia(c.Profiles[i])
 	}
 	if c.Language != "en" {
 		c.Language = "ru"
@@ -772,11 +887,18 @@ func (p *Profile) normalize(n int) {
 
 // cleanExitVia убирает из «Выход через» пустые id, сам профиль и повторы и
 // обрезает до MaxExitHops. Id удалённых профилей остаются (см. ExitChain).
-func cleanExitVia(p Profile) []string {
+// Звено из панели без профиля (ExitNeedPrefix) становится id профиля, как
+// только профиль с этим адресом появился.
+func (c Config) cleanExitVia(p Profile) []string {
 	var out []string
 	seen := map[string]bool{p.ID: true}
 	for _, id := range p.ExitVia {
 		id = strings.TrimSpace(id)
+		if key, need := strings.CutPrefix(id, ExitNeedPrefix); need {
+			if hop, ok := c.ProfileByKey(key); ok {
+				id = hop.ID
+			}
+		}
 		if id == "" || seen[id] {
 			continue
 		}
@@ -787,4 +909,33 @@ func cleanExitVia(p Profile) []string {
 		}
 	}
 	return out
+}
+
+// StampExitEdits — настройки целиком от экрана (ТЗ 16): у профиля, где
+// человек поменял цепочку выхода, ставится время правки (TouchExit), и
+// панели серверов увидят его значение. Экран открыли до того, как пришла
+// цепочка из панели (его ExitT старше), — такая правка не перебивает
+// свежую цепочку молча: остаётся цепочка панели, note говорит об этом.
+func StampExitEdits(cur Config, next *Config, now int64) (note string) {
+	for i := range next.Profiles {
+		p := &next.Profiles[i]
+		c, ok := cur.ProfileByID(p.ID)
+		if !ok {
+			continue
+		}
+		switch {
+		case strings.Join(p.ExitVia, "\x00") == strings.Join(c.ExitVia, "\x00"):
+			p.ExitT, p.ExitBy = c.ExitT, c.ExitBy
+		case p.ExitT < c.ExitT:
+			p.ExitVia, p.ExitT, p.ExitBy = c.ExitVia, c.ExitT, c.ExitBy
+			who := c.ExitBy
+			if who == "" {
+				who = "другое окно программы"
+			}
+			note = "цепочку выхода у «" + p.Name + "» только что поменял(а) " + who + " — твоя правка цепочки не сохранена, проверь и сохрани ещё раз"
+		default:
+			TouchExit(p, now)
+		}
+	}
+	return note
 }

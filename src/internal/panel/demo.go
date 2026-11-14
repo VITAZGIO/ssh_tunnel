@@ -250,6 +250,7 @@ func (d *demoBackend) seed() {
 		e.Time = unix - int64(len(past)-i)*1700
 		d.add(e)
 	}
+	d.seedDevices()
 	d.lastTick = now
 }
 
@@ -1084,6 +1085,7 @@ func (d *demoBackend) routes() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, meshsvc.Events{Seq: d.seq, Events: out})
 	})
+	d.deviceRoutes(h)
 	h("/api/mesh/check", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Net  string `json:"net"`
@@ -1366,7 +1368,10 @@ func (d *demoBackend) check(netID, from, to string, port int) (meshsvc.CheckResu
 	}
 	p := d.policy()
 	res := meshsvc.CheckResult{Rule: -1, Visible: p.visible(fu, tu)}
+	held := d.heldReason(netID, from, to)
 	switch {
+	case held != "":
+		res.Reason, res.Visible = held, false
 	case fromServer:
 		res.Reason = "server cannot initiate"
 	case !p.Enabled:
@@ -1409,6 +1414,7 @@ func (d *demoBackend) state() MeshState {
 			for i := range c.Devices {
 				c.Devices[i].User = ""
 			}
+			stripDeviceProfile(&c)
 		}
 		st.Networks = append(st.Networks, c)
 	}
