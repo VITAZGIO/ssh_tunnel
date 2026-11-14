@@ -15,6 +15,10 @@
 //	POST /net/delete        {net}                → {"ok":true}  данные сети целиком
 //	POST /folder/access     AccessReq            → {"ok":true}  галочка устройства (ТЗ 18)
 //	POST /folder/migrate    MigrateReq           → {"ok":true}  правило обновления
+//	POST /adblock/set       AdblockConf          → AdblockState  источники и свои записи (ТЗ 15)
+//	POST /adblock/update    {}                   → AdblockState  скачать источники сейчас
+//	POST /sitecheck         SiteReq              → проверка сайта с сервера (probe.ServerResult)
+//	POST /machines/clear    {net}                → {"ok":true}  стереть историю машин сети
 //
 // Ошибки — HTTP 400 {"error":"<текст>"}.
 package nodeapi
@@ -53,6 +57,15 @@ const (
 	PortClipboard = 47837
 	// PortBackup — «Резервные копии» (ТЗ 13): только на сервере.
 	PortBackup = 47838
+	// Порты трёх плагинов ТЗ 15 — только на сервере: устройства присылают
+	// показания машин и читают их историю, берут общий список блокировки
+	// рекламы, просят проверить сайт с сервера.
+	PortMachines  = 47844
+	PortAdblock   = 47845
+	PortSitecheck = 47846
+
+	// DefaultMachinesDays — сколько дней хранить историю машин.
+	DefaultMachinesDays = 30
 
 	// DefaultQuotaMB — сколько места всем плагинам вместе по умолчанию.
 	DefaultQuotaMB = 10 * 1024
@@ -61,7 +74,7 @@ const (
 )
 
 // Ports — порты всех плагинов.
-var Ports = []int{PortFiles, PortMirror, PortClipboard, PortBackup}
+var Ports = []int{PortFiles, PortMirror, PortClipboard, PortBackup, PortMachines, PortAdblock, PortSitecheck}
 
 // Плагины.
 const (
@@ -69,7 +82,55 @@ const (
 	PluginFiles     = "files"
 	PluginClipboard = "clipboard"
 	PluginBackup    = "backup"
+	PluginMachines  = "machines"
+	PluginAdblock   = "adblock"
+	PluginSitecheck = "sitecheck"
 )
+
+// Plugins — все плагины хоста по порядку.
+var Plugins = []string{PluginMirror, PluginFiles, PluginClipboard, PluginBackup, PluginMachines, PluginAdblock, PluginSitecheck}
+
+// PortOf — порт плагина; 0 — нет такого.
+func PortOf(plugin string) int {
+	switch plugin {
+	case PluginFiles:
+		return PortFiles
+	case PluginMirror:
+		return PortMirror
+	case PluginClipboard:
+		return PortClipboard
+	case PluginBackup:
+		return PortBackup
+	case PluginMachines:
+		return PortMachines
+	case PluginAdblock:
+		return PortAdblock
+	case PluginSitecheck:
+		return PortSitecheck
+	}
+	return 0
+}
+
+// On — включён ли плагин в настройках.
+func (c Config) On(plugin string) bool {
+	switch plugin {
+	case PluginMirror:
+		return c.Mirror
+	case PluginFiles:
+		return c.Files
+	case PluginClipboard:
+		return c.Clipboard
+	case PluginBackup:
+		return c.Backup
+	case PluginMachines:
+		return c.Machines
+	case PluginAdblock:
+		return c.Adblock
+	case PluginSitecheck:
+		return c.Sitecheck
+	}
+	return false
+}
 
 // Caller — устройство сети, которое пришло к плагину (ответ meshd на who).
 type Caller struct {
@@ -89,6 +150,12 @@ type Config struct {
 	Clipboard  bool  `json:"clipboard"`
 	Backup     bool  `json:"backup"`
 	QuotaMB    int64 `json:"quotaMB"` // всем плагинам вместе
+	// ТЗ 15: история машин, общий список блокировки, проверка сайта.
+	Machines  bool `json:"machines,omitempty"`
+	Adblock   bool `json:"adblock,omitempty"`
+	Sitecheck bool `json:"sitecheck,omitempty"`
+	// MachinesDays — сколько дней хранить историю машин (0 — стандартно).
+	MachinesDays int `json:"machinesDays,omitempty"`
 }
 
 // ConfigPatch — изменение настроек: nil — не трогать.
@@ -99,6 +166,11 @@ type ConfigPatch struct {
 	Clipboard  *bool  `json:"clipboard,omitempty"`
 	Backup     *bool  `json:"backup,omitempty"`
 	QuotaMB    *int64 `json:"quotaMB,omitempty"`
+
+	Machines     *bool `json:"machines,omitempty"`
+	Adblock      *bool `json:"adblock,omitempty"`
+	Sitecheck    *bool `json:"sitecheck,omitempty"`
+	MachinesDays *int  `json:"machinesDays,omitempty"`
 }
 
 // Folder — зеркальная папка сети на сервере.
@@ -136,6 +208,58 @@ type Network struct {
 	BackupBytes int64       `json:"backupBytes,omitempty"`
 	// LastActive — последнее обращение устройства по плагинам (unix).
 	LastActive map[string]int64 `json:"lastActive,omitempty"`
+	// Machines — история машин сети (ТЗ 15): чья и сколько места.
+	Machines *MachinesNet `json:"machines,omitempty"`
+}
+
+// MachinesNet — история машин одной сети на сервере.
+type MachinesNet struct {
+	Bytes     int64              `json:"bytes"`
+	Oldest    int64              `json:"oldest,omitempty"` // самая старая точка (unix)
+	Reporters []MachinesReporter `json:"reporters"`
+}
+
+// MachinesReporter — устройство, которое присылает показания своих машин.
+type MachinesReporter struct {
+	ID       string   `json:"id"` // PeerID
+	Name     string   `json:"name,omitempty"`
+	Shared   bool     `json:"shared"` // видно всем устройствам сети
+	Last     int64    `json:"last,omitempty"`
+	Machines []string `json:"machines"` // имена машин
+}
+
+// AdblockConf — общий список блокировки рекламы на сервере (ТЗ 15):
+// источники (ссылки http/https) и свои записи панели.
+type AdblockConf struct {
+	Sources []string `json:"sources"`
+	Allow   []string `json:"allow"` // никогда не блокировать (с поддоменами)
+	Deny    []string `json:"deny"`  // блокировать всегда (с поддоменами)
+}
+
+// AdblockSource — как скачался один источник в последний раз.
+type AdblockSource struct {
+	URL   string `json:"url"`
+	Names int    `json:"names"`
+	Error string `json:"error,omitempty"`
+}
+
+// AdblockState — общий список: настройки, последнее обновление, счёт.
+type AdblockState struct {
+	AdblockConf
+	Updated  int64           `json:"updated,omitempty"` // последнее удачное обновление (unix)
+	Checked  int64           `json:"checked,omitempty"` // последняя попытка
+	Names    int             `json:"names"`             // имён в итоговом списке
+	Error    string          `json:"error,omitempty"`
+	Fetched  []AdblockSource `json:"fetched,omitempty"`
+	Version  string          `json:"version,omitempty"` // метка списка (ETag)
+	Devices  int             `json:"devices"`           // сколько устройств забирали список за сутки
+	Updating bool            `json:"updating,omitempty"`
+}
+
+// SiteReq — проверить сайт с сервера.
+type SiteReq struct {
+	Site string `json:"site"`
+	Lang string `json:"lang,omitempty"`
 }
 
 // BackupSet — резервная копия одной папки одного устройства.
@@ -181,6 +305,8 @@ type State struct {
 	Events    []Event   `json:"events"`
 	// Listening — какие плагины сейчас слушают свой порт.
 	Listening map[string]bool `json:"listening"`
+	// Adblock — общий список блокировки (ТЗ 15).
+	Adblock *AdblockState `json:"adblock,omitempty"`
 }
 
 // FolderReq — запросы про зеркальные папки.
@@ -204,6 +330,11 @@ type API interface {
 	DeleteNet(ctx context.Context, net string) error
 	SetFolderAccess(ctx context.Context, r AccessReq) error
 	MigrateAccess(ctx context.Context, r MigrateReq) error
+	// ТЗ 15.
+	SetAdblock(ctx context.Context, c AdblockConf) (AdblockState, error)
+	UpdateAdblock(ctx context.Context) (AdblockState, error)
+	CheckSite(ctx context.Context, r SiteReq) (json.RawMessage, error)
+	ClearMachines(ctx context.Context, net string) error
 }
 
 // AccessReq — дать (On) или забрать у устройства зеркальную папку сети
@@ -327,6 +458,28 @@ func (c *Client) SetFolderAccess(ctx context.Context, r AccessReq) error {
 
 func (c *Client) MigrateAccess(ctx context.Context, r MigrateReq) error {
 	return c.do(ctx, http.MethodPost, "/folder/migrate", r, nil)
+}
+
+func (c *Client) SetAdblock(ctx context.Context, a AdblockConf) (AdblockState, error) {
+	var st AdblockState
+	err := c.do(ctx, http.MethodPost, "/adblock/set", a, &st)
+	return st, err
+}
+
+func (c *Client) UpdateAdblock(ctx context.Context) (AdblockState, error) {
+	var st AdblockState
+	err := c.do(ctx, http.MethodPost, "/adblock/update", struct{}{}, &st)
+	return st, err
+}
+
+func (c *Client) CheckSite(ctx context.Context, r SiteReq) (json.RawMessage, error) {
+	var out json.RawMessage
+	err := c.do(ctx, http.MethodPost, "/sitecheck", r, &out)
+	return out, err
+}
+
+func (c *Client) ClearMachines(ctx context.Context, n string) error {
+	return c.do(ctx, http.MethodPost, "/machines/clear", map[string]string{"net": n}, nil)
 }
 
 // PeerID — постоянный id устройства для прав зеркальных папок (ТЗ 18) по

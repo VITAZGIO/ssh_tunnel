@@ -26,10 +26,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"sshtunnel/internal/backup"
+	"sshtunnel/internal/diag/probe"
 	"sshtunnel/internal/mesh"
 	"sshtunnel/internal/mirror"
 	"sshtunnel/internal/nodeapi"
@@ -430,4 +432,168 @@ func startDeviceID(t *testing.T, addr, key, name, id string) *device {
 		time.Sleep(20 * time.Millisecond)
 	}
 	return d
+}
+
+// ---------- ТЗ 15: машины, общий список блокировки, проверка сайта ----------
+
+// portsFree15 — свободны ли порты трёх плагинов ТЗ 15 (только они нужны
+// этому тесту: на машине разработчика остальные заняты программой).
+func portsFree15(t *testing.T) {
+	t.Helper()
+	for _, p := range []int{nodeapi.PortMachines, nodeapi.PortAdblock, nodeapi.PortSitecheck} {
+		ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(p)))
+		if err != nil {
+			t.Skipf("порт %d занят — сквозной тест ТЗ 15 пропущен", p)
+		}
+		ln.Close()
+	}
+}
+
+func TestСквозьНастоящийMeshdТЗ15(t *testing.T) {
+	if testing.Short() {
+		t.Skip("долгий")
+	}
+	portsFree15(t)
+	serverIP = ""
+	addr := runMeshd(t)
+	src := &fakeSources{data: map[string]string{"https://lists.example/hosts": "0.0.0.0 ads.example.com\n0.0.0.0 track.example.net\n"}}
+	var checked atomic.Int32
+	h, err := New(Options{Dir: t.TempDir(), Meshd: addr, Version: "test", AdFetch: src.fetch,
+		SiteCheck: func(ctx context.Context, site, lang string) (probe.ServerResult, error) {
+			checked.Add(1)
+			if site == "example.test" {
+				// Без выхода в интернет: «открывается» — подделка; всё
+				// остальное — настоящая проверка (отказы — до сети).
+				return probe.ServerResult{Site: site, Host: site, Verdict: "server_ok", Text: probe.ServerPhrase("server_ok", lang),
+					Server: probe.Path{OK: true}}, nil
+			}
+			return probe.CheckFromServer(ctx, site, lang, probe.ServerOptions{})
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	on := true
+	if _, err := h.SetConfig(nodeapi.ConfigPatch{Machines: &on, Adblock: &on, Sitecheck: &on}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(); err != nil {
+		t.Skipf("порты плагинов: %v", err)
+	}
+	t.Cleanup(h.Close)
+	if _, err := h.SetAdblock(nodeapi.AdblockConf{Sources: []string{"https://lists.example/hosts"}, Allow: []string{"ok.example.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	waitAd(t, h)
+
+	key := mesh.NewKey()
+	post := func(d *device, port int, path string, v any) (*http.Response, []byte) {
+		t.Helper()
+		b, _ := json.Marshal(v)
+		resp, err := d.hc.Post(base(port)+path, "application/json", strings.NewReader(string(b)))
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return resp, body
+	}
+
+	// ---------- домашний сервер присылает показания, потом выключается ----------
+	home := startDevice(t, addr, key, "Домашний")
+	for i := 0; i < 3; i++ {
+		resp, body := post(home, nodeapi.PortMachines, "/push", MachinesPush{Shared: true,
+			Machines: []MachinePush{mp("nas", "NAS", float64(20+i))}})
+		if resp.StatusCode != 200 {
+			t.Fatalf("показания: %s %s", resp.Status, body)
+		}
+	}
+	st := h.State()
+	if len(st.Networks) != 1 || st.Networks[0].Machines == nil || len(st.Networks[0].Machines.Reporters) != 1 {
+		t.Fatalf("история на сервере: %+v", st.Networks)
+	}
+	if got := st.Networks[0].Machines.Reporters[0].Name; got != "Домашний" {
+		t.Fatalf("имя читателя должен назвать meshd: %q", got)
+	}
+
+	// Список блокировки — через сеть устройств, с меткой.
+	resp, err := home.hc.Get(base(nodeapi.PortAdblock) + "/list")
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("список: %v %v", err, resp)
+	}
+	etag := resp.Header.Get("ETag")
+	list, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(list), "\nads.example.com\n") || !strings.Contains(string(list), "@@ok.example.com") {
+		t.Fatalf("список с сервера:\n%s", list)
+	}
+	req, _ := http.NewRequest(http.MethodGet, base(nodeapi.PortAdblock)+"/list", nil)
+	req.Header.Set("If-None-Match", etag)
+	if resp, err := home.hc.Do(req); err != nil || resp.StatusCode != http.StatusNotModified {
+		t.Fatalf("тот же список: %v %v", err, resp)
+	} else {
+		resp.Body.Close()
+	}
+	home.stop()
+
+	// ---------- телефон приходит, когда домашнего уже нет ----------
+	phone := startDevice(t, addr, key, "Телефон")
+	resp, err = phone.hc.Get(base(nodeapi.PortMachines) + "/history")
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("история: %v %v", err, resp)
+	}
+	var hist History
+	json.NewDecoder(resp.Body).Decode(&hist)
+	resp.Body.Close()
+	if len(hist.Reporter) != 1 || hist.Reporter[0].Self || hist.Reporter[0].Name != "Домашний" ||
+		len(hist.Reporter[0].Machines) != 1 || len(hist.Reporter[0].Machines[0].T) == 0 {
+		t.Fatalf("телефон видит историю домашнего: %+v", hist)
+	}
+
+	// Проверка сайта с сервера: по делу, отказ локальному, лимит.
+	resp, body := post(phone, nodeapi.PortSitecheck, "/check", nodeapi.SiteReq{Site: "example.test"})
+	var sr probe.ServerResult
+	json.Unmarshal(body, &sr)
+	if resp.StatusCode != 200 || sr.Verdict != "server_ok" {
+		t.Fatalf("проверка: %s %s", resp.Status, body)
+	}
+	resp, body = post(phone, nodeapi.PortSitecheck, "/check", nodeapi.SiteReq{Site: "127.0.0.1"})
+	json.Unmarshal(body, &sr)
+	if resp.StatusCode != 200 || sr.Verdict != "server_refused" {
+		t.Fatalf("локальный адрес: %s %s", resp.Status, body)
+	}
+	limited := false
+	for i := 0; i < siteBurst+2; i++ {
+		if resp, _ := post(phone, nodeapi.PortSitecheck, "/check", nodeapi.SiteReq{Site: "example.test"}); resp.StatusCode == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatal("нет ограничения частоты")
+	}
+
+	// Мимо meshd к порту проверки — без ответа.
+	raw, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(nodeapi.PortSitecheck))
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.WriteString(raw, "POST /check HTTP/1.0\r\nContent-Length: 22\r\n\r\n{\"site\":\"example.test\"}")
+	raw.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if n, _ := raw.Read(make([]byte, 16)); n > 0 {
+		t.Fatal("соединение мимо meshd получило ответ")
+	}
+	raw.Close()
+
+	// Чужая сеть не видит историю машин.
+	other := startDevice(t, addr, mesh.NewKey(), "Чужой")
+	resp, err = other.hc.Get(base(nodeapi.PortMachines) + "/history")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oh History
+	json.NewDecoder(resp.Body).Decode(&oh)
+	resp.Body.Close()
+	if len(oh.Reporter) != 0 {
+		t.Fatalf("чужая сеть видит машины: %+v", oh)
+	}
 }

@@ -121,7 +121,7 @@ func (a *App) SetNetLayer(n NetLayer) {
 	cfg := a.cfg
 	a.mu.Unlock()
 	if ab, ok := n.(AdBlocker); ok {
-		ab.SetAdBlock(cfg)
+		a.attachAdBlock(ab, cfg)
 	}
 	if cl, ok := n.(ConfigLayer); ok {
 		cl.ApplyConfig(cfg)

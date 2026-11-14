@@ -13,6 +13,10 @@
 // устройствам сети» — и другие свои устройства (телефон на работе) видят
 // эти показания по сети устройств (порт SharePort): настроил один раз на
 // домашнем сервере — видно отовсюду.
+//
+// История на сервере (ТЗ 15, server.go): после каждого опроса показания
+// уходят и на серверы сети с плагином «Машины» — там они хранятся сутками,
+// и график не рвётся, пока это устройство выключено.
 package machines
 
 import (
@@ -93,6 +97,7 @@ type Reading struct {
 	Uptime   int64     `json:"uptime,omitempty"`
 	Extra    []Extra   `json:"extra,omitempty"` // ha: датчики
 	Hist     []float64 `json:"hist,omitempty"`  // процессор за последние ~30 мин
+	HistT    []int64   `json:"histT,omitempty"` // когда снята каждая точка Hist (unix)
 	Online   bool      `json:"online"`          // отвечает (пинг или показания)
 	Ping     float64   `json:"ping,omitempty"`  // мс
 }
@@ -108,6 +113,8 @@ type Extra struct {
 type Settings struct {
 	Share         bool `json:"share"`         // показывать свои машины всем устройствам сети
 	AllowShutdown bool `json:"allowShutdown"` // своим устройствам можно выключать это
+	// NoServer — не отправлять показания на серверы сети (ТЗ 15).
+	NoServer bool `json:"noServer,omitempty"`
 }
 
 type conf struct {
@@ -573,12 +580,15 @@ func refresh() {
 			r := readOne(m)
 			mu.Lock()
 			if old := readings[m.ID]; old != nil {
-				r.Hist = old.Hist
+				r.Hist, r.HistT = old.Hist, old.HistT
+			}
+			if len(r.HistT) != len(r.Hist) {
+				r.Hist, r.HistT = nil, nil // со старой версии — без времени
 			}
 			if r.Error == "" && (m.Src == "ssh" || m.Src == "netdata" || m.Src == "self") {
-				r.Hist = append(r.Hist, r.CPU)
+				r.Hist, r.HistT = append(r.Hist, r.CPU), append(r.HistT, r.Time)
 				if len(r.Hist) > 60 {
-					r.Hist = r.Hist[len(r.Hist)-60:]
+					r.Hist, r.HistT = r.Hist[len(r.Hist)-60:], r.HistT[len(r.HistT)-60:]
 				}
 			}
 			readings[m.ID] = &r
@@ -629,6 +639,7 @@ func (m *module) Start() error {
 	stop := m.stop
 	go func() {
 		refresh()
+		pushServers()
 		t := time.NewTicker(30 * time.Second)
 		defer t.Stop()
 		for {
@@ -637,6 +648,7 @@ func (m *module) Start() error {
 				return
 			case <-t.C:
 				refresh()
+				pushServers()
 			}
 		}
 	}()
@@ -671,7 +683,7 @@ func fromNetwork() []map[string]any {
 			name = p.Host
 		}
 		wg.Add(1)
-		go func(ip, name string) {
+		go func(ip, name, id string) {
 			defer wg.Done()
 			c, err := devnet.DialPeer(net.JoinHostPort(ip, strconv.Itoa(SharePort)))
 			if err != nil {
@@ -685,9 +697,9 @@ func fromNetwork() []map[string]any {
 				return
 			}
 			omu.Lock()
-			out = append(out, map[string]any{"device": name, "ip": ip, "machines": ms})
+			out = append(out, map[string]any{"device": name, "ip": ip, "id": id, "machines": ms})
 			omu.Unlock()
-		}(p.IP.String(), name)
+		}(p.IP.String(), name, p.ID)
 	}
 	wg.Wait()
 	sort.Slice(out, func(i, j int) bool { return fmt.Sprint(out[i]["device"]) < fmt.Sprint(out[j]["device"]) })
@@ -714,6 +726,7 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 			Machine
 			Saved   bool     `json:"saved"`
 			Reading *Reading `json:"reading,omitempty"`
+			Series  Series   `json:"series"`
 		}
 		var ms []item
 		for _, m := range c.Machines {
@@ -722,6 +735,10 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 			ms = append(ms, it)
 		}
 		mu.Unlock()
+		hist, srv := fetchHistory()
+		for i := range ms {
+			ms[i].Series = seriesOf(hist, srv, true, "", ms[i].ID, ms[i].Reading)
+		}
 		online := map[string]bool{}
 		type peer struct {
 			IP     string `json:"ip"`
@@ -743,7 +760,29 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		out := map[string]any{"machines": ms, "settings": c.Settings, "peers": ps, "online": online,
 			"os": runtime.GOOS, "canShutdown": runtime.GOOS == "windows" || runtime.GOOS == "linux"}
 		if r.URL.Query().Get("net") != "0" {
-			out["network"] = fromNetwork()
+			net := fromNetwork()
+			for _, d := range net {
+				id, _ := d["id"].(string)
+				list, _ := d["machines"].([]Shared)
+				series := map[string]Series{}
+				for _, m := range list {
+					series[m.ID] = seriesOf(hist, srv, false, id, m.ID, m.Reading)
+				}
+				d["series"] = series
+			}
+			out["network"] = net
+		}
+		// Сервер с историей: имя и ответ последней отправки.
+		srvMu.Lock()
+		var sl []srvState
+		for _, s := range srvSeen {
+			sl = append(sl, *s)
+		}
+		srvMu.Unlock()
+		sort.Slice(sl, func(i, j int) bool { return sl[i].Name < sl[j].Name })
+		out["servers"] = sl
+		if srv != nil {
+			out["historyServer"] = srv.Name
 		}
 		writeJSON(w, out)
 		return

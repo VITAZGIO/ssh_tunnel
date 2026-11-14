@@ -1336,6 +1336,16 @@
             <span data-i18n="plugin_clipboard">Общий буфер</span></label>
           <label class="chk"><input type="checkbox" id="pluginBackup">
             <span data-i18n="plugin_backup">Резервные копии</span><button class="hint" data-hint="hint_plugin_backup">?</button></label>
+          <label class="chk"><input type="checkbox" id="pluginMachines">
+            <span data-i18n="plugin_machines">Машины: история</span><button class="hint" data-hint="hint_plugin_machines">?</button></label>
+          <div class="field" style="margin-left:26px;max-width:260px">
+            <label for="nodeMachDays" data-i18n="node_mach_days">Хранить историю машин (дней)</label>
+            <input type="number" id="nodeMachDays" min="1" max="3650">
+          </div>
+          <label class="chk"><input type="checkbox" id="pluginAdblock">
+            <span data-i18n="plugin_adblock">Блокировка рекламы: общий список</span><button class="hint" data-hint="hint_plugin_adblock">?</button></label>
+          <label class="chk"><input type="checkbox" id="pluginSitecheck">
+            <span data-i18n="plugin_sitecheck">Проверить сайт с сервера</span><button class="hint" data-hint="hint_plugin_sitecheck">?</button></label>
           <div class="field" style="margin-top:10px">
             <label for="nodeQuota"><span data-i18n="node_quota_label">Место на сервере всем плагинам, всего (МБ)</span><button class="hint" data-hint="hint_node_quota">?</button></label>
             <input type="number" id="nodeQuota" min="1" max="16777216">
@@ -1343,6 +1353,44 @@
           <div class="kv"><span class="k" data-i18n="node_used">Занято</span><span class="v" id="nodeUsed">—</span></div>
           <button class="btn" id="nodeConfigSaveBtn" style="margin-top:10px" data-i18n="cap_save">Применить</button>
           <div id="nodeConfigMsg"></div>
+        </div>
+
+        <!-- Общий список блокировки рекламы (ТЗ 15): один на сервер, его
+             забирают устройства всех сетей с плагином блокировки. -->
+        <div class="card span2" id="nodeAdCard" hidden>
+          <h1><span data-i18n="node_ad_title">Общий список блокировки</span><button class="hint" data-hint="hint_node_ad">?</button></h1>
+          <div class="kv"><span class="k" data-i18n="node_ad_names">Имён в списке</span><span class="v" id="nodeAdNames">—</span></div>
+          <div class="kv"><span class="k" data-i18n="node_ad_updated">Обновлён</span><span class="v" id="nodeAdUpdated">—</span></div>
+          <div class="kv"><span class="k" data-i18n="node_ad_devices">Устройств забрали за сутки</span><span class="v" id="nodeAdDevices">—</span></div>
+          <div class="msg err" id="nodeAdErr" hidden></div>
+          <div id="nodeAdFetched"></div>
+          <div class="field" style="margin-top:10px">
+            <label for="nodeAdSources" data-i18n="node_ad_sources">Источники — ссылки на списки (hosts или adblock), по одной в строке</label>
+            <textarea id="nodeAdSources" rows="3" spellcheck="false" style="font-family:var(--mono);font-size:12px"></textarea>
+          </div>
+          <div class="field">
+            <label for="nodeAdDeny" data-i18n="node_ad_deny">Блокировать всегда (свои имена)</label>
+            <textarea id="nodeAdDeny" rows="2" spellcheck="false" style="font-family:var(--mono);font-size:12px"></textarea>
+          </div>
+          <div class="field">
+            <label for="nodeAdAllow" data-i18n="node_ad_allow">Не блокировать никогда (вместе с поддоменами)</label>
+            <textarea id="nodeAdAllow" rows="2" spellcheck="false" style="font-family:var(--mono);font-size:12px"></textarea>
+          </div>
+          <div class="row-inline">
+            <button class="btn" id="nodeAdSaveBtn" data-i18n="node_ad_save">Сохранить</button>
+            <button class="btn ghost" id="nodeAdUpdateBtn" data-i18n="node_ad_update">Обновить сейчас</button>
+          </div>
+        </div>
+
+        <!-- Проверить сайт с сервера (ТЗ 15): то же, что второй столбец на
+             устройстве. -->
+        <div class="card span2" id="nodeSiteCard" hidden>
+          <h1><span data-i18n="node_site_title">Проверить сайт с сервера</span><button class="hint" data-hint="hint_node_site">?</button></h1>
+          <div class="row-inline">
+            <input type="text" id="nodeSiteInput" placeholder="youtube.com" spellcheck="false" autocomplete="off" style="flex:1;min-width:140px">
+            <button class="btn" id="nodeSiteBtn" data-i18n="node_site_check">Проверить</button>
+          </div>
+          <div id="nodeSiteOut" style="margin-top:8px"></div>
         </div>
       </div>
 
@@ -1731,7 +1779,7 @@ const I18N = {
     hint_autostart:'То же, что «systemctl enable ssh_tunnel_panel» в консоли — просто кнопкой.',
 
     nav_plugins:'Плагины',
-    plugins_sub:'Сервер сам становится участником сети устройств: зеркальные папки, общая папка, общий буфер и резервные копии.',
+    plugins_sub:'Сервер сам становится участником сети устройств: зеркальные папки, общая папка, общий буфер, резервные копии, история машин, общий список блокировки и проверка сайтов.',
     hint_plugins_what:'Те же модули, что в программе на устройстве, только работают прямо на сервере — '+
       'своим отдельным процессом без прав root.',
     node_host_title:'Хост плагинов', node_meshd:'Опознание устройств',
@@ -1782,6 +1830,8 @@ const I18N = {
     node_warn_title:'Что мешает плагинам',
     warn_server_access_off:'«Сервер в сети устройств» выключен — устройства не достают до плагинов.',
     warn_ports_blocked:'В портах «Сервера в сети устройств» нет портов плагинов: {ports}.',
+    warn_adblock_no_sources:'Общий список блокировки включён, но в нём нет ни источников, ни своих имён — устройствам раздавать нечего. Добавь источник ниже.',
+    warn_adblock_failed:'Список блокировки не обновился ({detail}) — устройствам раздаётся прежний.',
     warn_access_rules:'Права доступа включены, а у этих устройств нет правила к «@servers» на порты {ports}: {users}. '+
       'Это решение о правах — поправь в «Доступе».',
     warn_secondary:'Это побочный сервер: здесь meshd только пересылает, и узнать, какое устройство пришло, '+
@@ -1797,6 +1847,26 @@ const I18N = {
     node_net_delete:'Удалить данные',
     confirm_net_delete:'Стереть все данные плагинов сети «{n}» (папки, файлы, буфер, резервные копии)? Отменить это будет нельзя.',
     node_last:'Последнее обращение', node_never:'не было',
+    plugin_machines:'Машины: история', plugin_adblock:'Блокировка рекламы: общий список', plugin_sitecheck:'Проверить сайт с сервера',
+    hint_plugin_machines:'Устройства с плагином «Машины» каждые 30 секунд присылают сюда показания своих машин (процессор, память, диск, температура). '+
+      'Сервер хранит их, и график на любом устройстве не рвётся, пока читающее устройство выключено. Пароли и адреса машин остаются на устройствах.',
+    hint_plugin_adblock:'Один список блокировки рекламы на сервере: источники и свои записи — ниже. Устройства с плагином «Блокировка рекламы» '+
+      'забирают его отсюда раз в 15 минут; без связи с сервером у них действует последний полученный список.',
+    hint_plugin_sitecheck:'Устройства могут проверить сайт ещё и из сети сервера — вторая колонка «с сервера» в «Проверить сайт». '+
+      'Только имена в интернете на порту 443, не чаще 5 проверок подряд с устройства; локальные адреса сервер не проверяет.',
+    node_mach_days:'Хранить историю машин (дней)',
+    node_mach_title:'История машин', node_mach_from:'присылает', node_mach_shared:'видно всем устройствам сети', node_mach_private:'видно только ему',
+    node_mach_since:'с', node_mach_clear:'Стереть историю', confirm_mach_clear:'Стереть историю машин сети «{n}» на сервере? Устройства начнут её заново.',
+    node_ad_title:'Общий список блокировки', node_ad_names:'Имён в списке', node_ad_updated:'Обновлён', node_ad_devices:'Устройств забрали за сутки',
+    hint_node_ad:'Один список на сервер для всех сетей. Источники скачиваются раз в сутки; «Блокировать всегда» и «Не блокировать никогда» '+
+      'действуют сразу. Блокирует по-прежнему устройство (своим DNS в режиме VPN) — сервер только хранит и раздаёт список.',
+    node_ad_sources:'Источники — ссылки на списки (hosts или adblock), по одной в строке',
+    node_ad_deny:'Блокировать всегда (свои имена)', node_ad_allow:'Не блокировать никогда (вместе с поддоменами)',
+    node_ad_save:'Сохранить', node_ad_update:'Обновить сейчас', node_ad_updating:'скачиваю источники…', node_ad_saved:'Список сохранён',
+    node_ad_none:'ещё не скачан', node_ad_src_err:'не скачался',
+    node_site_title:'Проверить сайт с сервера', node_site_check:'Проверить', node_site_checking:'Проверяю…',
+    hint_node_site:'Те же шаги, что у плагина на устройстве: DNS → подключение → защищённое соединение → ответ сайта, только из сети сервера.',
+    site_step_dns:'DNS', site_step_tcp:'Подключение', site_step_tls:'Защищённое соединение', site_step_http:'Ответ сайта',
     folder_quota_save:'Сохранить', folder_quota_saved:'Квота сохранена',
     node_backups_title:'Резервные копии',
     backup_versions:'версий', backup_keep:'держать', backup_last:'последняя',
@@ -2117,7 +2187,7 @@ const I18N = {
     hint_autostart:'Same as "systemctl enable ssh_tunnel_panel" in a console — just a button.',
 
     nav_plugins:'Plugins',
-    plugins_sub:'The server itself joins the device network: mirrored folders, a shared folder, shared clipboard and backups.',
+    plugins_sub:'The server itself joins the device network: mirrored folders, a shared folder, shared clipboard, backups, machine history, a shared block list and site checks.',
     hint_plugins_what:'The same modules the desktop app runs, just on the server itself — their own process, '+
       'no root.',
     node_host_title:'Plugin host', node_meshd:'Device identification',
@@ -2168,6 +2238,8 @@ const I18N = {
     node_warn_title:'What blocks the plugins',
     warn_server_access_off:'«Server in the device network» is off — devices cannot reach the plugins.',
     warn_ports_blocked:'The ports of «Server in the device network» do not include the plugin ports: {ports}.',
+    warn_adblock_no_sources:'The shared block list is on but has no sources and no own names — nothing to hand out. Add a source below.',
+    warn_adblock_failed:'The block list did not update ({detail}) — devices get the previous one.',
     warn_access_rules:'Access rules are on, and these devices have no rule to «@servers» on ports {ports}: {users}. '+
       'That is a decision about rights — change it in «Access».',
     warn_secondary:'This is a secondary server: its meshd only forwards and cannot tell which device came, '+
@@ -2183,6 +2255,26 @@ const I18N = {
     node_net_delete:'Delete data',
     confirm_net_delete:'Erase all plugin data of network «{n}» (folders, files, clipboard, backups)? This cannot be undone.',
     node_last:'Last request', node_never:'never',
+    plugin_machines:'Machines: history', plugin_adblock:'Ad blocking: shared list', plugin_sitecheck:'Check a site from the server',
+    hint_plugin_machines:'Devices with the «Machines» plugin send the readings of their machines here every 30 s (CPU, memory, disk, temperature). '+
+      'The server keeps them, so graphs on any device have no holes while the reading device is off. Machine passwords and addresses stay on the devices.',
+    hint_plugin_adblock:'One ad-blocking list on the server: sources and own entries are below. Devices with the «Ad blocking» plugin '+
+      'take it from here every 15 minutes; without the server they keep the last list they got.',
+    hint_plugin_sitecheck:'Devices can also check a site from the server network — the «from the server» column in «Check a site». '+
+      'Only internet names on port 443, at most 5 checks in a row per device; the server does not check local addresses.',
+    node_mach_days:'Keep machine history (days)',
+    node_mach_title:'Machine history', node_mach_from:'sent by', node_mach_shared:'visible to all devices of the network', node_mach_private:'visible only to it',
+    node_mach_since:'since', node_mach_clear:'Erase history', confirm_mach_clear:'Erase the machine history of network «{n}» on the server? Devices will start it again.',
+    node_ad_title:'Shared block list', node_ad_names:'Names in the list', node_ad_updated:'Updated', node_ad_devices:'Devices that took it in a day',
+    hint_node_ad:'One list per server for all networks. Sources are downloaded once a day; «Always block» and «Never block» '+
+      'apply at once. Blocking is still done by the device (its DNS in VPN mode) — the server only keeps and hands out the list.',
+    node_ad_sources:'Sources — links to lists (hosts or adblock), one per line',
+    node_ad_deny:'Always block (own names)', node_ad_allow:'Never block (with subdomains)',
+    node_ad_save:'Save', node_ad_update:'Update now', node_ad_updating:'downloading sources…', node_ad_saved:'List saved',
+    node_ad_none:'not downloaded yet', node_ad_src_err:'failed',
+    node_site_title:'Check a site from the server', node_site_check:'Check', node_site_checking:'Checking…',
+    hint_node_site:'The same steps as the device plugin: DNS → connection → secure connection → site reply, only from the server network.',
+    site_step_dns:'DNS', site_step_tcp:'Connection', site_step_tls:'Secure connection', site_step_http:'Site reply',
     folder_quota_save:'Save', folder_quota_saved:'Quota saved',
     node_backups_title:'Backups',
     backup_versions:'versions', backup_keep:'keep', backup_last:'last',
@@ -4721,8 +4813,8 @@ function renderNodeWarnings(ws){
   card.hidden = !ws || !ws.length;
   box.innerHTML = '';
   (ws || []).forEach(w => {
-    const m = el('div', 'msg ' + (w.code === 'access_rules' || w.code === 'no_mesh' ? 'warn' : 'err'),
-      t('warn_' + w.code).replace('{ports}', w.ports || '').replace('{users}', (w.users || []).join(', ')));
+    const m = el('div', 'msg ' + (['access_rules', 'no_mesh', 'adblock_no_sources', 'adblock_failed'].includes(w.code) ? 'warn' : 'err'),
+      t('warn_' + w.code).replace('{ports}', w.ports || '').replace('{users}', (w.users || []).join(', ')).replace('{detail}', w.detail || ''));
     box.appendChild(m);
     if (w.fix){
       const row = el('div', 'row-inline');
@@ -4773,6 +4865,8 @@ function renderNode(){
   if (!installed || !NODE.state){
     meshdRow.hidden = true;
     cfgCard.hidden = true;
+    $('nodeAdCard').hidden = true;
+    $('nodeSiteCard').hidden = true;
     evCard.hidden = true;
     netsHead.hidden = true;
     $('nodeWarnCard').hidden = true;
@@ -4794,8 +4888,14 @@ function renderNode(){
     $('pluginFilesWrite').checked = !!st.config.filesWrite;
     $('pluginClipboard').checked = !!st.config.clipboard;
     $('pluginBackup').checked = !!st.config.backup;
+    $('pluginMachines').checked = !!st.config.machines;
+    $('pluginAdblock').checked = !!st.config.adblock;
+    $('pluginSitecheck').checked = !!st.config.sitecheck;
+    $('nodeMachDays').value = st.config.machinesDays || 30;
     $('nodeQuota').value = st.config.quotaMB || '';
   }
+  renderNodeAd(st);
+  $('nodeSiteCard').hidden = !st.config.sitecheck;
   $('nodeUsed').textContent = fmtBytes(st.usedBytes) + ' / ' + fmtBytes((st.config.quotaMB || 0) * 1048576);
 
   evCard.hidden = !(st.events && st.events.length);
@@ -4919,7 +5019,7 @@ function renderNodeNet(n){
   // Последнее обращение устройств — по плагинам.
   const acts = el('div', 'acts');
   const la = n.lastActive || {};
-  ['mirror', 'files', 'clipboard', 'backup'].forEach(p => {
+  ['mirror', 'files', 'clipboard', 'backup', 'machines', 'adblock', 'sitecheck'].forEach(p => {
     acts.appendChild(el('span', '', t('plugin_' + p) + ': ' + (la[p] ? fmtAgo(la[p]) : t('node_never'))));
   });
   card.appendChild(el('div', 'nsec', t('node_last')));
@@ -5007,6 +5107,25 @@ function renderNodeNet(n){
     card.appendChild(row);
   }
 
+  if (n.machines && n.machines.reporters && n.machines.reporters.length){
+    card.appendChild(el('div', 'nsec', t('node_mach_title') + ' · ' + fmtBytes(n.machines.bytes) +
+      (n.machines.oldest ? ' · ' + t('node_mach_since') + ' ' + new Date(n.machines.oldest * 1000).toLocaleDateString(LANG === 'ru' ? 'ru-RU' : 'en-US') : '')));
+    n.machines.reporters.forEach(r => {
+      card.appendChild(nodeRow((r.machines || []).join(', ') || '—',
+        t('node_mach_from') + ' ' + (r.name || r.id.slice(0, 8)) + ' · ' + (r.shared ? t('node_mach_shared') : t('node_mach_private')) +
+        (r.last ? ' · ' + fmtAgo(r.last) : '')));
+    });
+    const clr = el('button', 'btn ghost small', t('node_mach_clear'));
+    clr.addEventListener('click', async () => {
+      const yes = await appConfirm(t('confirm_mach_clear').replace('{n}', netName(n.id)), t('node_mach_clear'));
+      if (!yes) return;
+      const {ok, data} = await api('/api/node/machines/clear', {net: n.id});
+      if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+      loadNode();
+    });
+    card.appendChild(clr);
+  }
+
   if (n.backups && n.backups.length){
     card.appendChild(el('div', 'nsec', t('node_backups_title') + ' · ' + fmtBytes(n.backupBytes) + ' ' + t('backup_stored')));
     n.backups.forEach(b => {
@@ -5027,6 +5146,63 @@ function renderNodeNet(n){
   }
   return card;
 }
+
+// ---- Общий список блокировки (ТЗ 15) ----
+const lines = v => v.split('\n').map(x => x.trim()).filter(Boolean);
+function renderNodeAd(st){
+  const card = $('nodeAdCard'), ad = st.adblock;
+  card.hidden = !st.config.adblock || !ad;
+  if (card.hidden) return;
+  $('nodeAdNames').textContent = ad.updating ? t('node_ad_updating') : (ad.version ? String(ad.names) : t('node_ad_none'));
+  $('nodeAdUpdated').textContent = ad.updated ? fmtAgo(ad.updated) : '—';
+  $('nodeAdDevices').textContent = String(ad.devices || 0);
+  $('nodeAdErr').hidden = !ad.error;
+  $('nodeAdErr').textContent = ad.error || '';
+  const f = $('nodeAdFetched');
+  f.innerHTML = '';
+  (ad.fetched || []).forEach(x => f.appendChild(nodeRow(x.url, x.error ? t('node_ad_src_err') + ': ' + x.error : String(x.names))));
+  if (!card.contains(document.activeElement)){
+    $('nodeAdSources').value = (ad.sources || []).join('\n');
+    $('nodeAdDeny').value = (ad.deny || []).join('\n');
+    $('nodeAdAllow').value = (ad.allow || []).join('\n');
+  }
+  $('nodeAdUpdateBtn').disabled = !!ad.updating;
+}
+$('nodeAdSaveBtn').addEventListener('click', async () => {
+  const {ok, data} = await api('/api/node/adblock/set',
+    {sources: lines($('nodeAdSources').value), deny: lines($('nodeAdDeny').value), allow: lines($('nodeAdAllow').value)});
+  if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+  toast(t('node_ad_saved'), 'ok');
+  document.activeElement.blur();
+  loadNode();
+});
+$('nodeAdUpdateBtn').addEventListener('click', async () => {
+  const {ok, data} = await api('/api/node/adblock/update', {});
+  if (!ok){ toast(data.error || t('err_internal'), 'err'); return; }
+  loadNode();
+});
+
+// ---- Проверить сайт с сервера (ТЗ 15) ----
+async function nodeSiteCheck(){
+  const site = $('nodeSiteInput').value.trim();
+  if (!site){ $('nodeSiteInput').focus(); return; }
+  const out = $('nodeSiteOut');
+  out.innerHTML = '';
+  out.appendChild(el('p', 'note', t('node_site_checking')));
+  $('nodeSiteBtn').disabled = true;
+  const {ok, data} = await api('/api/node/sitecheck', {site, lang: LANG});
+  $('nodeSiteBtn').disabled = false;
+  out.innerHTML = '';
+  if (!ok){ out.appendChild(el('div', 'msg err', data.error || t('err_internal'))); return; }
+  const p = data.server || {};
+  out.appendChild(el('div', 'msg ' + (p.ok ? 'ok' : 'warn'), data.text || data.verdict));
+  (p.steps || []).forEach(s => {
+    out.appendChild(nodeRow((s.ok ? '● ' : '○ ') + t('site_step_' + s.id) + (s.ok ? '' : ' — ' + (s.kind || '')),
+      [s.ms ? s.ms + ' ms' : '', s.note || ''].filter(Boolean).join(' · ')));
+  });
+}
+$('nodeSiteBtn').addEventListener('click', nodeSiteCheck);
+$('nodeSiteInput').addEventListener('keydown', e => { if (e.key === 'Enter') nodeSiteCheck(); });
 
 $('nodeInstallBtn').addEventListener('click', async () => {
   const {ok, data} = await api('/api/node/install', {});
@@ -5053,6 +5229,10 @@ $('nodeConfigSaveBtn').addEventListener('click', async () => {
     filesWrite: $('pluginFilesWrite').checked,
     clipboard: $('pluginClipboard').checked,
     backup: $('pluginBackup').checked,
+    machines: $('pluginMachines').checked,
+    adblock: $('pluginAdblock').checked,
+    sitecheck: $('pluginSitecheck').checked,
+    machinesDays: Number($('nodeMachDays').value) || undefined,
     quotaMB: Number($('nodeQuota').value) || undefined,
   };
   const {ok, data} = await api('/api/node/config', body);

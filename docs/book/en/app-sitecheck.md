@@ -24,6 +24,14 @@ it.
   via VPN.
 - **"It seems to be down itself"** — opens neither way.
 
+## From the server
+
+If the network server panel has the **"Check a site from the server"**
+plugin on, a third column **"From the server «name»"** appears next to
+"Direct" and "Via VPN": the same steps from the server network, with a
+one-line verdict. The server checks only internet sites on port 443 — not
+local addresses — and at most 5 times in a row per device.
+
 ## The rule button
 
 After the verdict a **"Send via VPN"** or **"Send directly"** button appears —
