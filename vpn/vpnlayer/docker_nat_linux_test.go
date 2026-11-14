@@ -65,3 +65,35 @@ func TestNATPlan(t *testing.T) {
 		t.Fatalf("IPv6: %q", got)
 	}
 }
+
+// raw: ответы из адаптера на адрес контейнера — раньше DROP Docker 28+.
+func TestRawPlan(t *testing.T) {
+	a := netip.MustParseAddr("172.17.0.2")
+	dockerPre := []string{"-P PREROUTING ACCEPT", "-A PREROUTING -d 172.17.0.2/32 ! -i docker0 -j DROP"}
+	got := joinCmds(chainPlan(rawSpec, nil, dockerPre, []netip.Addr{a}, "sshtun0", false))
+	want := []string{
+		"-N SSH_TUNNEL_DOCKER_RAW",
+		"-A SSH_TUNNEL_DOCKER_RAW -d 172.17.0.2/32 -j ACCEPT",
+		"-I PREROUTING 1 -i sshtun0 -j SSH_TUNNEL_DOCKER_RAW",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("с нуля:\n%q\nждали\n%q", got, want)
+	}
+	chain := []string{"-N SSH_TUNNEL_DOCKER_RAW", "-A SSH_TUNNEL_DOCKER_RAW -d 172.17.0.2/32 -j ACCEPT"}
+	pre := []string{"-P PREROUTING ACCEPT", "-A PREROUTING -i sshtun0 -j SSH_TUNNEL_DOCKER_RAW", dockerPre[1]}
+	if c := chainPlan(rawSpec, chain, pre, []netip.Addr{a}, "sshtun0", false); len(c) != 0 {
+		t.Fatalf("лишние команды: %q", joinCmds(c))
+	}
+	// Docker поставил DROP нового контейнера раньше нашего перехода.
+	late := []string{"-P PREROUTING ACCEPT", dockerPre[1], "-A PREROUTING -i sshtun0 -j SSH_TUNNEL_DOCKER_RAW"}
+	got = joinCmds(chainPlan(rawSpec, chain, late, []netip.Addr{a}, "sshtun0", false))
+	want = []string{"-D PREROUTING -i sshtun0 -j SSH_TUNNEL_DOCKER_RAW", "-I PREROUTING 1 -i sshtun0 -j SSH_TUNNEL_DOCKER_RAW"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("переход не первым: %q", got)
+	}
+	got = joinCmds(chainPlan(rawSpec, chain, pre, nil, "sshtun0", false))
+	want = []string{"-D PREROUTING -i sshtun0 -j SSH_TUNNEL_DOCKER_RAW", "-F SSH_TUNNEL_DOCKER_RAW", "-X SSH_TUNNEL_DOCKER_RAW"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("снять: %q", got)
+	}
+}

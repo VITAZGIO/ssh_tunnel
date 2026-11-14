@@ -16,18 +16,53 @@ D() { timeout 60 docker -H "unix://$SOCK" "$@"; }
 
 cleanup() {
   set +e
+  set +x
   stop_client TERM
   D rm -f tun dir hst str >/dev/null 2>&1
-  [ -f /run/docker-lab.pid ] && kill "$(cat /run/docker-lab.pid)" 2>/dev/null
-  sleep 2
+  if [ -f /run/docker-lab.pid ]; then
+    local p; p=$(cat /run/docker-lab.pid)
+    kill "$p" 2>/dev/null
+    for _ in $(seq 1 15); do kill -0 "$p" 2>/dev/null || break; sleep 1; done
+    kill -9 "$p" 2>/dev/null
+    rm -f /run/docker-lab.pid
+  fi
+  # dockerd, убитый kill -9, оставляет контейнеры в containerd машины.
+  if command -v ctr >/dev/null; then
+    for t in $(timeout 10 ctr -n docker-lab task ls -q 2>/dev/null); do
+      timeout 10 ctr -n docker-lab task kill -s SIGKILL "$t" 2>/dev/null
+    done
+  fi
   lab_down
-  rm -rf /etc/netns/c
+  rm -rf /etc/netns/c "$LAB/etc-c"
 }
 trap cleanup EXIT
 
+# Своя /etc машины c. Пространство монтирований ip netns exec отделяет
+# только точки монтирования, а не сами файлы: без resolved клиент заменяет
+# ссылку /etc/resolv.conf своим файлом (так и задумано на настоящей машине),
+# а на общей /etc это DNS самой машины сборки — раннер GitHub терял связь, и
+# задание повисало без журнала (причина зависания, ТЗ 19). Копия /etc
+# привязывается поверх /etc только у клиента; resolv.conf в ней — ссылка, как
+# на Ubuntu, чтобы проверить и возврат ссылки.
+ETC_C="$LAB/etc-c"
+prepare_etc_c() {
+  rm -rf "$ETC_C"
+  cp -a /etc "$ETC_C" 2>/dev/null || true
+  rm -f "$ETC_C/resolv.conf"
+  echo "nameserver 192.0.2.53" > "$ETC_C/resolv-lab.conf"
+  ln -s /etc/resolv-lab.conf "$ETC_C/resolv.conf"
+}
+# in_c команда… — в пространстве c со своей /etc и без resolved машины.
+in_c() {
+  ns c sh -ec 'mount --bind "$0" /etc; [ ! -d /run/systemd/resolve ] || mount -t tmpfs tmpfs /run/systemd/resolve; exec "$@"' "$ETC_C" "$@"
+}
+host_resolv() { echo "$(readlink /etc/resolv.conf || true) $(md5sum < /etc/resolv.conf)"; }
+HOST_RESOLV=$(host_resolv)
+host_resolv_same() { [ "$(host_resolv)" = "$HOST_RESOLV" ]; }
+
 start_client() {
   rm -f "$CFG/ssh_tunnel/api.json"
-  ns c sh -c "[ -d /run/systemd/resolve ] && mount -t tmpfs tmpfs /run/systemd/resolve; exec env XDG_CONFIG_HOME='$CFG' DOCKER_HOST='unix://$SOCK' '$BIN' -web -web-listen 127.0.0.1:47800" \
+  in_c env XDG_CONFIG_HOME="$CFG" DOCKER_HOST="unix://$SOCK" "$BIN" -web -web-listen 127.0.0.1:47800 \
     >> "$LAB/client-c.log" 2>&1 &
   eventually 20 test -s "$CFG/ssh_tunnel/api.json"
   TOK=$(jq -r .token "$CFG/ssh_tunnel/api.json")
@@ -56,15 +91,31 @@ run_ctr() { # имя [доп. флаги docker run]
   D rm -f "$n" >/dev/null 2>&1 || true
   D run -d --name "$n" "$@" "$IMG" sh -c 'mkdir -p /www && echo ok > /www/index.html && exec httpd -f -p 80 -h /www' >/dev/null
 }
-ip_of() { D inspect -f '{{.NetworkSettings.IPAddress}}' "$1"; }
+# Docker 29 убрал NetworkSettings.IPAddress — адрес только в Networks.
+ip_of() { D inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1"; }
+# Как ядро c ведёт пакет из контейнера.
+route_of() { ip -n c route get "${2:-192.0.2.80}" from "$(ip_of "$1")" iif docker0 2>&1; }
+show_c() {
+  echo "-- ip rule c:"; ip -n c rule
+  for t in 7094 7095 7096 main; do echo "-- table $t:"; ip -n c route show table "$t"; done
+  for n in tun dir hst str; do echo "-- путь $n: $(route_of "$n")"; done
+}
 our_rules() { ip -n c rule | grep -E 'lookup 709[4-6]' || true; }
 count_rules() { ip -n c rule | grep -E 'lookup 709[4-6]' | grep -cE "$1" || true; }
 t_is_b() { [ "$(cecho tun 2>/dev/null)" = 203.0.113.20 ]; }
+# Правило «через сервер» для текущего адреса контейнера уже стоит (без него
+# контейнер идёт как компьютер — при включённом туннеле тоже через B, и
+# проверка пути одна ничего не доказывает).
+has_rule() { ip -n c rule | grep -q "from $(ip_of "$1") lookup 7094"; }
 
-echo "== стенд: rp_filter=$RP"
+# run.sh после аварии: только уборка.
+[ -z "${LAB_CLEANUP_ONLY:-}" ] || exit 0
+
+section "стенд: rp_filter=$RP"
 # Где мы: каждая строка сценария с временем — чтобы найти, что повисло.
 export PS4='+ $(date +%T) docker.sh:${LINENO}: '
 set -x
+hang_point start
 lab_down
 lab_inet
 lab_b
@@ -73,7 +124,7 @@ host lan br1 192.168.50.3/24 192.168.50.1
 mkdir -p /etc/netns/c
 echo "nameserver 192.0.2.53" > /etc/netns/c/resolv.conf
 
-echo "== свой dockerd в пространстве c"
+section "свой dockerd в пространстве c"
 rm -rf /var/lib/docker-lab /run/docker-lab
 # Свой daemon.json: у машины сборки в /etc/docker/daemon.json свой DNS.
 echo '{"dns":["192.0.2.53"],"ip6tables":false}' > "$LAB/daemon.json"
@@ -86,12 +137,14 @@ nsenter --net=/run/netns/c dockerd --data-root /var/lib/docker-lab --exec-root /
   --cgroup-parent docker-lab --config-file "$LAB/daemon.json" \
   > "$LAB/dockerd-c.log" 2>&1 &
 eventually 60 D info || { tail -n 40 "$LAB/dockerd-c.log"; exit 1; }
-docker save "$IMG" | D load >/dev/null
+timeout 120 docker save "$IMG" | D load >/dev/null
 ns c "$LAB/labd" -http 0.0.0.0:9090 > "$LAB/labd-c.log" 2>&1 &
+hang_point dockerd
 
-echo "== клиент ssh_tunnel в c"
+section "клиент ssh_tunnel в c"
 rm -rf "$CFG"
-ns c env XDG_CONFIG_HOME="$CFG" "$BIN" -host 203.0.113.20 -user tunlab -key "$LAB/key" -filter all \
+prepare_etc_c
+in_c env XDG_CONFIG_HOME="$CFG" "$BIN" -host 203.0.113.20 -user tunlab -key "$LAB/key" -filter all \
   -direct 192.0.2.81,.d.test-lab.net -save
 jq '.profiles[].meshEnabled=true | .profiles[].meshKey="lab-mesh-key-0123456789abcdef"' \
   "$CFG/ssh_tunnel/config.json" > "$CFG/c.json" && mv "$CFG/c.json" "$CFG/ssh_tunnel/config.json"
@@ -101,6 +154,7 @@ api /api/addons '{"op":"add","id":"docker"}' >/dev/null
 api /api/state '{"tunnel":true,"mesh":true}' >/dev/null
 tunnel_on || { echo "::error::туннель не поднялся"; api /api/state; tail -n 60 "$LAB/client-c.log"; exit 1; }
 
+hang_point tunnel
 run_ctr tun -p 8080:80
 run_ctr dir
 run_ctr hst
@@ -111,14 +165,19 @@ api /api/docker/set '{"container":"str","route":"tunnel","strict":true}' >/dev/n
 sleep 2
 echo "-- ip rule и nat в c:"; our_rules; ns c iptables -t nat -S | grep -E 'SSH_TUNNEL|MASQ' || true
 echo "-- /api/docker:"; api /api/docker | jq -c '.kernel, [.containers[] | {name, effective, strict, published}]'
+show_c
+check "resolv.conf машины сборки не тронут" host_resolv_same
+check "resolv.conf машины c — DNS программы" grep -q 198.18.0.53 "$ETC_C/resolv.conf"
 
-echo "== туннель включён"
+section "туннель включён"
 expect "«через сервер» виден адресом B" 203.0.113.20 cecho tun
 expect "«напрямую» виден домашним адресом" 192.168.50.2 cecho dir
 expect "«как компьютер» идёт как компьютер (через B)" 203.0.113.20 cecho hst
 expect "строгий «через сервер» — через B" 203.0.113.20 cecho str
 expect "«всегда напрямую» к «через сервер» не применяется" 203.0.113.20 cecho tun 192.0.2.81
-expect "у самого компьютера «всегда напрямую» действует" 192.168.50.2 cecho hst 192.0.2.81
+expect "«как компьютер» к «всегда напрямую» — напрямую" 192.168.50.2 cecho hst 192.0.2.81
+expect "сам компьютер к «всегда напрямую» — напрямую" 192.168.50.2 ns c curl -fsS -m 8 http://192.0.2.81/
+check "маршрут «напрямую» — в своей таблице, не в main" sh -c "ip -n c route show table 7097 | grep -q 192.0.2.81 && ! ip -n c route show table main | grep -q 192.0.2.81"
 check "DNS «через сервер» отвечает" cdns tun name1.test-lab.net
 expect "DNS «через сервер» разрешён через B" 1 dnslog 1.1.1.1 203.0.113.20 name1.test-lab.net
 expect "DNS «через сервер» не у провайдера" 0 dnslog 192.0.2.53 192.168.50.2 name1.test-lab.net
@@ -129,8 +188,9 @@ expect "контейнер ↔ контейнер" ok D exec tun wget -qO- -T 5 
 expect "контейнер → компьютер" "$(ip_of tun)" D exec tun wget -qO- -T 5 http://172.17.0.1:9090/
 expect "опубликованный порт из домашней сети" ok ns lan curl -fsS -m 5 http://192.168.50.2:8080/
 check "исключение из MASQUERADE стоит" sh -c "ip netns exec c iptables -t nat -S SSH_TUNNEL_DOCKER | grep -q -- '-s $(ip_of tun)/32 -j ACCEPT'"
+check "исключение из DROP Docker в raw стоит первым" sh -c "ip netns exec c iptables -t raw -S PREROUTING | grep -m1 -- '^-A PREROUTING' | grep -q SSH_TUNNEL_DOCKER_RAW"
 
-echo "== туннель выключен (сеть устройств включена)"
+section "туннель выключен (сеть устройств включена)"
 api /api/state '{"tunnel":false}' >/dev/null
 leak=0
 for _ in $(seq 1 12); do
@@ -146,13 +206,15 @@ expect "…и запрос имени никуда не ушёл" 0 sh -c "grep 
 expect "«напрямую» работает" 192.168.50.2 cecho dir
 expect "«как компьютер» — как компьютер (напрямую)" 192.168.50.2 cecho hst
 
-echo "== туннель снова включён, контейнер пересоздан"
+section "туннель снова включён, контейнер пересоздан"
 api /api/state '{"tunnel":true}' >/dev/null
 tunnel_on || fail "туннель не поднялся снова"
 run_ctr tun -p 8080:80
+s=$SECONDS
+if eventually 15 has_rule tun; then pass "правило пересозданного «через сервер» встало (за $((SECONDS - s)) с)"; else fail "правило пересозданного «через сервер» не встало за 15 с"; fi
 if eventually 10 t_is_b; then pass "пересозданный «через сервер» — через B"; else fail "пересозданный «через сервер» не через B"; fi
 
-echo "== kill -9 клиента"
+section "kill -9 клиента"
 stop_client KILL
 sleep 2
 refute "после kill -9 «через сервер» без интернета" cecho tun
@@ -163,20 +225,24 @@ echo "-- правила после kill -9:"; our_rules
 start_client
 api /api/state '{"tunnel":true,"mesh":true}' >/dev/null
 tunnel_on || fail "после перезапуска туннель не поднялся"
+check "после перезапуска правило «через сервер» снова стоит" eventually 15 has_rule tun
 if eventually 15 t_is_b; then pass "после перезапуска «через сервер» снова через B"; else fail "после перезапуска «через сервер» не через B"; fi
 
-echo "== чистая остановка"
+section "чистая остановка"
 stop_client TERM
 sleep 1
 echo "-- правила после остановки:"; our_rules
 expect "после остановки остались только правила строгого (3)" 3 count_rules '^940[23]:'
 expect "обычных правил контейнеров нет" 0 count_rules '^940[01]:'
 refute "цепочки исключения NAT нет" ns c iptables -t nat -S SSH_TUNNEL_DOCKER
+refute "цепочки исключения raw нет" ns c iptables -t raw -S SSH_TUNNEL_DOCKER_RAW
+check "resolv.conf машины c снова ссылка, как была" test "$(readlink "$ETC_C/resolv.conf")" = /etc/resolv-lab.conf
+check "resolv.conf машины сборки не тронут и после всего" host_resolv_same
 expect "«через сервер» без программы — как компьютер" 192.168.50.2 cecho tun
 refute "строгий без программы — без интернета" cecho str
 check "строгий без программы ходит в домашнюю сеть" D exec str ping -c1 -W2 192.168.50.3
 
-echo "== снять галочку (VPN выключен)"
+section "снять галочку (VPN выключен)"
 start_client
 api /api/state '{"tunnel":false,"mesh":false}' >/dev/null
 sleep 2
@@ -188,5 +254,5 @@ expect "после всего правил нет" 0 count_rules '.'
 expect "после всего таблица 7094 пуста" 0 sh -c "ip -n c route show table 7094 | wc -l"
 
 echo "== журнал клиента (хвост)"; tail -n 40 "$LAB/client-c.log" || true
-echo "== итог: провалов $FAILS"
+section "итог: провалов $FAILS"
 [ "$FAILS" = 0 ]

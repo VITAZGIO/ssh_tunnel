@@ -36,15 +36,36 @@ refute() { local d=$1; shift; if "$@" >/dev/null 2>&1; then fail "$d"; else pass
 # expect "описание" ожидание команда… — вывод команды (первая строка) равен ожиданию.
 expect() {
   local d=$1 want=$2; shift 2
-  local got
-  got=$("$@" 2>/dev/null | head -n1 | tr -d '\r' || true)
-  if [ "$got" = "$want" ]; then pass "$d ($got)"; else fail "$d: ждали «$want», получили «$got»"; fi
+  local got err=$LAB/expect.err
+  got=$("$@" 2>"$err" | head -n1 | tr -d '\r' || true)
+  if [ "$got" = "$want" ]; then pass "$d ($got)"; else fail "$d: ждали «$want», получили «$got» $(head -c 200 "$err" | tr '\n' ' ')"; fi
 }
-# eventually СЕК команда… — ждать, пока команда не пройдёт.
+# eventually СЕК команда… — ждать, пока команда не пройдёт, не дольше СЕК
+# секунд по часам (а не СЕК попыток: попытка с curl -m 10 — это 10 секунд).
 eventually() {
-  local t=$1; shift
-  for _ in $(seq 1 "$t"); do "$@" >/dev/null 2>&1 && return 0; sleep 1; done
-  return 1
+  local end=$((SECONDS + $1)); shift
+  while :; do
+    "$@" >/dev/null 2>&1 && return 0
+    [ "$SECONDS" -lt "$end" ] || return 1
+    sleep 1
+  done
+}
+
+# section "название" — начало раздела: и в журнал, и в файл, который читает
+# сторож (test/netns/run.sh), чтобы при аварии было видно, где мы были.
+section() {
+  echo "== $(date +%T) $*"
+  echo "$(date +%T) $*" > "$LAB/out/section" 2>/dev/null || true
+}
+
+# hang_point ИМЯ — для проверки самого стенда: при LAB_HANG=ИМЯ сценарий
+# здесь «виснет» (и держит фоновый процесс), сторож и предел должны снять
+# его и оставить читаемый журнал.
+hang_point() {
+  [ "${LAB_HANG:-}" = "$1" ] || return 0
+  echo "!! нарочно виснем в точке $1 (LAB_HANG)"
+  sleep 100000 &
+  sleep 100000
 }
 
 set_rp() { # пространство
@@ -142,7 +163,8 @@ PY
 
 lab_down() {
   for n in a b c lan actr inet; do
-    for p in $(ip netns pids "$n" 2>/dev/null); do kill -9 "$p" 2>/dev/null || true; done
+    [ -e "/run/netns/$n" ] || continue
+    for p in $(ip netns pids "$n" 2>/dev/null || true); do kill -9 "$p" 2>/dev/null || true; done
     ip netns del "$n" 2>/dev/null || true
   done
 }

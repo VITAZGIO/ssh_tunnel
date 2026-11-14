@@ -47,6 +47,17 @@ func TestDockerPlanToNetlink(t *testing.T) {
 			}
 		}
 		k := routeKey(*nr)
+		// Так маршрут вернёт ядро (RouteListFiltered): тип заполнен, метки
+		// и область — свои. Ключ обязан совпасть, иначе следующая
+		// перестановка снимет только что поставленный маршрут.
+		back := *nr
+		if back.Type == 0 {
+			back.Type = unix.RTN_UNICAST
+		}
+		back.Scope, back.Protocol, back.Flags = netlink.SCOPE_UNIVERSE, 0, 0
+		if got := routeKey(back); got != k {
+			t.Errorf("%s: ключ стоящего маршрута %s ≠ желаемого %s", r, got, k)
+		}
 		if seen[k] {
 			t.Errorf("два маршрута с одним ключом %s", k)
 		}

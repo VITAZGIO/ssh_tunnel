@@ -32,18 +32,26 @@ on:
       - "test/netns/**"
       - ".github/workflows/netns-lab.yml"
   workflow_dispatch:
+    inputs:
+      hang:
+        description: "Проверка самого стенда: нарочно повиснуть в точке (start / dockerd / tunnel)"
+        required: false
+        default: ""
+      limit:
+        description: "Предел сценария, секунд"
+        required: false
+        default: "600"
 
 jobs:
   lab:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # Весь прогон — около 10 минут; сценарий снимает свой предел (run.sh)
+    # заметно раньше предела задания, чтобы журнал успел уйти.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        # Стенд Docker (test/netns/docker.sh) пока не проходит: задание
-        # повисает и не оставляет журнала. Чтобы он не вешал каждый PR, сам
-        # он идёт только при ручном запуске (workflow_dispatch) — до починки.
-        suite: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["egress","docker"]') || fromJSON('["egress"]') }}
+        suite: [egress, docker]
         rp: [0, 1, 2]
     name: ${{ matrix.suite }} (rp_filter=${{ matrix.rp }})
     env:
@@ -75,12 +83,27 @@ jobs:
         run: docker pull -q busybox:1.36
 
       - name: Стенд
-        # Свой предел раньше предела задания: снятое по тайм-ауту задание
-        # GitHub остаётся без журнала.
-        run: sudo --preserve-env=LAB RP=${{ matrix.rp }} timeout -k 20 1500 bash test/netns/${{ matrix.suite }}.sh
+        # run.sh: сценарий в своём сеансе с журналом в файл, вывод вживую,
+        # сторож машины сборки и свой предел (по умолчанию 600 с) — задолго
+        # до предела шага и задания: снятое GitHub задание журнала не оставляет.
+        timeout-minutes: 15
+        env:
+          LAB_HANG: ${{ inputs.hang }}
+        run: sudo --preserve-env=LAB,LAB_HANG RP=${{ matrix.rp }} bash test/netns/run.sh ${{ matrix.suite }} ${{ inputs.limit || '600' }}
 
       - name: Журналы стенда
         if: always()
         run: |
-          sudo tail -n 200 "$LAB"/*.log 2>/dev/null || true
-          sudo journalctl -u 'ssh_tunnel_egress*' --no-pager -n 200 2>/dev/null || true
+          sudo journalctl -u 'ssh_tunnel_egress*' --no-pager -n 200 > "$LAB/journal-egress.txt" 2>&1 || true
+          sudo mkdir -p "$LAB/out"
+          sudo sh -c 'cp "$0"/*.log "$0"/*.txt "$0/out/" 2>/dev/null; chmod -R a+rX "$0/out"' "$LAB" || true
+          ls -la "$LAB/out" || true
+
+      - name: Выгрузить журналы
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab-${{ matrix.suite }}-rp${{ matrix.rp }}
+          path: ${{ env.LAB }}/out/
+          retention-days: 14
+          if-no-files-found: warn

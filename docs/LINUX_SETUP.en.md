@@ -262,8 +262,12 @@ the server**, **direct**. A compose project switches as a whole; the label
   `ip rule`, `ip route show table 7094`). "Via the server" containers skip
   Docker's address rewriting (chain `SSH_TUNNEL_DOCKER` in
   `iptables -t nat`): the program recognises their connections by the
-  address. Turn the VPN or the app off — they are removed (except those with
-  the checkbox).
+  address. Replies to them from the adapter pass the chain
+  `SSH_TUNNEL_DOCKER_RAW` in `iptables -t raw` (Docker 28+ drops there
+  anything addressed to a container that does not come from its bridge).
+  Routes to "always direct" addresses live in table 7097, for the program's
+  own sockets only (`ip rule` 9399 `from <uplink address>`). Turn the VPN or
+  the app off — they are removed (except those with the checkbox).
 - Tested on a real kernel: the `netns-lab` GitHub build sets up a lab of
   network namespaces with its own Docker and runs all of this with
   `rp_filter` 0, 1 and 2 (`test/netns/`).

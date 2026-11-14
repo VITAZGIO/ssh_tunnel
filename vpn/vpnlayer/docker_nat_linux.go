@@ -22,7 +22,33 @@ import (
 // стек тогда видит адрес адаптера и строгий режим не включается (остаётся
 // прежний «через сервер» по правилам ядра).
 
-const natChain = "SSH_TUNNEL_DOCKER"
+// Ответы стека на адрес такого контейнера приходят из адаптера. Docker 28+
+// в таблице raw (PREROUTING) отбрасывает всё, что идёт на адрес контейнера
+// не из его моста («-d <контейнер> ! -i docker0 -j DROP» — защита от прямого
+// доступа к контейнерам из соседних сетей), и делает это раньше conntrack:
+// без исключения ответ не доходит, у строгого «через сервер» нет ни
+// интернета, ни DNS. Наша цепочка в raw стоит первой в PREROUTING и для
+// пакетов из адаптера на адреса таких контейнеров говорит ACCEPT (только
+// raw: фильтр Docker дальше пропускает их как ответы, ESTABLISHED). Нашёл
+// стенд на настоящем ядре (ТЗ 19).
+
+const (
+	natChain = "SSH_TUNNEL_DOCKER"
+	rawChain = "SSH_TUNNEL_DOCKER_RAW"
+)
+
+// chainSpec — наша цепочка-исключение: в какой таблице, в какую встроенную
+// цепочку переход, как выглядит переход и правило для адреса.
+type chainSpec struct {
+	table, chain, hook string
+	iface              string // "-o" (уходит в адаптер) или "-i" (пришёл из него)
+	match              string // "-s" (источник) или "-d" (назначение)
+}
+
+var (
+	natSpec = chainSpec{table: "nat", chain: natChain, hook: "POSTROUTING", iface: "-o", match: "-s"}
+	rawSpec = chainSpec{table: "raw", chain: rawChain, hook: "PREROUTING", iface: "-i", match: "-d"}
+)
 
 // natTool — программа для семейства.
 func natTool(v6 bool) string {
@@ -36,50 +62,56 @@ func natTool(v6 bool) string {
 // переход на неё к want. chain — вывод «-S natChain» (nil — цепочки нет),
 // post — вывод «-S POSTROUTING».
 func natPlan(chain, post []string, want []netip.Addr, tun string, v6 bool) [][]string {
+	return chainPlan(natSpec, chain, post, want, tun, v6)
+}
+
+// chainPlan — то же для любой нашей цепочки sp. hook — вывод «-S <sp.hook>».
+func chainPlan(sp chainSpec, chain, hook []string, want []netip.Addr, tun string, v6 bool) [][]string {
 	bits := "/32"
 	if v6 {
 		bits = "/128"
 	}
-	jump := "-o " + tun + " -j " + natChain
+	jump := sp.iface + " " + tun + " -j " + sp.chain
+	pre := "-A " + sp.hook + " "
 	var cmds [][]string
 	if len(want) == 0 {
-		for _, l := range post {
-			if strings.TrimPrefix(l, "-A POSTROUTING ") == jump {
-				cmds = append(cmds, append([]string{"-D", "POSTROUTING"}, strings.Fields(jump)...))
+		for _, l := range hook {
+			if strings.TrimPrefix(l, pre) == jump {
+				cmds = append(cmds, append([]string{"-D", sp.hook}, strings.Fields(jump)...))
 			}
 		}
 		if chain != nil {
-			cmds = append(cmds, []string{"-F", natChain}, []string{"-X", natChain})
+			cmds = append(cmds, []string{"-F", sp.chain}, []string{"-X", sp.chain})
 		}
 		return cmds
 	}
 	if chain == nil {
-		cmds = append(cmds, []string{"-N", natChain})
+		cmds = append(cmds, []string{"-N", sp.chain})
 	}
 	have := map[string]bool{}
 	for _, l := range chain {
-		if r, ok := strings.CutPrefix(l, "-A "+natChain+" "); ok {
+		if r, ok := strings.CutPrefix(l, "-A "+sp.chain+" "); ok {
 			have[r] = true
 		}
 	}
 	wantSet := map[string]bool{}
 	for _, a := range want {
-		r := "-s " + a.String() + bits + " -j ACCEPT"
+		r := sp.match + " " + a.String() + bits + " -j ACCEPT"
 		wantSet[r] = true
 		if !have[r] {
-			cmds = append(cmds, append([]string{"-A", natChain}, strings.Fields(r)...))
+			cmds = append(cmds, append([]string{"-A", sp.chain}, strings.Fields(r)...))
 		}
 	}
 	for r := range have {
 		if !wantSet[r] {
-			cmds = append(cmds, append([]string{"-D", natChain}, strings.Fields(r)...))
+			cmds = append(cmds, append([]string{"-D", sp.chain}, strings.Fields(r)...))
 		}
 	}
-	// Переход — первым в POSTROUTING: Docker дописывает свои правила в конец,
-	// но после перезапуска мог встать и раньше.
+	// Переход — первым во встроенной цепочке: Docker дописывает свои правила
+	// в конец, но после перезапуска мог встать и раньше.
 	var rules []string
-	for _, l := range post {
-		if r, ok := strings.CutPrefix(l, "-A POSTROUTING "); ok {
+	for _, l := range hook {
+		if r, ok := strings.CutPrefix(l, pre); ok {
 			rules = append(rules, r)
 		}
 	}
@@ -92,22 +124,23 @@ func natPlan(chain, post []string, want []netip.Addr, tun string, v6 bool) [][]s
 	}
 	if !first || n > 1 {
 		for i := 0; i < n; i++ {
-			cmds = append(cmds, append([]string{"-D", "POSTROUTING"}, strings.Fields(jump)...))
+			cmds = append(cmds, append([]string{"-D", sp.hook}, strings.Fields(jump)...))
 		}
-		cmds = append(cmds, append([]string{"-I", "POSTROUTING", "1"}, strings.Fields(jump)...))
+		cmds = append(cmds, append([]string{"-I", sp.hook, "1"}, strings.Fields(jump)...))
 	}
 	return cmds
 }
 
-func natList(tool, chain string) ([]string, bool) {
-	out, err := exec.Command(tool, "-w", "-t", "nat", "-S", chain).Output()
+func natList(tool, table, chain string) ([]string, bool) {
+	out, err := exec.Command(tool, "-w", "-t", table, "-S", chain).Output()
 	if err != nil {
 		return nil, false
 	}
 	return strings.Split(strings.TrimSpace(string(out)), "\n"), true
 }
 
-// applyNAT приводит исключения из подмены адреса к forced.
+// applyNAT приводит исключения из подмены адреса (nat) и из защиты Docker от
+// прямого доступа (raw) к forced.
 func applyNAT(forced []netip.Addr, tun string) error {
 	var errs []error
 	for _, v6 := range []bool{false, true} {
@@ -124,17 +157,19 @@ func applyNAT(forced []netip.Addr, tun string) error {
 			}
 			continue
 		}
-		chain, ok := natList(tool, natChain)
-		if !ok {
-			chain = nil
-		} else if chain == nil {
-			chain = []string{}
-		}
-		post, _ := natList(tool, "POSTROUTING")
-		for _, c := range natPlan(chain, post, want, tun, v6) {
-			args := append([]string{"-w", "-t", "nat"}, c...)
-			if out, err := exec.Command(tool, args...).CombinedOutput(); err != nil {
-				errs = append(errs, fmt.Errorf("%s %s: %v %s", tool, strings.Join(c, " "), err, bytes.TrimSpace(out)))
+		for _, sp := range []chainSpec{natSpec, rawSpec} {
+			chain, ok := natList(tool, sp.table, sp.chain)
+			if !ok {
+				chain = nil
+			} else if chain == nil {
+				chain = []string{}
+			}
+			hook, _ := natList(tool, sp.table, sp.hook)
+			for _, c := range chainPlan(sp, chain, hook, want, tun, v6) {
+				args := append([]string{"-w", "-t", sp.table}, c...)
+				if out, err := exec.Command(tool, args...).CombinedOutput(); err != nil {
+					errs = append(errs, fmt.Errorf("%s -t %s %s: %v %s", tool, sp.table, strings.Join(c, " "), err, bytes.TrimSpace(out)))
+				}
 			}
 		}
 	}
