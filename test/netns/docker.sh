@@ -33,13 +33,36 @@ cleanup() {
     done
   fi
   lab_down
-  rm -rf /etc/netns/c
+  rm -rf /etc/netns/c "$LAB/etc-c"
 }
 trap cleanup EXIT
 
+# Своя /etc машины c. Пространство монтирований ip netns exec отделяет
+# только точки монтирования, а не сами файлы: без resolved клиент заменяет
+# ссылку /etc/resolv.conf своим файлом (так и задумано на настоящей машине),
+# а на общей /etc это DNS самой машины сборки — раннер GitHub терял связь, и
+# задание повисало без журнала (причина зависания, ТЗ 19). Копия /etc
+# привязывается поверх /etc только у клиента; resolv.conf в ней — ссылка, как
+# на Ubuntu, чтобы проверить и возврат ссылки.
+ETC_C="$LAB/etc-c"
+prepare_etc_c() {
+  rm -rf "$ETC_C"
+  cp -a /etc "$ETC_C" 2>/dev/null || true
+  rm -f "$ETC_C/resolv.conf"
+  echo "nameserver 192.0.2.53" > "$ETC_C/resolv-lab.conf"
+  ln -s /etc/resolv-lab.conf "$ETC_C/resolv.conf"
+}
+# in_c команда… — в пространстве c со своей /etc и без resolved машины.
+in_c() {
+  ns c sh -ec 'mount --bind "$0" /etc; [ ! -d /run/systemd/resolve ] || mount -t tmpfs tmpfs /run/systemd/resolve; exec "$@"' "$ETC_C" "$@"
+}
+host_resolv() { echo "$(readlink /etc/resolv.conf || true) $(md5sum < /etc/resolv.conf)"; }
+HOST_RESOLV=$(host_resolv)
+host_resolv_same() { [ "$(host_resolv)" = "$HOST_RESOLV" ]; }
+
 start_client() {
   rm -f "$CFG/ssh_tunnel/api.json"
-  ns c sh -c "[ -d /run/systemd/resolve ] && mount -t tmpfs tmpfs /run/systemd/resolve; exec env XDG_CONFIG_HOME='$CFG' DOCKER_HOST='unix://$SOCK' '$BIN' -web -web-listen 127.0.0.1:47800" \
+  in_c env XDG_CONFIG_HOME="$CFG" DOCKER_HOST="unix://$SOCK" "$BIN" -web -web-listen 127.0.0.1:47800 \
     >> "$LAB/client-c.log" 2>&1 &
   eventually 20 test -s "$CFG/ssh_tunnel/api.json"
   TOK=$(jq -r .token "$CFG/ssh_tunnel/api.json")
@@ -68,7 +91,15 @@ run_ctr() { # имя [доп. флаги docker run]
   D rm -f "$n" >/dev/null 2>&1 || true
   D run -d --name "$n" "$@" "$IMG" sh -c 'mkdir -p /www && echo ok > /www/index.html && exec httpd -f -p 80 -h /www' >/dev/null
 }
-ip_of() { D inspect -f '{{.NetworkSettings.IPAddress}}' "$1"; }
+# Docker 29 убрал NetworkSettings.IPAddress — адрес только в Networks.
+ip_of() { D inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1"; }
+# Как ядро c ведёт пакет из контейнера.
+route_of() { ip -n c route get "${2:-192.0.2.80}" from "$(ip_of "$1")" iif docker0 2>&1; }
+show_c() {
+  echo "-- ip rule c:"; ip -n c rule
+  for t in 7094 7095 7096 main; do echo "-- table $t:"; ip -n c route show table "$t"; done
+  for n in tun dir hst str; do echo "-- путь $n: $(route_of "$n")"; done
+}
 our_rules() { ip -n c rule | grep -E 'lookup 709[4-6]' || true; }
 count_rules() { ip -n c rule | grep -E 'lookup 709[4-6]' | grep -cE "$1" || true; }
 t_is_b() { [ "$(cecho tun 2>/dev/null)" = 203.0.113.20 ]; }
@@ -108,7 +139,8 @@ hang_point dockerd
 
 section "клиент ssh_tunnel в c"
 rm -rf "$CFG"
-ns c env XDG_CONFIG_HOME="$CFG" "$BIN" -host 203.0.113.20 -user tunlab -key "$LAB/key" -filter all \
+prepare_etc_c
+in_c env XDG_CONFIG_HOME="$CFG" "$BIN" -host 203.0.113.20 -user tunlab -key "$LAB/key" -filter all \
   -direct 192.0.2.81,.d.test-lab.net -save
 jq '.profiles[].meshEnabled=true | .profiles[].meshKey="lab-mesh-key-0123456789abcdef"' \
   "$CFG/ssh_tunnel/config.json" > "$CFG/c.json" && mv "$CFG/c.json" "$CFG/ssh_tunnel/config.json"
@@ -129,6 +161,9 @@ api /api/docker/set '{"container":"str","route":"tunnel","strict":true}' >/dev/n
 sleep 2
 echo "-- ip rule и nat в c:"; our_rules; ns c iptables -t nat -S | grep -E 'SSH_TUNNEL|MASQ' || true
 echo "-- /api/docker:"; api /api/docker | jq -c '.kernel, [.containers[] | {name, effective, strict, published}]'
+show_c
+check "resolv.conf машины сборки не тронут" host_resolv_same
+check "resolv.conf машины c — DNS программы" grep -q 198.18.0.53 "$ETC_C/resolv.conf"
 
 section "туннель включён"
 expect "«через сервер» виден адресом B" 203.0.113.20 cecho tun
@@ -190,6 +225,8 @@ echo "-- правила после остановки:"; our_rules
 expect "после остановки остались только правила строгого (3)" 3 count_rules '^940[23]:'
 expect "обычных правил контейнеров нет" 0 count_rules '^940[01]:'
 refute "цепочки исключения NAT нет" ns c iptables -t nat -S SSH_TUNNEL_DOCKER
+check "resolv.conf машины c снова ссылка, как была" test "$(readlink "$ETC_C/resolv.conf")" = /etc/resolv-lab.conf
+check "resolv.conf машины сборки не тронут и после всего" host_resolv_same
 expect "«через сервер» без программы — как компьютер" 192.168.50.2 cecho tun
 refute "строгий без программы — без интернета" cecho str
 check "строгий без программы ходит в домашнюю сеть" D exec str ping -c1 -W2 192.168.50.3
