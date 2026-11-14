@@ -25,7 +25,10 @@
 //   - панель управляет хостом через unix-сокет (nodeapi.ControlSocket);
 //   - «Резервные копии» (ТЗ 13, internal/backup) — четвёртый плагин, только
 //     серверный: копии устройств по сетям, читать может лишь владелец
-//     (устройство или его SSH-пользователь).
+//     (устройство или его SSH-пользователь);
+//   - ТЗ 15 — ещё три серверных плагина: история «Машин» (machines.go),
+//     общий список «Блокировки рекламы» (adblock.go) и «Проверить сайт» с
+//     сервера (sitecheck.go).
 package node
 
 import (
@@ -49,6 +52,7 @@ import (
 	"sshtunnel/internal/backup"
 	"sshtunnel/internal/clipshare"
 	"sshtunnel/internal/devfiles"
+	"sshtunnel/internal/diag/probe"
 	"sshtunnel/internal/mesh"
 	"sshtunnel/internal/mirror"
 	"sshtunnel/internal/nodeapi"
@@ -68,6 +72,11 @@ type Options struct {
 	UsageEvery time.Duration
 	// Now — часы (тесты).
 	Now func() time.Time
+	// AdFetch — скачать источник списка блокировки; nil — по HTTP (тесты
+	// подменяют).
+	AdFetch func(ctx context.Context, url string) (io.ReadCloser, error)
+	// SiteCheck — проверка сайта с сервера; nil — probe.CheckFromServer.
+	SiteCheck func(ctx context.Context, site, lang string) (probe.ServerResult, error)
 }
 
 // folderConf — зеркальная папка сети в config.json.
@@ -81,6 +90,8 @@ type folderConf struct {
 type fileConf struct {
 	Config  nodeapi.Config          `json:"config"`
 	Folders map[string][]folderConf `json:"folders"` // по id сети
+	// Adblock — общий список блокировки сервера (ТЗ 15).
+	Adblock nodeapi.AdblockConf `json:"adblock"`
 }
 
 // Host — работающий хост плагинов.
@@ -96,6 +107,11 @@ type Host struct {
 	used    int64 // всё занятое место (кэш)
 	usedAt  time.Time
 	stopped bool
+
+	ad         adMeta           // список блокировки (ТЗ 15)
+	adUpdating bool             // идёт скачивание источников
+	adPulls    map[string]int64 // сеть/устройство → когда забирало список
+	site       *siteLimiter     // «Проверить сайт»: вёдра устройств
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -113,6 +129,7 @@ type netData struct {
 	board    *clipshare.ServerBoard
 	filesH   http.Handler
 	backup   *backup.Store
+	mach     *machStore // история машин (ТЗ 15)
 	last     map[string]int64
 	used     int64 // всё место сети (кэш)
 	folderBy map[string]int64
@@ -141,7 +158,8 @@ func New(opt Options) (*Host, error) {
 	if err := os.MkdirAll(filepath.Join(opt.Dir, "nets"), 0o700); err != nil {
 		return nil, err
 	}
-	h := &Host{opt: opt, nets: map[string]*netData{}, lns: map[string]*pluginListener{}}
+	h := &Host{opt: opt, nets: map[string]*netData{}, lns: map[string]*pluginListener{},
+		adPulls: map[string]int64{}, site: newSiteLimiter(opt.Now)}
 	h.conf.Config.QuotaMB = nodeapi.DefaultQuotaMB
 	if data, err := os.ReadFile(h.confPath()); err == nil {
 		if err := json.Unmarshal(data, &h.conf); err != nil {
@@ -154,6 +172,7 @@ func New(opt Options) (*Host, error) {
 	if h.conf.Config.QuotaMB <= 0 {
 		h.conf.Config.QuotaMB = nodeapi.DefaultQuotaMB
 	}
+	h.loadAdMeta()
 	h.ctx, h.cancel = context.WithCancel(context.Background())
 	return h, nil
 }
@@ -215,33 +234,19 @@ func (h *Host) port(plugin string) int {
 	if p, ok := h.opt.Ports[plugin]; ok {
 		return p
 	}
-	switch plugin {
-	case nodeapi.PluginFiles:
-		return nodeapi.PortFiles
-	case nodeapi.PluginMirror:
-		return nodeapi.PortMirror
-	case nodeapi.PluginBackup:
-		return nodeapi.PortBackup
-	default:
-		return nodeapi.PortClipboard
-	}
+	return nodeapi.PortOf(plugin)
 }
 
 // applyLocked открывает порты включённых плагинов и закрывает выключенные:
 // выключенный плагин не слушает вовсе — устройство получает «на сервере
 // на порту ничего не слушает».
 func (h *Host) applyLocked() error {
-	want := map[string]bool{
-		nodeapi.PluginMirror:    h.conf.Config.Mirror,
-		nodeapi.PluginFiles:     h.conf.Config.Files,
-		nodeapi.PluginClipboard: h.conf.Config.Clipboard,
-		nodeapi.PluginBackup:    h.conf.Config.Backup,
-	}
 	var errs []string
-	for _, p := range []string{nodeapi.PluginMirror, nodeapi.PluginFiles, nodeapi.PluginClipboard, nodeapi.PluginBackup} {
+	for _, p := range nodeapi.Plugins {
 		l := h.lns[p]
+		on := h.conf.Config.On(p)
 		switch {
-		case want[p] && l == nil && !h.stopped:
+		case on && l == nil && !h.stopped:
 			nl, err := h.listen(p)
 			if err != nil {
 				errs = append(errs, err.Error())
@@ -249,7 +254,7 @@ func (h *Host) applyLocked() error {
 				continue
 			}
 			h.lns[p] = nl
-		case !want[p] && l != nil:
+		case !on && l != nil:
 			l.close()
 			delete(h.lns, p)
 		}
@@ -782,6 +787,12 @@ func (h *Host) pluginHandler(plugin string) http.Handler {
 		case nodeapi.PluginBackup:
 			r = r.WithContext(backup.WithCaller(r.Context(), backup.Caller{Device: c.Device, Name: c.Name, User: c.User}))
 			h.backupOf(nd).Handler().ServeHTTP(w, r)
+		case nodeapi.PluginMachines:
+			h.serveMachines(w, r, nd)
+		case nodeapi.PluginAdblock:
+			h.serveAdblock(w, r, nd)
+		case nodeapi.PluginSitecheck:
+			h.serveSitecheck(w, r, nd)
 		}
 	})
 }
@@ -855,6 +866,9 @@ func (h *Host) loop() {
 			if time.Since(lastPrune) > time.Hour {
 				lastPrune = time.Now()
 			}
+			if h.adDue() {
+				h.startAdUpdate()
+			}
 		case <-usage.C:
 			h.recount()
 		}
@@ -885,6 +899,19 @@ func (h *Host) scanAll(prune bool) {
 		if board != nil {
 			board.Prune()
 		}
+		if prune {
+			h.pruneMachines(nd)
+		}
+	}
+	if prune {
+		day := h.opt.Now().Add(-48 * time.Hour).Unix()
+		h.mu.Lock()
+		for k, t := range h.adPulls {
+			if t < day {
+				delete(h.adPulls, k)
+			}
+		}
+		h.mu.Unlock()
 	}
 }
 
@@ -968,12 +995,15 @@ func (h *Host) State() nodeapi.State {
 			}
 			n.BackupBytes = st.Stored()
 		}
+		n.Machines = h.machinesState(nd)
 		st.Networks = append(st.Networks, n)
 	}
 	sort.Slice(st.Networks, func(i, j int) bool { return st.Networks[i].ID < st.Networks[j].ID })
 	if st.Networks == nil {
 		st.Networks = []nodeapi.Network{}
 	}
+	ad := h.adState()
+	st.Adblock = &ad
 	return st
 }
 
@@ -1003,11 +1033,34 @@ func (h *Host) SetConfig(p nodeapi.ConfigPatch) (nodeapi.State, error) {
 		}
 		c.QuotaMB = *p.QuotaMB
 	}
+	if p.MachinesDays != nil {
+		if *p.MachinesDays < 1 || *p.MachinesDays > 3650 {
+			h.mu.Unlock()
+			return nodeapi.State{}, errors.New("историю машин хранить — от 1 до 3650 дней")
+		}
+		c.MachinesDays = *p.MachinesDays
+	}
+	if p.Machines != nil {
+		c.Machines = *p.Machines
+	}
+	if p.Sitecheck != nil {
+		c.Sitecheck = *p.Sitecheck
+	}
+	adOn := false
+	if p.Adblock != nil {
+		adOn = *p.Adblock && !c.Adblock
+		c.Adblock = *p.Adblock
+	}
 	err := h.saveLocked()
 	if err == nil {
 		err = h.applyLocked()
 	}
+	noList := h.ad.Checked == 0 && len(h.conf.Adblock.Sources) > 0
 	h.mu.Unlock()
+	if adOn && noList {
+		// Включили, а списка ещё нет — скачать сразу, не ждать круга.
+		h.startAdUpdate()
+	}
 	return h.State(), err
 }
 
@@ -1277,6 +1330,32 @@ func (h *Host) ControlHandler() http.Handler {
 			return nil, err
 		}
 		return ok, h.MigrateAccess(req)
+	})
+	post("/adblock/set", func(b []byte) (any, error) {
+		var req nodeapi.AdblockConf
+		if err := json.Unmarshal(b, &req); err != nil {
+			return nil, err
+		}
+		return h.SetAdblock(req)
+	})
+	post("/adblock/update", func(b []byte) (any, error) {
+		return h.UpdateAdblock(), nil
+	})
+	post("/sitecheck", func(b []byte) (any, error) {
+		var req nodeapi.SiteReq
+		if err := json.Unmarshal(b, &req); err != nil {
+			return nil, err
+		}
+		return h.CheckSite(context.Background(), req)
+	})
+	post("/machines/clear", func(b []byte) (any, error) {
+		var req struct {
+			Net string `json:"net"`
+		}
+		if err := json.Unmarshal(b, &req); err != nil {
+			return nil, err
+		}
+		return ok, h.ClearMachines(req.Net)
 	})
 	post("/clipboard/clear", func(b []byte) (any, error) {
 		var req struct {

@@ -24,12 +24,14 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"sshtunnel/internal/diag/probe"
 	"sshtunnel/internal/meshsvc"
 	"sshtunnel/internal/nodeapi"
 	"sshtunnel/internal/share"
@@ -77,6 +79,11 @@ type demoBackend struct {
 	// остались»).
 	nodeBackups map[string][]nodeapi.BackupSet
 	nodeOrphan  string
+	// ТЗ 15: общий список блокировки, стёртая история машин, последняя
+	// проверка сайта с сервера.
+	nodeAd        nodeapi.AdblockState
+	nodeMachClear map[string]bool
+	nodeSiteAt    int64
 	// egress — выход этого сервера через другой сервер (ТЗ 10): свой
 	// маленький стейт-машин для показа, не настоящий EgressManager (ему
 	// нужна система).
@@ -115,6 +122,10 @@ func NewDemoHandler(version string) http.Handler {
 		nodeClipboard: map[string]int{},
 		nodeBackups:   map[string][]nodeapi.BackupSet{},
 		nodeOrphan:    "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
+		nodeMachClear: map[string]bool{},
+		nodeAd: nodeapi.AdblockState{AdblockConf: nodeapi.AdblockConf{
+			Sources: []string{"https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"},
+			Allow:   []string{}, Deny: []string{}}},
 	}
 	d.seed()
 	return d.routes()
@@ -524,8 +535,28 @@ func (d *demoBackend) nodeStatus() NodeStatus {
 		if items := d.nodeClipboard[n.ID]; items > 0 {
 			net.Clipboard = nodeapi.Clipboard{Items: items, Bytes: int64(items) << 10, Devices: len(n.Devices)}
 		}
+		if d.nodeConfig.Machines && !d.nodeMachClear[n.ID] && len(n.Devices) > 0 {
+			// Показания присылает первое устройство сети (домашний сервер).
+			dev := n.Devices[0]
+			net.Machines = &nodeapi.MachinesNet{Bytes: int64(3+i) << 20, Oldest: now - 9*86400,
+				Reporters: []nodeapi.MachinesReporter{{ID: nodeapi.PeerID(dev.ID), Name: dev.Name, Shared: true,
+					Last: now - 20, Machines: []string{"NAS", "Proxmox", "Ubuntu"}}}}
+			net.UsedBytes += net.Machines.Bytes
+			net.LastActive[nodeapi.PluginMachines] = now - 20
+		}
+		if d.nodeConfig.Adblock && d.nodeAd.Version != "" {
+			net.LastActive[nodeapi.PluginAdblock] = now - int64(300+i*120)
+		}
+		if d.nodeConfig.Sitecheck && d.nodeSiteAt > 0 && i == 0 {
+			net.LastActive[nodeapi.PluginSitecheck] = d.nodeSiteAt
+		}
 		st.Networks = append(st.Networks, net)
 	}
+	ad := d.nodeAd
+	if d.nodeConfig.Adblock && ad.Version != "" {
+		ad.Devices = len(d.nets)
+	}
+	st.Adblock = &ad
 	if d.nodeOrphan != "" {
 		st.Networks = append(st.Networks, nodeapi.Network{ID: d.nodeOrphan, Folders: []nodeapi.Folder{
 			{ID: "old1", Name: "Старые фото", QuotaMB: 2048, UsedBytes: 734 << 20, Files: 212}},
@@ -538,13 +569,56 @@ func (d *demoBackend) nodeStatus() NodeStatus {
 		}
 	}
 	ns := NodeStatus{Unit: UnitState{Installed: true, Active: true, Enabled: true, Detail: "active"}, State: &st}
-	ns.Warnings = pluginWarnings(MeshRoleMain, d.self.Enabled, d.self.Ports, d.access, d.clients, d.nodeConfig)
+	ns.Warnings = append(pluginWarnings(MeshRoleMain, d.self.Enabled, d.self.Ports, d.access, d.clients, d.nodeConfig), stateWarnings(&st)...)
 	nets := make([]MeshNetwork, 0, len(d.nets))
 	for _, n := range d.nets {
 		nets = append(nets, *n)
 	}
 	ns.Access = nodeAccess(nets, &st)
 	return ns
+}
+
+// demoAdUpdate — «скачать» источники: выдуманный счёт имён.
+func (d *demoBackend) demoAdUpdate() {
+	now := time.Now().Unix()
+	d.nodeAd.Checked, d.nodeAd.Error, d.nodeAd.Fetched = now, "", nil
+	if len(d.nodeAd.Sources) == 0 {
+		d.nodeAd.Error = "не задан ни один источник"
+		return
+	}
+	total := len(d.nodeAd.Deny)
+	for i, u := range d.nodeAd.Sources {
+		n := 48000 + i*7311
+		d.nodeAd.Fetched = append(d.nodeAd.Fetched, nodeapi.AdblockSource{URL: u, Names: n})
+		total += n
+	}
+	d.nodeAd.Updated, d.nodeAd.Names = now, total-len(d.nodeAd.Allow)
+	d.nodeAd.Version = strconv.FormatInt(now, 16)
+}
+
+// demoSiteCheck — проверка сайта с сервера в показе: без сети, по шагам.
+func demoSiteCheck(req nodeapi.SiteReq) (probe.ServerResult, error) {
+	t, err := probe.ParseSite(req.Site)
+	if err != nil {
+		return probe.ServerResult{}, err
+	}
+	if t.Port != "443" {
+		return probe.ServerResult{}, probe.ErrPort
+	}
+	lang := req.Lang
+	res := probe.ServerResult{Site: req.Site, Host: t.Host, Time: time.Now()}
+	if a, err := netip.ParseAddr(t.Host); (err == nil && !probe.Public(a)) || !strings.Contains(t.Host, ".") || strings.HasSuffix(t.Host, ".local") || strings.HasSuffix(t.Host, ".mesh") {
+		res.Server = res.Server.FailAt(probe.Step{ID: "dns", Kind: probe.KindRefused, Note: t.Host})
+	} else if strings.HasSuffix(t.Host, ".invalid") || strings.Contains(t.Host, "nosuch") {
+		res.Server = res.Server.FailAt(probe.Step{ID: "dns", Kind: probe.KindDNSFail, Ms: 31, Note: "no such host"})
+	} else {
+		res.Server = probe.Path{OK: true, IPs: []string{"203.0.113.10"}, Steps: []probe.Step{
+			{ID: "dns", OK: true, Ms: 12, Note: "203.0.113.10"}, {ID: "tcp", OK: true, Ms: 38},
+			{ID: "tls", OK: true, Ms: 61, Note: "Let's Encrypt"}, {ID: "http", OK: true, Ms: 95, Note: "200 OK"}}}
+	}
+	res.Verdict = probe.ServerVerdict(res.Server)
+	res.Text = probe.ServerPhrase(res.Verdict, lang)
+	return res, nil
 }
 
 // seedBackups — выдуманные резервные копии устройств (показ).
@@ -1144,7 +1218,81 @@ func (d *demoBackend) routes() http.Handler {
 		if p.QuotaMB != nil && *p.QuotaMB > 0 {
 			d.nodeConfig.QuotaMB = *p.QuotaMB
 		}
+		if p.Machines != nil {
+			d.nodeConfig.Machines = *p.Machines
+		}
+		if p.Sitecheck != nil {
+			d.nodeConfig.Sitecheck = *p.Sitecheck
+		}
+		if p.MachinesDays != nil {
+			if *p.MachinesDays < 1 || *p.MachinesDays > 3650 {
+				replyErr(w, errors.New("историю машин хранить — от 1 до 3650 дней"), nil)
+				return
+			}
+			d.nodeConfig.MachinesDays = *p.MachinesDays
+		}
+		if p.Adblock != nil {
+			d.nodeConfig.Adblock = *p.Adblock
+			if d.nodeConfig.Adblock && d.nodeAd.Version == "" {
+				d.demoAdUpdate()
+			}
+		}
 		writeJSON(w, http.StatusOK, d.nodeStatus().State)
+	})
+	h("/api/node/adblock/set", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.AdblockConf
+		if !decodePost(w, r, &req) {
+			return
+		}
+		clean := func(in []string) []string {
+			out := []string{}
+			for _, x := range in {
+				if x = strings.ToLower(strings.TrimSpace(x)); x != "" {
+					out = append(out, x)
+				}
+			}
+			return out
+		}
+		for _, u := range clean(req.Sources) {
+			if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+				replyErr(w, fmt.Errorf("источник — ссылка http:// или https://: %q", u), nil)
+				return
+			}
+		}
+		d.nodeAd.Sources, d.nodeAd.Allow, d.nodeAd.Deny = clean(req.Sources), clean(req.Allow), clean(req.Deny)
+		if d.nodeAd.Version != "" {
+			d.demoAdUpdate()
+		}
+		writeJSON(w, http.StatusOK, d.nodeAd)
+	})
+	h("/api/node/adblock/update", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{}
+		if !decodePost(w, r, &req) {
+			return
+		}
+		d.demoAdUpdate()
+		writeJSON(w, http.StatusOK, d.nodeAd)
+	})
+	h("/api/node/sitecheck", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.SiteReq
+		if !decodePost(w, r, &req) {
+			return
+		}
+		res, err := demoSiteCheck(req)
+		if err == nil {
+			d.nodeSiteAt = time.Now().Unix()
+		}
+		replyErr(w, err, res)
+	})
+	h("/api/node/machines/clear", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Net string `json:"net"`
+		}
+		if !decodePost(w, r, &req) {
+			return
+		}
+		d.nodeMachClear[req.Net] = true
+		writeJSON(w, http.StatusOK, ok)
 	})
 	h("/api/node/folder/add", func(w http.ResponseWriter, r *http.Request) {
 		var req nodeapi.FolderReq

@@ -61,7 +61,8 @@ const KIND = {
   tcp_refused: L('порт закрыт', 'port closed'), tls_reset: L('обрыв (DPI)', 'cut off (DPI)'),
   tls_timeout: L('повисло (DPI)', 'hangs (DPI)'), tls_cert: L('чужой сертификат', 'foreign certificate'),
   http_stub: L('заглушка провайдера', 'ISP block page'), http_error: L('ошибка сайта', 'site error'),
-  off: L('туннель выключен', 'tunnel is off'), other: L('ошибка', 'error'),
+  off: L('туннель выключен', 'tunnel is off'), refused: L('адрес локальный — сервер не проверяет', 'local address — not checked by the server'),
+  other: L('ошибка', 'error'),
 };
 $('go').textContent = L('Проверить', 'Check');
 $('popBtn').innerHTML = icon('refresh') + '<span>' + L('Проверить популярные', 'Check popular') + '</span>';
@@ -85,7 +86,23 @@ function render(r){
   return `<div class="card"><div class="verdict">${esc(r.text)}</div>
       <div class="hint">${esc(r.host || r.site)}</div>
       ${rule ? `<div class="row" style="margin-top:8px">${rule}<span class="hint" data-note></span></div>` : ''}</div>
-    <div class="paths" style="margin-top:10px">${pathCard(L('Напрямую', 'Direct'), r.direct || {})}${pathCard(L('Через VPN', 'Via VPN'), r.vpn || {})}</div>`;
+    <div class="paths" style="margin-top:10px">${pathCard(L('Напрямую', 'Direct'), r.direct || {})}${pathCard(L('Через VPN', 'Via VPN'), r.vpn || {})}<div data-srv></div></div>`;
+}
+
+// Третья колонка — «с сервера» (ТЗ 15): тот же путь из сети сервера сети с
+// плагином «Проверить сайт». Нет такого сервера — колонки нет.
+function srvCard(box, s){
+  if(!box) return;
+  if(!s){ box.innerHTML = `<div class="card"><b>${esc(L('С сервера', 'From the server'))}</b><div class="hint">${esc(L('Проверяю…', 'Checking…'))}</div></div>`; return; }
+  if(s.error){
+    box.innerHTML = /не включён|нет на связи|not/.test(s.error) ? '' :
+      `<div class="card"><b>${esc(L('С сервера', 'From the server'))}${s.server ? ' «' + esc(s.server) + '»' : ''}</b><div class="hint err">${esc(s.error)}</div></div>`;
+    return;
+  }
+  const p = s.result.server || {};
+  box.innerHTML = pathCard(L('С сервера', 'From the server') + ' «' + s.server + '»', p);
+  const c = box.firstElementChild;
+  if(c) c.insertAdjacentHTML('beforeend', `<div class="hint" style="margin-top:6px">${esc(s.result.text)}</div>`);
 }
 
 // addRule — то же, что правка списков в настройках: /api/config, активный
@@ -114,11 +131,16 @@ async function check(site){
   $('site').value = site;
   $('go').disabled = true;
   $('out').innerHTML = `<div class="hint">${esc(L('Проверяю…', 'Checking…'))}</div>`;
+  // С сервера — одновременно со своей проверкой.
+  const srv = api('/api/sitecheck/server', {site, lang: LANG}).catch(e => ({error: String(e)}));
   const r = await api('/api/diag/site', {site}).catch(() => ({error: L('Нет связи с программой.', 'No connection to the app.')}));
   $('go').disabled = false;
   if(r.error){ $('out').innerHTML = `<div class="card">${esc(r.error)}</div>`; return; }
   $('out').innerHTML = render(r);
   bindRules($('out'), r);
+  const box = $('out').querySelector('[data-srv]');
+  srvCard(box, null);
+  srv.then(s => srvCard(box, s));
   loadHistory();
 }
 

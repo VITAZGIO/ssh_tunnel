@@ -63,6 +63,12 @@
 
   <!-- Списки: что блокировать и что пропускать. -->
   <div class="tab" id="tLists" hidden>
+    <!-- Общий список сервера сети (ТЗ 15): ведёт панель сервера. -->
+    <div class="card" id="srv" style="display:flex;flex-direction:column;gap:6px">
+      <label class="ck" style="display:flex;gap:10px;align-items:center;cursor:pointer"><input type="checkbox" id="srvOn"><b id="srvT"></b></label>
+      <div class="hint" id="srvS"></div>
+      <div class="acts"><button class="btn" id="srvSync"></button></div>
+    </div>
     <div class="hint" id="srcH"></div>
     <textarea id="src" spellcheck="false"></textarea>
     <div class="hint" id="allowH"></div>
@@ -76,7 +82,29 @@
    в VPN-версии на Windows/Linux): имя из списка не получает адреса. Здесь —
    включить, списки и статистика (/api/adblock/stats). Настройки — те же
    поля adBlock* в /api/config, что раньше были в «Настройках». */
-let TAB = 'stat', PER = 'today', ST = null, CFG = null;
+let TAB = 'stat', PER = 'today', ST = null, CFG = null, SRV = null;
+const when = t => t ? new Date(t * 1000).toLocaleString(LANG === 'en' ? 'en-GB' : 'ru-RU') : '—';
+// Список с сервера: откуда, когда, сколько имён. Пока он действует, свои
+// источники не качаются — их ведёт панель сервера.
+function drawSrv(){
+  const s = SRV;
+  $('srv').hidden = !s;
+  if(!s) return;
+  const using = s.using && !s.off;
+  $('srvOn').checked = !s.off;
+  $('srvT').textContent = L('Брать список с сервера сети', 'Take the list from the network server');
+  let t = '';
+  if(s.off) t = L('Выключено — список качает это устройство по своим источникам.', 'Off — this device downloads its own sources.');
+  else if(using) t = L(`Список сервера «${s.server}»: имён — ${fmt(s.names)}, обновлён на сервере ${when(s.updated)}, получен ${when(s.fetched)}.`,
+    `List of server «${s.server}»: ${fmt(s.names)} names, updated on the server ${when(s.updated)}, received ${when(s.fetched)}.`);
+  else t = L('Пока не получен — действует свой список.', 'Not received yet — the own list is used.');
+  if(s.error && !s.off) t += ' ' + s.error;
+  $('srvS').textContent = t;
+  $('srvS').className = 'hint' + (s.error && !s.off ? ' err' : using ? ' ok' : '');
+  $('srvSync').hidden = !!s.off;
+  $('srcH').hidden = $('src').hidden = using;
+  $('save').textContent = using ? L('Сохранить', 'Save') : L('Сохранить и обновить списки', 'Save and update lists');
+}
 const fmt = n => n >= 10000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + L(' тыс.', 'k') : String(n);
 
 function tabs(){
@@ -90,8 +118,11 @@ function tabs(){
 }
 
 async function load(){
-  const [st, cfg, stats] = await Promise.all([api('/api/status').catch(() => ({})), api('/api/config').catch(() => ({})), api('/api/adblock/stats').catch(() => null)]);
+  const [st, cfg, stats, srv] = await Promise.all([api('/api/status').catch(() => ({})), api('/api/config').catch(() => ({})),
+    api('/api/adblock/stats').catch(() => null), api('/api/adblock/server').catch(() => null)]);
   CFG = cfg || {};
+  SRV = srv && !srv.error ? srv : null;
+  drawSrv();
   const vpn = !!(st && st.adBlock);
   $('noVpn').hidden = vpn;
   $('noVpn').textContent = L('Блокировка работает в режиме VPN: на телефоне и в VPN-версии ssh_tunnel на Windows и Linux. В обычной версии имена разрешают сами программы — перехватить нечего.',
@@ -146,7 +177,7 @@ async function save(doc, lists){
   const r = await api('/api/config', doc).catch(e => ({error: String(e)}));
   if(r && r.error){ $('note').className = 'hint err'; $('note').textContent = r.error; return; }
   // Списки скачиваются по ссылкам заново и сразу применяются.
-  if(lists && (doc.adBlockEnabled ?? CFG.adBlockEnabled) && (doc.adBlockSources || '').trim()){
+  if(lists && !(SRV && SRV.using && !SRV.off) && (doc.adBlockEnabled ?? CFG.adBlockEnabled) && (doc.adBlockSources || '').trim()){
     $('note').textContent = L('Скачиваю списки…', 'Downloading lists…');
     const u = await api('/api/adblock/update', {sources: doc.adBlockSources}).catch(e => ({error: String(e)}));
     $('note').className = 'hint ' + (u.error ? 'err' : 'ok');
@@ -166,6 +197,20 @@ $('src').placeholder = L('https://… — по одной ссылке в стр
 $('allow').placeholder = 'example.com';
 $('save').textContent = L('Сохранить и обновить списки', 'Save and update lists');
 $('save').onclick = () => save({adBlockSources: $('src').value.trim(), adBlockAllowlist: $('allow').value.trim()}, true);
+$('srvSync').textContent = L('Спросить сервер сейчас', 'Ask the server now');
+$('srvSync').onclick = async () => {
+  $('srvSync').disabled = true;
+  const r = await api('/api/adblock/server', {op: 'sync'}).catch(e => ({error: String(e)}));
+  $('srvSync').disabled = false;
+  if(r && !r.error) SRV = r; else if(r) { $('srvS').className = 'hint err'; $('srvS').textContent = r.error; return; }
+  drawSrv();
+};
+$('srvOn').onchange = async () => {
+  const r = await api('/api/adblock/server', {op: 'use', on: $('srvOn').checked}).catch(e => ({error: String(e)}));
+  if(r && !r.error) SRV = r;
+  drawSrv();
+  changed();
+};
 tabs();
 load();
 setInterval(() => { if(!document.hidden && TAB === 'stat') load(); }, 10000);

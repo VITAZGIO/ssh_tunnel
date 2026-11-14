@@ -212,6 +212,8 @@ network service". Details and the upgrade order for several servers — in
 The "Plugins" tab: the server itself joins the device network — mirrored
 folders, a shared folder ("Device files"), the shared clipboard and backups
 run right on the server, through the same code that serves them on devices.
+Three more plugins — machine history, a shared ad-blocking list and a site
+check from the server — are below.
 
 Plugins live in their own process, `ssh_tunnel_node`, without root: its own
 system user (`DynamicUser` in systemd, like `meshd`), its own data folder
@@ -237,7 +239,8 @@ Until the device network is installed, or its version is too old to answer
   unless "Also delete plugin data" is checked — that cannot be undone.
 - **"What blocks the plugins"** — the panel checks "Server in the device
   network" and the access rules against the ports of the enabled plugins
-  (47835 files, 47836 folders, 47837 clipboard, 47838 backups). Closed server
+  (47835 files, 47836 folders, 47837 clipboard, 47838 backups, 47844
+  machines, 47845 ad blocking, 47846 site check). Closed server
   ports are opened with one button — only the plugin ports: each plugin
   identifies every caller itself. The panel never changes access rules on its
   own — it only names who has no rule to `@servers`. On a secondary server
@@ -252,6 +255,65 @@ Until the device network is installed, or its version is too old to answer
 - A network deleted in "Networks" whose plugin data is still here is marked
   "Network deleted, data left" with a "Delete data" button. It is never
   erased on its own; a live network cannot be erased this way.
+
+### Machines, ad blocking, site check
+
+Three plugins that do on the server what a device cannot do well: it is not
+on around the clock, or it sits behind a different network.
+
+- **"Machines: history"** — devices with the "Machines" plugin send the
+  readings of their machines here every 30 seconds (CPU, memory, disk,
+  temperature, online). The server does not read machines itself: their
+  addresses, passwords and tokens stay on the devices, and the server cannot
+  call a device first. So the history has no holes for machines read by a
+  device that is always on (a home server, or the machine itself running
+  ssh_tunnel with the "this device" source); a laptop that was off sees it
+  from the server. It is kept for "Keep machine history" days (30 by
+  default) and counted in the shared quota. Each network shows who sends
+  which machines; "Erase history" erases it. Other devices of the network
+  see the history only if the sender has "Show my machines to all my
+  devices" on.
+- **"Ad blocking: shared list"** — one list per server: sources (links to
+  hosts or adblock lists), own "Always block" and "Never block", update
+  time, number of names and how many devices took it in a day. Sources are
+  downloaded once a day and on "Update now"; if none downloads, the previous
+  list is handed out. Devices with the "Ad blocking" plugin take it every 15
+  minutes and block by themselves as before; without the server they keep
+  the last list.
+- **"Check a site from the server"** — the same steps as the device plugin
+  (DNS → connection → secure connection → reply), only from the server
+  network: on the device it is the "from the server" column, in the panel a
+  field and a button. It is not a proxy: only internet names on port 443,
+  one GET "/" without a body, local and private addresses (and names that
+  resolve to them) are not checked, at most 5 checks in a row per device
+  and then one per 10 seconds.
+
+The last two plugins need internet access, so the `ssh_tunnel_node` service
+no longer has `IPAddressAllow=localhost`; plugin ports still listen only on
+127.0.0.1.
+
+### Nginx Proxy Manager and `.mesh` addresses
+
+A Docker container on the server (for example Nginx Proxy Manager) **cannot
+reach** a device at `laptop.mesh` or `198.19.x.x` today. Three things are
+missing:
+
+1. **The name.** `.mesh` names are known only to the program's own DNS on
+   each device; nothing resolves them on the server or in containers.
+2. **The path.** The server has no network interface in the device
+   network: 198.19.0.0/16 is not routed, all traffic to devices goes through
+   `meshd` and its protocol (the `dial` call), and `meshd` listens only on
+   127.0.0.1 — invisible from the Docker bridge.
+3. **The right.** Only a device of the network that came in over SSH may
+   call another device: `meshd` matches the system user owning the
+   connection with the device's SSH user. The server itself cannot call
+   devices first (the access check says "server cannot initiate").
+
+It needs a separate change: a forwarder on the server "port on the Docker
+bridge → device:port" through `meshd`, with its own account and a rule in
+"Access" (that is `meshd`, `internal/mesh` and the panel itself — outside the
+plugins). Until then, run NPM on a device inside the network (a home server)
+or proxy to the device's address in its local network.
 
 ## Server egress through another server
 

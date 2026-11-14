@@ -133,6 +133,13 @@
   `POST /api/config`). `GET` — 10 последних проверок и список «популярных».
 - `POST /api/diag/site/popular` `{"list":[…]}` — сохранить список,
   `{"check":true}` — проверить все.
+- `POST /api/sitecheck/server` `{"site","lang"?,"server"?}` — тот же сайт с
+  сервера сети, где включён плагин «Проверить сайт» (ТЗ 15) →
+  `{"server":<имя>,"result":{site,host,time,server:{ok,fail,steps,ips},verdict,text}}`.
+  Шаги и `kind` — те же, что выше, плюс `refused` (локальный адрес —
+  сервер не проверяет). `verdict`: `server_ok`, `server_fail`,
+  `server_no_such`, `server_refused`. Только порт 443; не чаще 5 проверок
+  подряд с устройства (дальше 400 «слишком часто»).
 - `GET|POST /api/diag/meddlers` — кто трогает трафик (последний поиск / искать
   заново) и `disabled` — «Что я отключал».
   `POST /api/diag/meddlers/try {"id","site"}` — это и есть «Разрешаю»:
@@ -370,6 +377,53 @@ meshd: `{id,name,host,user,online,gone,folders}`); `POST /api/node/folder/access
 - `POST /api/backup/delete` `{"device","set"[,"version"]}` — убрать копию с сервера.
 
 Протокол с сервером — `internal/backup/proto.go`.
+
+## Машины, блокировка, проверка сайта на сервере (ТЗ 15)
+
+На устройстве:
+
+- `GET /api/machines` — как раньше, плюс у каждой машины `series`
+  (`{src:"server"|"local",server,since,t:[unix…],cpu:[…],join}` — график
+  процессора: история сервера до `join`, дальше свои показания), у
+  `reading` — `histT` (время точек `hist`), у `network[]` — `id` (PeerID
+  устройства) и `series` по id машины, `servers` (`[{name,ip,on,error,at}]`
+  — как прошла последняя отправка), `historyServer` (с какого сервера
+  история). `settings.noServer` — не отправлять показания на сервер.
+- `GET /api/adblock/server` — список блокировки с сервера:
+  `{off,using,server,etag,updated,fetched,checked,names,allow,error}`;
+  `POST {"op":"sync"}` — спросить сейчас, `{"op":"use","on":bool}` — брать ли
+  его. Пока `using`, `POST /api/adblock/update` (свои источники) отвечает
+  ошибкой: список ведёт сервер.
+
+Протокол устройства с хостом плагинов (по сети устройств, к серверу сети;
+кто пришёл — `meshd`, op `who`):
+
+- порт 47844: `POST /push` `{"shared":bool,"machines":[{id,name,src,reading}]}`
+  — показания (точка на машину не чаще раза в 50 с; квота кончилась — 507);
+  `GET /history?since=&step=&from=<PeerID|self>&machine=` —
+  `{since,step,days,reporters:[{id,name,self,shared,last,machines:[{id,name,t,cpu,mem,disk,temp,on}]}]}`:
+  свои машины всегда, чужие — если их читатель `shared`.
+- порт 47845: `GET /list` — текст, имя в строке, `@@имя` — исключение;
+  `ETag`, `If-None-Match` → 304, `X-Adblock-Updated`, `X-Adblock-Names`.
+- порт 47846: `POST /check` `{"site","lang"}` (других полей нет — 400) →
+  результат, как выше; 429 и `Retry-After` — слишком часто.
+
+В панели сервера (вход сессией, ошибки — 400 `{"error"}`):
+
+- `GET /api/node/state` — `state.config` с `machines`, `adblock`,
+  `sitecheck`, `machinesDays`; `state.adblock` —
+  `{sources,allow,deny,updated,checked,names,error,fetched:[{url,names,error}],version,devices,updating}`;
+  `state.networks[].machines` — `{bytes,oldest,reporters:[{id,name,shared,last,machines}]}`;
+  `lastActive` — и по трём новым плагинам.
+- `POST /api/node/config` — те же поля (`machinesDays` 1…3650).
+- `POST /api/node/adblock/set` `{"sources":[…],"allow":[…],"deny":[…]}` →
+  `state.adblock` (источники — только `http(s)://`, до 32; своих строк — до
+  10000; свои записи применяются сразу, новые источники скачиваются).
+- `POST /api/node/adblock/update` `{}` — скачать источники сейчас (в фоне:
+  `updating:true`).
+- `POST /api/node/sitecheck` `{"site","lang"}` — проверка с сервера, ответ —
+  как у устройств (`{site,host,server:{steps…},verdict,text}`).
+- `POST /api/node/machines/clear` `{"net"}` — стереть историю машин сети.
 
 ## Трафик, сканер, буфер (ТЗ 5)
 

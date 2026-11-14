@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 
+	"sshtunnel/internal/adblock"
 	"sshtunnel/internal/config"
 )
 
@@ -16,11 +17,46 @@ type AdBlocker interface {
 	UpdateAdBlockLists(sources string) (int, error)
 }
 
+// adBlocker — блокировка слоя VPN, к исключениям которой добавлены
+// исключения общего списка сервера (ТЗ 15, internal/adblock).
 func (a *App) adBlocker() AdBlocker {
+	ab := a.rawAdBlocker()
+	if ab == nil {
+		return nil
+	}
+	return serverList{ab}
+}
+
+func (a *App) rawAdBlocker() AdBlocker {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	ab, _ := a.net.(AdBlocker)
 	return ab
+}
+
+// serverList — блокировка, которая знает о списке с сервера сети: его
+// исключения действуют вместе со своими, а свои источники не качаются,
+// пока список ведёт сервер.
+type serverList struct{ AdBlocker }
+
+func (s serverList) SetAdBlock(cfg config.Config) { s.AdBlocker.SetAdBlock(adblock.WithServer(cfg)) }
+
+func (s serverList) UpdateAdBlockLists(sources string) (int, error) {
+	if on, srv := adblock.UsingServer(); on {
+		return 0, errors.New("список ведёт сервер сети «" + srv + "» — источники меняются в его панели; чтобы качать свои, сними «Брать список с сервера»")
+	}
+	return s.AdBlocker.UpdateAdBlockLists(sources)
+}
+
+// attachAdBlock — слой VPN подключён: применить настройки и дать списку с
+// сервера способ перечитать блокировку, когда он обновится.
+func (a *App) attachAdBlock(ab AdBlocker, cfg config.Config) {
+	serverList{ab}.SetAdBlock(cfg)
+	adblock.SetReload(func() {
+		if x := a.adBlocker(); x != nil {
+			x.SetAdBlock(a.Config())
+		}
+	})
 }
 
 // AdBlockAvailable — есть ли блокировка рекламы в этой версии программы.
@@ -44,7 +80,7 @@ func (a *App) UpdateAdBlockLists(sources string) (int, error) {
 // AdBlocked — сколько запросов имён заблокировано с подключения; 0, если
 // блокировки в этой версии нет.
 func (a *App) AdBlocked() int {
-	if c, ok := a.adBlocker().(interface{ AdBlocked() int }); ok {
+	if c, ok := a.rawAdBlocker().(interface{ AdBlocked() int }); ok {
 		return c.AdBlocked()
 	}
 	return 0
@@ -53,7 +89,7 @@ func (a *App) AdBlocked() int {
 // AdStatsJSON — статистика плагина «Блокировка рекламы» (JSON); "" — нет
 // блокировки в этой версии.
 func (a *App) AdStatsJSON() string {
-	if c, ok := a.adBlocker().(interface{ AdStatsJSON() string }); ok {
+	if c, ok := a.rawAdBlocker().(interface{ AdStatsJSON() string }); ok {
 		return c.AdStatsJSON()
 	}
 	return ""

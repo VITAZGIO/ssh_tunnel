@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -26,6 +27,55 @@ func (s *Server) nodeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/node/backup/delete", s.requireAuth(s.withNode(s.handleNodeBackupDelete)))
 	mux.HandleFunc("/api/node/net/delete", s.requireAuth(s.withNode(s.handleNodeNetDelete)))
 	mux.HandleFunc("/api/node/fix", s.requireAuth(s.withNode(s.handleNodeFix)))
+	// ТЗ 15: общий список блокировки, проверка сайта с сервера, история машин.
+	mux.HandleFunc("/api/node/adblock/set", s.requireAuth(s.withNode(s.handleNodeAdblockSet)))
+	mux.HandleFunc("/api/node/adblock/update", s.requireAuth(s.withNode(s.handleNodeAdblockUpdate)))
+	mux.HandleFunc("/api/node/sitecheck", s.requireAuth(s.withNode(s.handleNodeSitecheck)))
+	mux.HandleFunc("/api/node/machines/clear", s.requireAuth(s.withNode(s.handleNodeMachinesClear)))
+}
+
+func (s *Server) handleNodeAdblockSet(w http.ResponseWriter, r *http.Request) {
+	var req nodeapi.AdblockConf
+	if !decodePost(w, r, &req) {
+		return
+	}
+	st, err := s.node.api.SetAdblock(r.Context(), req)
+	replyErr(w, err, st)
+}
+
+func (s *Server) handleNodeAdblockUpdate(w http.ResponseWriter, r *http.Request) {
+	var req struct{}
+	if !decodePost(w, r, &req) {
+		return
+	}
+	st, err := s.node.api.UpdateAdblock(r.Context())
+	replyErr(w, err, st)
+}
+
+// handleNodeSitecheck — «Проверить сайт» с сервера кнопкой панели; ответ —
+// как у устройств ({server:{steps…},verdict,text}).
+func (s *Server) handleNodeSitecheck(w http.ResponseWriter, r *http.Request) {
+	var req nodeapi.SiteReq
+	if !decodePost(w, r, &req) {
+		return
+	}
+	res, err := s.node.api.CheckSite(r.Context(), req)
+	if err != nil {
+		replyErr(w, err, nil)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write(append(json.RawMessage(nil), res...))
+}
+
+func (s *Server) handleNodeMachinesClear(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Net string `json:"net"`
+	}
+	if !decodePost(w, r, &req) {
+		return
+	}
+	replyErr(w, s.node.api.ClearMachines(r.Context(), req.Net), map[string]bool{"ok": true})
 }
 
 func (s *Server) withNode(next http.HandlerFunc) http.HandlerFunc {
