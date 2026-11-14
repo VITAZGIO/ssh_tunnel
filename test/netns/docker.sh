@@ -103,6 +103,10 @@ show_c() {
 our_rules() { ip -n c rule | grep -E 'lookup 709[4-6]' || true; }
 count_rules() { ip -n c rule | grep -E 'lookup 709[4-6]' | grep -cE "$1" || true; }
 t_is_b() { [ "$(cecho tun 2>/dev/null)" = 203.0.113.20 ]; }
+# Правило «через сервер» для текущего адреса контейнера уже стоит (без него
+# контейнер идёт как компьютер — при включённом туннеле тоже через B, и
+# проверка пути одна ничего не доказывает).
+has_rule() { ip -n c rule | grep -q "from $(ip_of "$1") lookup 7094"; }
 
 # run.sh после аварии: только уборка.
 [ -z "${LAB_CLEANUP_ONLY:-}" ] || exit 0
@@ -206,6 +210,8 @@ section "туннель снова включён, контейнер перес
 api /api/state '{"tunnel":true}' >/dev/null
 tunnel_on || fail "туннель не поднялся снова"
 run_ctr tun -p 8080:80
+s=$SECONDS
+if eventually 15 has_rule tun; then pass "правило пересозданного «через сервер» встало (за $((SECONDS - s)) с)"; else fail "правило пересозданного «через сервер» не встало за 15 с"; fi
 if eventually 10 t_is_b; then pass "пересозданный «через сервер» — через B"; else fail "пересозданный «через сервер» не через B"; fi
 
 section "kill -9 клиента"
@@ -219,6 +225,7 @@ echo "-- правила после kill -9:"; our_rules
 start_client
 api /api/state '{"tunnel":true,"mesh":true}' >/dev/null
 tunnel_on || fail "после перезапуска туннель не поднялся"
+check "после перезапуска правило «через сервер» снова стоит" eventually 15 has_rule tun
 if eventually 15 t_is_b; then pass "после перезапуска «через сервер» снова через B"; else fail "после перезапуска «через сервер» не через B"; fi
 
 section "чистая остановка"
